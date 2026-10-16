@@ -3,7 +3,11 @@
 import { useState, useTransition } from "react";
 import LocalDate from "@/components/ui/LocalDate";
 import type { BoardRenewalReport, BoardRenewalTypeReport } from "@/lib/renewal/board-report";
-import type { RenewalOrgType } from "@/lib/renewal/renewal-progress";
+// Leaf module on purpose — see the note in lib/renewal/cohorts.ts. Importing
+// this value from board-report.ts pulls Supabase and Stripe into this client
+// bundle and the page 500s at runtime while both build gates stay green.
+import { LAPSED_COHORT, type BoardRenewalCohort } from "@/lib/renewal/cohorts";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import {
   CONTACT_CHANNELS,
   CONTACT_OUTCOMES,
@@ -35,6 +39,11 @@ interface Props {
   /** LIVE assignment per org id — deliberately not read off the snapshot. The
    *  figures freeze to a meeting; who owns the conversation does not. */
   assignmentsByOrg: Record<string, string>;
+  /** Org ids holding a booth at the conference currently on sale. LIVE for the
+   *  same reason as assignments — booths keep selling after the meeting, and a
+   *  figure frozen into the minutes would go stale as a sales cue. Null when no
+   *  conference is open for registration, which hides the cue entirely. */
+  boothHolderOrgIds: string[] | null;
 }
 
 /**
@@ -394,6 +403,7 @@ function pct(part: number, whole: number): string {
 const TYPE_LABEL: Record<string, string> = {
   Member: "Members",
   "Vendor Partner": "Vendor Partners",
+  [LAPSED_COHORT]: "Lapsed members",
 };
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -412,18 +422,35 @@ function TypePanel({
   eventSlug,
   members,
   assignmentsByOrg,
+  boothHolderOrgIds,
 }: {
   type: BoardRenewalTypeReport;
   renewalYear: number;
   eventSlug: string;
   members: AssignableMember[];
   assignmentsByOrg: Record<string, string>;
+  boothHolderOrgIds: string[] | null;
 }) {
   const [open, setOpen] = useState(false);
   const [logging, setLogging] = useState<string | null>(null);
   // Counted from live assignments rather than type.assignedCount, which is
   // frozen into the snapshot alongside the figures.
   const assignedNow = type.outstanding.filter((o) => assignmentsByOrg[o.organizationId]).length;
+  // Only partners buy booths, so the cue is scoped to that section rather than
+  // shown as a blank column against every member store.
+  const boothCueApplies = boothHolderOrgIds !== null && type.orgType === ORG_TYPE.vendorPartner;
+  // Former members are not "failing to renew" — there is nothing due from them.
+  // Same panel, same assign-and-log controls, honest framing: the bar measures
+  // win-backs, and a store with no FTE on file is priced at 0 upstream and
+  // counted here rather than guessed at.
+  const isLapsed = type.orgType === LAPSED_COHORT;
+  const unpricedCount = isLapsed
+    ? type.outstanding.filter((o) => o.amountCents === 0).length
+    : 0;
+  const boothHolders = new Set(boothHolderOrgIds ?? []);
+  const withoutBooth = boothCueApplies
+    ? type.outstanding.filter((o) => !boothHolders.has(o.organizationId)).length
+    : 0;
   const renewedPct = type.populationCount === 0 ? 0 : type.renewedCount / type.populationCount;
 
   return (
@@ -433,7 +460,7 @@ function TypePanel({
           {TYPE_LABEL[type.orgType] ?? type.orgType}
         </h3>
         <span className="text-xs text-gray-500 tabular-nums">
-          {type.renewedCount} of {type.populationCount} renewed ·{" "}
+          {type.renewedCount} of {type.populationCount} {isLapsed ? "won back" : "renewed"} ·{" "}
           {pct(type.renewedCount, type.populationCount)}
         </span>
       </div>
@@ -441,7 +468,9 @@ function TypePanel({
       <div
         className="h-2 w-full rounded-full bg-gray-100 overflow-hidden mb-4"
         role="img"
-        aria-label={`${pct(type.renewedCount, type.populationCount)} renewed`}
+        aria-label={`${pct(type.renewedCount, type.populationCount)} ${
+          isLapsed ? "won back" : "renewed"
+        }`}
       >
         <div
           className="h-full rounded-full bg-[#163D6D] transition-all"
@@ -450,13 +479,21 @@ function TypePanel({
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
-        <Stat label="Collected" value={money(type.collectedCents)} hint="excludes tax" />
         <Stat
-          label="Outstanding"
+          label={isLapsed ? "Recovered" : "Collected"}
+          value={money(type.collectedCents)}
+          hint="excludes tax"
+        />
+        <Stat
+          label={isLapsed ? "Dues at stake" : "Outstanding"}
           value={money(type.outstandingCents)}
-          hint={`${type.outstanding.length} ${
-            type.outstanding.length === 1 ? "organization" : "organizations"
-          }`}
+          hint={
+            isLapsed && unpricedCount > 0
+              ? `${type.outstanding.length} stores · ${unpricedCount} with no FTE on file, not priced`
+              : `${type.outstanding.length} ${
+                  type.outstanding.length === 1 ? "organization" : "organizations"
+                }`
+          }
         />
       </div>
 
@@ -465,6 +502,7 @@ function TypePanel({
           <p className="text-xs text-gray-500 mb-2">
             {type.contactedCount} of {type.outstanding.length} spoken to
             {assignedNow > 0 && ` · ${assignedNow} assigned`}
+            {boothCueApplies && withoutBooth > 0 && ` · ${withoutBooth} not yet in a booth`}
             {type.contactedCount === 0 && type.outstanding.length > 0 && (
               <span className="text-[#9C0006] font-medium"> — nobody has been called yet</span>
             )}
@@ -475,7 +513,8 @@ function TypePanel({
             className="inline-flex items-center gap-1 text-xs font-semibold text-[#EE2A2E] hover:underline"
             aria-expanded={open}
           >
-            {open ? "Hide" : "Show"} the {type.outstanding.length} still to renew
+            {open ? "Hide" : "Show"} the {type.outstanding.length}{" "}
+            {isLapsed ? "to win back" : "still to renew"}
             <svg
               className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
               fill="none"
@@ -493,6 +532,14 @@ function TypePanel({
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-700 min-w-0 truncate">{org.name}</span>
                     <span className="flex items-center gap-2 shrink-0">
+                      {/* Two asks, one call. Whoever takes this row should see
+                          that the booth conversation is still open before they
+                          dial, rather than finding out afterwards. */}
+                      {boothCueApplies && !boothHolders.has(org.organizationId) ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100 whitespace-nowrap">
+                          not yet in a booth
+                        </span>
+                      ) : null}
                       {org.lastContactedAt ? (
                         <span
                           className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-800"
@@ -547,6 +594,7 @@ export default function MeetingRenewalsTab({
   eventSlug,
   assignableMembers,
   assignmentsByOrg,
+  boothHolderOrgIds,
 }: Props) {
   // The frozen figures win wherever they exist. The live report stays the
   // fallback for a meeting nobody has frozen yet, and the source is stated in
@@ -554,7 +602,10 @@ export default function MeetingRenewalsTab({
   const shown = snapshot?.report ?? report;
   const { totals } = shown;
   const assignedLive = Object.keys(assignmentsByOrg).length;
-  const orgTypes = Object.keys(shown.types) as RenewalOrgType[];
+  // Members, Vendor Partners, then Lapsed — the order the report builds them.
+  // A snapshot frozen before the Lapsed cohort existed simply has no such key
+  // and renders two panels, which is correct for what it recorded.
+  const orgTypes = Object.keys(shown.types) as BoardRenewalCohort[];
 
   return (
     <div className="mb-8">
@@ -643,6 +694,7 @@ export default function MeetingRenewalsTab({
             eventSlug={eventSlug}
             members={assignableMembers}
             assignmentsByOrg={assignmentsByOrg}
+            boothHolderOrgIds={boothHolderOrgIds}
           />
         ))}
       </div>

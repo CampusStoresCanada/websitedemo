@@ -221,7 +221,7 @@ export async function activateMembershipRenewal(
 
   const { data: org, error: orgError } = await db
     .from("organizations")
-    .select("membership_status, membership_expires_at")
+    .select("membership_status, membership_expires_at, archived_at")
     .eq("id", params.organizationId)
     .single();
 
@@ -229,9 +229,25 @@ export async function activateMembershipRenewal(
     return { success: false, error: orgError?.message ?? "Organization not found." };
   }
 
+  // A payment that buys a coverage period also un-archives the org. Archived
+  // orgs are invisible to everything reading through `active_organizations`,
+  // so without this a fully paid partner stays hidden with no signal that
+  // anything is wrong — McGraw Hill paid on 2026-08-11 and stayed archived,
+  // unlisted, and `active` all at once.
+  //
+  // Unconditional on this path by design. The renewal cron filters
+  // `archived_at is null` (lib/renewal/jobs.ts), so an archived org reaching
+  // here means a human initiated the invoice. And invoices with no billing
+  // period never call this function at all (see settlePaidInvoiceMembership),
+  // so a GST/HST correction cannot revive anything on its own.
+  const orgPatch: { membership_expires_at: string; archived_at?: null } = {
+    membership_expires_at: params.newExpiresAt,
+  };
+  if (org.archived_at) orgPatch.archived_at = null;
+
   const { error: updateError } = await db
     .from("organizations")
-    .update({ membership_expires_at: params.newExpiresAt })
+    .update(orgPatch)
     .eq("id", params.organizationId);
 
   if (updateError) {
@@ -250,7 +266,12 @@ export async function activateMembershipRenewal(
     { source: "activateMembershipRenewal" }
   );
 
-  if (org.membership_status === "grace" || org.membership_status === "locked" || org.membership_status === "approved") {
+  if (
+    org.membership_status === "grace" ||
+    org.membership_status === "locked" ||
+    org.membership_status === "approved" ||
+    org.membership_status === "canceled"
+  ) {
     // "approved" here is a first-time activation, not a renewal — an org
     // whose partnership/membership application was approved but who hasn't
     // paid yet. createPartnershipInvoice/createMembershipInvoice set a
@@ -259,6 +280,13 @@ export async function activateMembershipRenewal(
     // paid. Without this branch, the expiry date got set correctly but the
     // org stayed stuck on "approved" forever — masked as if logged out,
     // with no way for its own admin to edit the profile.
+    //
+    // "canceled" is the same failure one step further along: `canceled` used
+    // to be terminal, so an org that paid for a fresh coverage period after
+    // cancellation banked the new expiry and stayed canceled permanently.
+    // Reaching this branch is not self-serve — lib/actions/renewal.ts keeps
+    // `canceled` out of its own renewableStatuses gate — so an opt-out still
+    // cannot un-cancel itself; only an admin or webhook settlement lands here.
     const nextStatus = org.membership_status === "locked" ? "reactivated" : "active";
     // The Stripe-driven sources (the invoice-paid event, the
     // conference-checkout-session-completed event) both map to
@@ -271,7 +299,11 @@ export async function activateMembershipRenewal(
       nextStatus,
       params.triggeredBy === "out_of_band" ? "system" : "stripe_webhook",
       null,
-      org.membership_status === "approved" ? "First payment received" : "Renewal payment received"
+      org.membership_status === "approved"
+        ? "First payment received"
+        : org.membership_status === "canceled"
+          ? "Payment received after cancellation"
+          : "Renewal payment received"
     );
     if (!transitionResult.success) {
       // Don't fail the whole activation over a status transition — the
@@ -325,6 +357,8 @@ export async function activateMembershipRenewal(
       previous_expires_at: org.membership_expires_at,
       new_expires_at: params.newExpiresAt,
       billing_period_start: params.billingPeriodStart,
+      previous_status: org.membership_status,
+      ...(org.archived_at ? { unarchived_from: org.archived_at } : {}),
       ...params.metadata,
     }
   );

@@ -7,7 +7,6 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
 // NOTE: sponsor_* tables are new — not yet in database.types.ts.
 // The `db` cast below removes Supabase's generated-type strictness for these
@@ -547,39 +546,19 @@ export async function deleteSponsorPlacement(id: string): Promise<Result<void>> 
 // CANCOLL — org flag helpers
 // ─────────────────────────────────────────────────────────────────
 
-export async function setCANCOLLMembership(
-  organizationId: string,
-  isMember: boolean,
-  tier?: string | null
-): Promise<Result<void>> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const db = sponsorDb();
-  const { error } = await db
-    .from("organizations")
-    .update({
-      is_cancoll_member: isMember,
-      cancoll_tier: isMember ? (tier ?? null) : null,
-    })
-    .eq("id", organizationId);
-  if (error) return { success: false, error: error.message };
-
-  // Phase 4 Stage 2a: mirror the cancoll flags into `memberships` so they
-  // don't drift from `organizations` ahead of the Stage 2 billing cutover
-  // (CANCOLL status feeds pricing). Same two columns as the write above.
-  await mirrorFieldsToMembership(
-    organizationId,
-    {
-      is_cancoll_member: isMember,
-      cancoll_tier: isMember ? (tier ?? null) : null,
-    },
-    { source: "setCANCOLLMembership" }
-  );
-
-  revalidatePath("/admin/sponsorships");
-  return { success: true, data: undefined };
-}
+// `setCANCOLLMembership` was removed here (2026-10-14). It had no callers
+// anywhere and was a trap waiting for one: it wrote `is_cancoll_member`
+// without an audit row, and set `certifications` not at all — so whichever of
+// the two writers a future caller happened to reach would decide whether the
+// change was traceable, and whether a partner's public badge followed the
+// flag. `updateCancollStatus` (lib/actions/update-certifications.ts) is now
+// the single writer, and it owns both of those.
+//
+// It also cleared `cancoll_tier`, which `updateCancollStatus` deliberately
+// does not touch — but with no callers it had never actually written that
+// column, so nothing is losing a writer it had. A tier editor, if one is ever
+// wanted, belongs in `updateCancollStatus` alongside the flag rather than in a
+// second path that has to re-derive the same rules.
 
 export async function listCANCOLLMembers(): Promise<
   Result<Array<{ id: string; name: string; slug: string; cancoll_tier: string | null }>>

@@ -319,13 +319,12 @@ export async function renewalReminderRun(): Promise<JobResult> {
         // with no contact left, an invoice being settled some other way. It
         // stops the chase without cancelling the org or voiding revenue, both
         // of which are decisions someone should make deliberately.
-        //
         // Matched on STATUS, not on a date. Invoices are generated ~30 days
         // before the cycle starts and carry a billing_period_start of Aug 31,
         // so neither created_at nor billing_period_start lines up with
-        // cycleBillingPeriodStart — a date filter here silently matches nothing
-        // and the flag stays a no-op. "An open invoice somebody told us to stop
-        // chasing" is the actual condition, and it says itself.
+        // cycleBillingPeriodStart — a date filter here silently matched nothing
+        // and the flag stayed a no-op. "An open invoice somebody told us to
+        // stop chasing" is the actual condition, and it says itself.
         const { data: suppressedInvoice } = await db
           .from("invoices")
           .select("id")
@@ -335,6 +334,26 @@ export async function renewalReminderRun(): Promise<JobResult> {
           .limit(1)
           .maybeSingle();
         if (suppressedInvoice) return;
+
+        // The member already told us not to bill them for THIS cycle.
+        //
+        // optOutOfRenewal records an opt_out event against the renewal year it
+        // applies to, which for a member whose coverage was still in force is
+        // the cycle starting after their term ends — not the term they were
+        // sitting in when they clicked. Honouring that event here is what makes
+        // "opt out of renewal" mean what it says: no invoice, no chase, and no
+        // cancellation of coverage they already paid for. Without this read the
+        // opt-out only had teeth because the old code cancelled the org
+        // outright, which is exactly the behaviour being removed.
+        const { data: optedOut } = await db
+          .from("renewal_events")
+          .select("id")
+          .eq("organization_id", org.id)
+          .eq("renewal_year", renewalYear)
+          .eq("event_type", "opt_out")
+          .limit(1)
+          .maybeSingle();
+        if (optedOut) return;
 
         // An org that already paid through this renewal year or beyond
         // (e.g. bridged multiple cycles at once via `bridgeFrom` in

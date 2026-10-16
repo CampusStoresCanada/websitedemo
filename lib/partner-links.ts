@@ -11,6 +11,16 @@ import type { ViewerLevel } from "@/lib/visibility/defaults";
 // Core types
 // ---------------------------------------------------------------------------
 
+/**
+ * Ceiling for an uploaded partner document, matching the partner-documents
+ * bucket's own file_size_limit — the bucket is the real enforcement.
+ *
+ * ⛔ Shared by the UI copy and the server check on purpose. They disagreed
+ * before: the form promised 50MB while the transport capped out near 4MB,
+ * so the number people read was never the number that applied.
+ */
+export const MAX_PARTNER_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
 export type PartnerLinkType =
   | "catalogue"
   | "price_list"

@@ -123,8 +123,9 @@ export default async function ExhibitorCardPage({
 
   const { org, people, booths } = found;
 
-  // The printed QR encodes ?s=p, so a real scan off paper is distinguishable
-  // from someone following a shared link — which is the actual question when
+  // The printed QR encodes ?s=p and an exhibitor's badge front encodes ?s=b, so
+  // a scan off paper, a scan off a badge, and someone following a shared link
+  // are distinguishable — which is the actual question when
   // judging whether the print run earned its place. Awaited rather than
   // fire-and-forget: this runs during render, and a floating promise in a
   // serverless function can be killed before it lands. recordDirectoryScan
@@ -134,7 +135,7 @@ export default async function ExhibitorCardPage({
     organizationId: org.id,
     publicCode: code.toUpperCase(),
     userAgent: (await headers()).get("user-agent"),
-    source: s === "p" ? "print" : "link",
+    source: s === "p" ? "print" : s === "b" ? "badge" : "link",
   });
   const cats = parseOrgCategories(org.primary_category);
 

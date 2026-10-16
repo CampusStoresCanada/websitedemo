@@ -1,6 +1,6 @@
 import { listTemplates } from "@/lib/comms/templates";
 import Link from "next/link";
-import type { TemplateCategory } from "@/lib/comms/types";
+import { groupTemplatesByCategory } from "@/lib/comms/template-categories";
 
 export const metadata = {
   title: "Email Templates | Communications | Admin | Campus Stores Canada",
@@ -8,34 +8,15 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-const CATEGORY_LABELS: Record<TemplateCategory | string, string> = {
-  renewal: "Renewal",
-  user_mgmt: "User Management",
-  conference: "Conference",
-  membership: "Membership",
-  general: "General",
-};
-
 export default async function TemplatesPage() {
+  // Shared-library templates only — campaign-scoped forks belong to their
+  // campaign's own page, not here. See listTemplates.
   const templates = await listTemplates();
 
-  const byCategory = templates.reduce<Record<string, typeof templates>>(
-    (acc, t) => {
-      const key = t.category;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(t);
-      return acc;
-    },
-    {}
-  );
-
-  const categoryOrder: string[] = [
-    "renewal",
-    "user_mgmt",
-    "conference",
-    "membership",
-    "general",
-  ];
+  // Derived from the categories present in the data, never from a fixed
+  // list: a newly added category gets its own heading rather than having
+  // its rows silently dropped. See lib/comms/template-categories.
+  const groups = groupTemplatesByCategory(templates);
 
   return (
     <main>
@@ -61,12 +42,10 @@ export default async function TemplatesPage() {
       </div>
 
       <div className="mt-6 space-y-8">
-        {categoryOrder
-          .filter((cat) => byCategory[cat]?.length)
-          .map((category) => (
+        {groups.map(({ category, label, templates: inCategory }) => (
             <section key={category}>
               <h2 className="text-base font-semibold text-gray-800 mb-3">
-                {CATEGORY_LABELS[category] ?? category}
+                {label}
               </h2>
               <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
                 <table className="w-full text-sm">
@@ -80,7 +59,7 @@ export default async function TemplatesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {byCategory[category].map((t) => (
+                    {inCategory.map((t) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900">{t.name}</div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { initiateAccountRecovery } from "@/lib/actions/account-recovery";
@@ -17,6 +17,14 @@ export default function ForgotPasswordPage() {
   // the reset so someone who arrives from a board-vote button (or any other
   // deep link) is returned to it rather than dropped on /onboarding having
   // forgotten what they were doing. Only same-site paths are honoured.
+  // Prefilled from ?email= the same way /reset-password already does. Without
+  // it, a link from an onboarding email lands a reader who has never signed in
+  // on an empty field, asking them to recall which address their CSC account
+  // uses. /reset-password has read this param since it was written; this is the
+  // step in front of it and was the one that didn't.
+  const emailFromLink = searchParams.get("email");
+  useEffect(() => { if (emailFromLink) setEmail(emailFromLink); }, [emailFromLink]);
+
   const rawNext = searchParams.get("next");
   const nextPath = rawNext && rawNext.startsWith("/") ? rawNext : null;
 

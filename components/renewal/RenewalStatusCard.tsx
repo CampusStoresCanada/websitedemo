@@ -118,6 +118,19 @@ export function RenewalStatusCard({
         )
       : null;
 
+  // Does opting out decline a future year, or cancel the membership in front
+  // of you? Same rule the server applies in lib/renewal/opt-out-scope.ts. The
+  // member should be told which one the button does before they press it.
+  const coverageInForce = daysUntilExpiry !== null && daysUntilExpiry >= 0;
+  const termEndLabel = membershipExpiresAt
+    ? new Date(membershipExpiresAt).toLocaleDateString("en-CA", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        timeZone: "UTC",
+      })
+    : null;
+
   async function handleOptOut() {
     if (!optOutReason.trim()) {
       setError("Please provide a reason for opting out.");
@@ -136,7 +149,11 @@ export function RenewalStatusCard({
       return;
     }
 
-    setSuccess("Opt-out processed successfully. Your membership will not renew.");
+    setSuccess(
+      coverageInForce && termEndLabel
+        ? `Thanks. Your membership stays active until ${termEndLabel}, and we will not invoice you for the year after that.`
+        : "Thanks. Your membership has been cancelled and any outstanding invoice has been voided."
+    );
     setShowOptOut(false);
     setOptOutReason("");
     router.refresh();
@@ -243,6 +260,20 @@ export function RenewalStatusCard({
         <div className="mt-4 pt-3 border-t border-gray-200/60">
           {showOptOut ? (
             <div className="space-y-2">
+              <p className="text-xs text-gray-600">
+                {coverageInForce && termEndLabel ? (
+                  <>
+                    Your membership runs to {termEndLabel}. Opting out means we
+                    will not invoice you for the year after that. Nothing about
+                    your current membership changes, and no payment is refunded.
+                  </>
+                ) : (
+                  <>
+                    You have no paid coverage for the current year. Opting out
+                    cancels your membership and voids any outstanding invoice.
+                  </>
+                )}
+              </p>
               <textarea
                 rows={2}
                 value={optOutReason}

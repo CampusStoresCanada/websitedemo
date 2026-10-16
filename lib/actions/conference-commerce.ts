@@ -1507,12 +1507,22 @@ export async function createConferenceCheckout(
         offer?.kind === MEMBERSHIP_RENEWAL_KIND
           ? taxRates.membershipStripeTaxRateId
           : taxRates.conferenceStripeTaxRateId;
+      /**
+       * A booth entity's name is its number and nothing else — "109" — because
+       * that bare name is load-bearing elsewhere (the floor plan, and the suite
+       * auto-pin in mint_v3_for_order matches on `name ~ '^[0-9]+$'`). Renaming
+       * the entity to read nicely would break those, so the label is composed
+       * here instead, where it only ever reaches Stripe. Without this the
+       * customer receives an invoice line that says "109" and nothing more.
+       */
+      const lineName =
+        offer?.kind === "booth" ? `Booth ${offer.name}` : offer?.name ?? "Conference offer";
       return {
         quantity: item.quantity,
         price_data: {
           currency: order.currency.toLowerCase(),
           unit_amount: item.unit_price_cents,
-          product_data: { name: offer?.name ?? "Conference offer" },
+          product_data: { name: lineName },
         },
         ...(stripeTaxRateId ? { tax_rates: [stripeTaxRateId] } : {}),
       };

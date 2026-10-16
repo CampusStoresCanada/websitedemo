@@ -62,8 +62,11 @@ export interface HomeMapOrg {
   companyDescription: string | null;
   /** Partner-only: featured product name */
   highlightProductName: string | null;
-  /** Partner-only: URL to partner's product catalogue */
-  catalogueUrl: string | null;
+  /**
+   * Partner-only: whether this partner has uploaded a catalogue. Deliberately
+   * a boolean and not the URL — see the mapper in this file for why.
+   */
+  hasCatalogue: boolean;
   /** Partner-only: social/ethical certifications (Canadian Made, Women Owned, etc.) */
   certifications: string[];
   /** Partner-only: whether this org is a CANCOLL member — visibility gated to members + CANCOLL partners */
@@ -264,7 +267,13 @@ function normalizeMapOrg(row: Record<string, unknown>): HomeOrgRecord {
     fte: typeof row.fte === "number" ? row.fte : null,
     companyDescription: (row.company_description as string | null) ?? null,
     highlightProductName: (row.highlight_product_name as string | null) ?? null,
-    catalogueUrl: (row.catalogue_url as string | null) ?? null,
+    // Only whether a catalogue exists, never the URL itself. These records
+    // are rendered into ISR-cached pages (revalidate = 60) shared by every
+    // viewer, so anything viewer-dependent would be served to the wrong
+    // audience out of the cache. The boolean drives filters, counts and
+    // sorting; the URL is resolved per-request by /api/org/[id]/catalogue,
+    // which checks the viewer.
+    hasCatalogue: Boolean((row.catalogue_url as string | null) ?? null),
     certifications: Array.isArray(row.certifications) ? (row.certifications as string[]) : [],
     isCancollMember: row.is_cancoll_member === true,
     procurementCategories: (() => {

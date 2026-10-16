@@ -10,13 +10,19 @@
  * mailing-list preference, and the whole point of this cycle is to move 37 of
  * 52 stores closer to 52.
  *
- * The cost of that choice is that a dead address is also not filtered out. We
- * cannot currently detect one — Resend delivery events have never reached the
- * webhook, so `comms_suppressions` holds unsubscribes only and bounce
- * auto-suppression is not functioning. So `invited_at` records that Resend
- * accepted the message, never that anyone read it, and every send returns a
- * per-recipient outcome the caller is expected to surface. The honest position
- * is: we know what we attempted.
+ * A dead address IS now filtered out, though — that exemption was never meant
+ * to cover mailboxes that do not exist. Since 2026-09-02, `comms_suppressions`
+ * records why an address was suppressed, and `lib/email/send.ts` blocks any
+ * send to a hard-bounced one regardless of how transactional it is. An
+ * unsubscribed member still gets their survey; a member whose mailbox was
+ * deleted gets a skip we can see, instead of a bounce we never noticed.
+ * (Before this, the blocker was that Resend delivery events never reached the
+ * webhook — fixed 2026-08-22, confirmed flowing 2026-09-02.)
+ *
+ * `invited_at` still records that Resend accepted the message, never that
+ * anyone read it, and every send still returns a per-recipient outcome the
+ * caller is expected to surface. The honest position is: we know what we
+ * attempted.
  *
  * Nothing here throws. Sending mail must never be able to fail a survey action
  * — the record is the database, the email is a notification of it.
@@ -261,7 +267,7 @@ export interface SendPlan {
   surveyId: string;
   fiscalYear: number;
   surveyStatus: string;
-  templateKey: TemplateKey;
+  templateKey: string;
   /** BENCHMARKING_SUPPRESS_EMAIL is set — a "send" would mail nobody. */
   killSwitchOn: boolean;
   willSend: PlannedSend[];
@@ -376,7 +382,7 @@ export async function sendBenchmarkingInvitations(
   const outcomes: NotifyOutcome[] = [];
   for (const line of plan.willSend) {
     const outcome = await send(
-      plan.templateKey,
+      plan.templateKey as TemplateKey,
       line.to,
       line.organizationId,
       line.organizationName,
@@ -420,7 +426,7 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
   const outcomes: NotifyOutcome[] = [];
   for (const line of plan.willSend) {
     const outcome = await send(
-      "benchmarking_reminder",
+      "benchmarking_reminder" as TemplateKey,
       line.to,
       line.organizationId,
       line.organizationName,
@@ -462,7 +468,7 @@ export async function sendSubmissionReceipt(
 
   const orgName = r.organizations?.name ?? "your store";
   return send(
-    "benchmarking_submission_received",
+    "benchmarking_submission_received" as TemplateKey,
     recipientEmail(r),
     organizationId,
     orgName,

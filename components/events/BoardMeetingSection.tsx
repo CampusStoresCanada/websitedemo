@@ -63,6 +63,7 @@ interface Props {
   renewalDelta: RenewalDelta | null;
   assignableMembers: AssignableMember[];
   assignmentsByOrg: Record<string, string>;
+  boothHolderOrgIds: string[] | null;
   eventSlug: string;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
@@ -444,6 +445,7 @@ export default function BoardMeetingSection({
   renewalDelta,
   assignableMembers,
   assignmentsByOrg,
+  boothHolderOrgIds,
   eventSlug,
   reportPeriod,
   isSA,
@@ -584,6 +586,7 @@ export default function BoardMeetingSection({
           eventSlug={eventSlug}
           assignableMembers={assignableMembers}
           assignmentsByOrg={assignmentsByOrg}
+          boothHolderOrgIds={boothHolderOrgIds}
         />
       )}
     </div>

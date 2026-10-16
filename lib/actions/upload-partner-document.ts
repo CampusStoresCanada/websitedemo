@@ -2,6 +2,9 @@
 
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+// ⚠️ A "use server" module may only export async functions, so the shared
+// constants live in lib/partner-links.ts. Only `next build` catches this.
+import { MAX_PARTNER_DOCUMENT_BYTES } from "@/lib/partner-links";
 
 const ALLOWED_MIME_TYPES = [
   "application/pdf",
@@ -11,65 +14,74 @@ const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-
-interface UploadPartnerDocumentParams {
+interface CreateUploadUrlParams {
   orgId: string;
-  fileData: string;   // base64 data URL
   fileName: string;
   contentType: string;
+  /** Declared by the browser, used only for the friendly error. The bucket
+   *  enforces the real ceiling regardless of what's claimed here. */
+  fileSize: number;
 }
 
-interface UploadPartnerDocumentResult {
+interface CreateUploadUrlResult {
   success: boolean;
-  storagePath?: string;
+  /** Storage path to record on the partner_links entry once the upload lands. */
+  path?: string;
+  /** Single-use upload token, scoped to `path` by Supabase Storage. */
+  token?: string;
   error?: string;
 }
 
-export async function uploadPartnerDocument({
+/**
+ * Authorize an upload and hand back a signed, single-use URL the browser
+ * writes to directly.
+ *
+ * ⛔ The bytes must not travel through this Server Action. The previous version
+ * took the whole file as a base64 data URL argument, which put it inside the
+ * action's request body — and a Server Action body is capped
+ * (`serverActions.bodySizeLimit`, 6mb in next.config.ts). Base64 inflates a
+ * file by about a third, so the real ceiling was roughly 4MB against a UI
+ * promising 50MB, and the code's own 50MB check could never fire: the request
+ * was refused before the action ever ran. It shows up as no server log at all,
+ * which is why nothing appeared in production logs while people watched
+ * uploads fail. The largest file that ever made it into this bucket was 3.0MB.
+ *
+ * Authorization still happens here — who may upload, where it lands, and what
+ * type it is are all decided server-side. Only the transfer moves.
+ */
+export async function createPartnerDocumentUploadUrl({
   orgId,
-  fileData,
   fileName,
   contentType,
-}: UploadPartnerDocumentParams): Promise<UploadPartnerDocumentResult> {
+  fileSize,
+}: CreateUploadUrlParams): Promise<CreateUploadUrlResult> {
   const auth = await requireOrgAdminOrSuperAdmin(orgId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   if (!ALLOWED_MIME_TYPES.includes(contentType)) {
     return {
       success: false,
-      error: `File type not allowed: ${contentType}. Accepted: PDF, Word, Excel.`,
+      error: `File type not allowed: ${contentType || "unknown"}. Accepted: PDF, Word, Excel.`,
     };
   }
 
-  // Strip data URL prefix
-  const base64Data = fileData.replace(/^data:[^;]+;base64,/, "");
-  const buffer = Buffer.from(base64Data, "base64");
-
-  if (buffer.length > MAX_FILE_SIZE) {
-    return { success: false, error: "File exceeds 50MB limit" };
+  if (fileSize > MAX_PARTNER_DOCUMENT_BYTES) {
+    const mb = (fileSize / 1024 / 1024).toFixed(1);
+    return { success: false, error: `That file is ${mb}MB — the limit is 50MB.` };
   }
 
   const sanitizedOrgId = orgId.replace(/[^a-zA-Z0-9-]/g, "");
-  const sanitizedName = fileName
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(0, 100);
-  const timestamp = Date.now();
-  const storagePath = `${sanitizedOrgId}/${timestamp}_${sanitizedName}`;
+  const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+  const storagePath = `${sanitizedOrgId}/${Date.now()}_${sanitizedName}`;
 
-  const adminClient = createAdminClient();
+  const { data, error } = await createAdminClient()
+    .storage.from("partner-documents")
+    .createSignedUploadUrl(storagePath);
 
-  const { error: uploadError } = await adminClient.storage
-    .from("partner-documents")
-    .upload(storagePath, buffer, {
-      contentType,
-      upsert: false,
-    });
-
-  if (uploadError) {
-    console.error("[upload-partner-document] upload error", uploadError);
-    return { success: false, error: uploadError.message };
+  if (error || !data) {
+    console.error("[upload-partner-document] signed url failed", error);
+    return { success: false, error: error?.message ?? "Could not start the upload." };
   }
 
-  return { success: true, storagePath };
+  return { success: true, path: data.path, token: data.token };
 }

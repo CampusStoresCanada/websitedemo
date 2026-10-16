@@ -25,8 +25,13 @@ export async function geocodeAddress(
     .filter(Boolean)
     .join(", ");
 
+  // ⛔ `country` was hardcoded to CA. CSC's exhibitor list includes US vendors
+  // (Boxercraft, MV Sport, VitalSource, Itoya) — forcing CA either returned
+  // nothing or, worse, a same-named Canadian street. The badge map is centred
+  // on this result, so a wrong hit is a wrong badge nobody notices.
+  const countryCode = /united states|usa|^us$/i.test(country) ? "US" : "CA";
   const encodedQuery = encodeURIComponent(searchQuery);
-  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodedQuery}.json?access_token=${MAPBOX_TOKEN}&country=CA&limit=1`;
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodedQuery}.json?access_token=${MAPBOX_TOKEN}&country=${countryCode}&limit=1`;
 
   try {
     const response = await fetch(url);

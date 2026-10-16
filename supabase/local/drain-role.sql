@@ -1,0 +1,69 @@
+-- The drain's credential — RUNBOOK ONLY. The role and its grants are already
+-- applied (migrations 20260901154834 + 20260901154908). Nothing here to run
+-- except step 1 below; the DDL was removed so it cannot be re-run by hand.
+--
+-- ⛔ The drain must never use SUPABASE_SERVICE_ROLE_KEY. Service role bypasses
+-- RLS on every table — contacts, invoices, ballots, benchmarking — to perform a
+-- job that needs four tables. Putting it on a workstation means one malicious
+-- npm postinstall, in a repo that already runs `npx tsx`, reads a full-database
+-- credential out of a file on a mounted volume. No encryption is defeated in
+-- that story; the machine is awake and logged in because the job requires it.
+--
+-- What this role can do, in full: take rows off the queue, delete them, write
+-- derived output, and read the two tables it needs to compute against. Stolen,
+-- it yields roughly one drain interval of search strings.
+--
+-- ── Setup ───────────────────────────────────────────────────────────────────
+--
+--  1. Generate a password and put it straight into the Keychain. It must never
+--     exist in a file — a dotfile is world-readable by default and is included
+--     in every backup, which is how one credential becomes three copies:
+--
+--       PW=$(openssl rand -base64 32)
+--       security add-generic-password -a csc-drain -s csc-match-engine -w "$PW"
+--       # paste $PW below, run this file, then close the terminal
+--
+--  2. The drain reads it at start, never from disk:
+--
+--       security find-generic-password -s csc-match-engine -w
+--
+--  3. Restrict the Postgres port to this machine's WAN address in
+--     Supabase → Settings → Database → Network Restrictions. The drain connects
+--     from one place forever, so a leaked string is inert everywhere else. This
+--     is the single highest-value control here and it is config, not code.
+--
+-- ⚠️ Rotation must stay trivial or it will not happen: one Keychain item on one
+-- machine means rotating is `security add-generic-password -U` plus one ALTER
+-- ROLE. If rotating ever requires editing files on several machines, the
+-- narrowness quietly expires.
+
+
+-- ── The only step left ──────────────────────────────────────────────────────
+--
+-- The role exists with NO password and therefore cannot connect. Setting one is
+-- deliberately the operator's job, on the operator's machine, so the secret is
+-- never in a transcript, a tool call, or a file that a backup replicates:
+--
+--   PW=$(openssl rand -base64 32)
+--   security add-generic-password -a csc-drain -s csc-match-engine -w "$PW"
+--   PGPASSWORD="$DBPW" psql -h aws-1-us-east-2.pooler.supabase.com -p 5432 \
+--     -U postgres.kalosjtiwtnwsseitfys -d postgres \
+--     -c "alter role csc_drain with password '$PW'"
+--   unset PW
+--
+-- Then the runner reads it at start, never from disk:
+--
+--   export MATCH_DATABASE_URL="postgresql://csc_drain.kalosjtiwtnwsseitfys:$(security find-generic-password -s csc-match-engine -w)@aws-1-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require"
+--
+-- ⚠️ POOLER, not the direct host. `db.<ref>.supabase.co` is AAAA-only and this
+-- machine has no global IPv6 address (only an fd09::/8 ULA), so getaddrinfo
+-- refuses the name for every family — while `host` resolves it fine, because
+-- `host` queries DNS directly and everything else does not.
+-- ⚠️ The pooler requires the project ref on the role name: csc_drain.<ref>.
+-- ⚠️ Port 5432 is session mode; 6543 is transaction mode and COPY is unreliable there.
+--   npx tsx scripts/match-run.mts --dry-run
+--
+-- ⚠️ Rotation must stay trivial or it will not happen: one Keychain item on one
+-- machine means rotating is `security add-generic-password -U` plus one ALTER
+-- ROLE. If it ever requires editing files on several machines, the narrowness
+-- quietly expires.

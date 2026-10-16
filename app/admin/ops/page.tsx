@@ -15,7 +15,8 @@ import {
   runOpsAlertEvaluationAction,
   deleteSchedulerRunAction,
   deleteBillingRunAction,
-  retryQBExportAction,
+  retryQBQueueRowAction,
+  skipQBQueueRowAction,
   ignoreQBReconciliationItemAction,
 } from "@/lib/actions/ops";
 import { approveApplication, rejectApplication, resendApplicationInvite } from "@/lib/actions/applications";
@@ -172,6 +173,26 @@ type QBExportFailureRow = {
   retry_count: number;
   error_message: string | null;
   created_at: string;
+};
+
+/** One failed row from any of the five QBO worker queues, flattened for the
+ *  panel. Before this, only qbo_export_queue was shown — which is how a dead
+ *  misc-receipt row holding $4,689.50 stayed invisible for a week. */
+type QBQueueFailureRow = {
+  id: string;
+  queue: string;
+  queueLabel: string;
+  /** What the row is about, in the queue's own terms (invoice, order, payment). */
+  subject: string;
+  retryCount: number;
+  errorMessage: string | null;
+  createdAt: string;
+  /** A document id already recorded against this row. Present means a retry
+   *  will adopt it rather than post again. */
+  existingDocId: string | null;
+  /** Refund queues can't be made retry-safe automatically — their DocNumber
+   *  comes from the parent invoice/order, so partial refunds share it. */
+  needsManualCheck: boolean;
 };
 
 type QBReconPendingRow = {
@@ -869,6 +890,107 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const openInvoiceTotal = openInvoicesRes.count ?? openInvoices.length;
   const qbReconPendingRows = (qboReconPendingRes.data ?? []) as QBReconPendingRow[];
   const qboExportFailedRows = (qboExportFailedRes.data ?? []) as QBExportFailureRow[];
+
+  // The other four QBO queues. Fetched separately rather than threaded into
+  // the big positional Promise.all above — that array is destructured by
+  // position and inserting into it is how you silently shift every later row.
+  const [
+    membershipRefundFailedRes,
+    conferenceReceiptFailedRes,
+    conferenceRefundFailedRes,
+    miscReceiptFailedRes,
+  ] = await Promise.all([
+    adminClient
+      .from("qbo_membership_refund_queue")
+      .select("id, invoice_id, retry_count, error_message, created_at, qbo_refund_receipt_id")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    adminClient
+      .from("qbo_conference_receipt_queue")
+      .select("id, conference_order_id, retry_count, error_message, created_at, qbo_sales_receipt_id")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    adminClient
+      .from("qbo_conference_refund_queue")
+      .select("id, conference_order_id, retry_count, error_message, created_at, qbo_refund_receipt_id")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    adminClient
+      .from("qbo_misc_receipt_queue")
+      .select("id, payment_kind, payment_id, retry_count, error_message, created_at, qbo_sales_receipt_id")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
+
+  type RawQueueRow = Record<string, unknown>;
+  const asText = (value: unknown) => (typeof value === "string" ? value : null);
+
+  const buildQueueFailures = (
+    rows: RawQueueRow[],
+    queue: string,
+    queueLabel: string,
+    subjectOf: (row: RawQueueRow) => string,
+    docIdKey: string,
+    needsManualCheck: boolean
+  ): QBQueueFailureRow[] =>
+    rows.map((row) => ({
+      id: String(row.id),
+      queue,
+      queueLabel,
+      subject: subjectOf(row),
+      retryCount: Number(row.retry_count ?? 0),
+      errorMessage: asText(row.error_message),
+      createdAt: String(row.created_at),
+      existingDocId: asText(row[docIdKey]),
+      needsManualCheck,
+    }));
+
+  const qboAllFailedRows: QBQueueFailureRow[] = [
+    ...buildQueueFailures(
+      qboExportFailedRows as unknown as RawQueueRow[],
+      "qbo_export_queue",
+      "Invoice export",
+      (row) => `Invoice ${row.invoice_id}`,
+      "qbo_invoice_id",
+      false
+    ),
+    ...buildQueueFailures(
+      (membershipRefundFailedRes.data ?? []) as RawQueueRow[],
+      "qbo_membership_refund_queue",
+      "Membership refund",
+      (row) => `Invoice ${row.invoice_id}`,
+      "qbo_refund_receipt_id",
+      true
+    ),
+    ...buildQueueFailures(
+      (conferenceReceiptFailedRes.data ?? []) as RawQueueRow[],
+      "qbo_conference_receipt_queue",
+      "Conference receipt",
+      (row) => `Order ${row.conference_order_id}`,
+      "qbo_sales_receipt_id",
+      false
+    ),
+    ...buildQueueFailures(
+      (conferenceRefundFailedRes.data ?? []) as RawQueueRow[],
+      "qbo_conference_refund_queue",
+      "Conference refund",
+      (row) => `Order ${row.conference_order_id}`,
+      "qbo_refund_receipt_id",
+      true
+    ),
+    ...buildQueueFailures(
+      (miscReceiptFailedRes.data ?? []) as RawQueueRow[],
+      "qbo_misc_receipt_queue",
+      "Misc receipt",
+      (row) => `${row.payment_kind} ${row.payment_id}`,
+      "qbo_sales_receipt_id",
+      false
+    ),
+  ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const qboExportPendingCount = qboExportPendingCountRes.count ?? 0;
   const failedSyncItems = (circleFailedItemsRes.data ?? []) as CircleSyncRow[];
   const latestConference =
@@ -1749,8 +1871,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             <p className="mt-1 text-gray-700">{qboExportPendingCount}</p>
           </article>
           <article className="rounded-lg border border-gray-100 p-3 text-sm">
-            <p className="font-medium text-gray-900">Export Failed</p>
-            <p className={`mt-1 font-medium ${qboExportFailedRows.length > 0 ? "text-red-600" : "text-gray-700"}`}>{qboExportFailedRows.length}</p>
+            <p className="font-medium text-gray-900">Failed (all queues)</p>
+            <p className={`mt-1 font-medium ${qboAllFailedRows.length > 0 ? "text-red-600" : "text-gray-700"}`}>{qboAllFailedRows.length}</p>
           </article>
           <article className="rounded-lg border border-gray-100 p-3 text-sm">
             <p className="font-medium text-gray-900">Recon Pending Review</p>
@@ -1758,24 +1880,42 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
           </article>
         </div>
 
-        {qboExportFailedRows.length > 0 && (
+        {qboAllFailedRows.length > 0 && (
           <div className="mt-4">
             <p className="text-sm font-medium text-gray-900 mb-2">Failed Exports</p>
             <ul className="space-y-2">
-              {qboExportFailedRows.map((row) => (
-                <li key={row.id} className="rounded-lg border border-red-100 bg-red-50 p-2 text-sm">
-                  <p className="font-medium text-gray-900">Invoice: {row.invoice_id}</p>
-                  <p className="text-gray-600 text-xs mt-0.5">
-                    Retries: {row.retry_count} • Queued: <Timestamp iso={row.created_at} />
+              {qboAllFailedRows.map((row) => (
+                <li key={`${row.queue}:${row.id}`} className="rounded-lg border border-red-100 bg-red-50 p-2 text-sm">
+                  <p className="font-medium text-gray-900">
+                    <span className="mr-2 rounded bg-gray-900/5 px-1.5 py-0.5 text-xs font-medium text-gray-700">
+                      {row.queueLabel}
+                    </span>
+                    {row.subject}
                   </p>
-                  {row.error_message && (
-                    <p className="text-red-700 text-xs mt-0.5 font-mono">{row.error_message}</p>
+                  <p className="text-gray-600 text-xs mt-0.5">
+                    Retries: {row.retryCount} • Queued: <Timestamp iso={row.createdAt} />
+                  </p>
+                  {row.errorMessage && (
+                    <p className="text-red-700 text-xs mt-0.5 font-mono">{row.errorMessage}</p>
+                  )}
+                  {row.existingDocId && (
+                    <p className="text-gray-700 text-xs mt-0.5">
+                      Already has QuickBooks document {row.existingDocId} — a retry will adopt it,
+                      not post again.
+                    </p>
+                  )}
+                  {row.needsManualCheck && !row.existingDocId && (
+                    <p className="text-amber-800 text-xs mt-0.5">
+                      ⚠️ Refund queue: its document number comes from the parent invoice/order, so
+                      partial refunds share one and cannot be told apart automatically. Check
+                      QuickBooks for an existing refund receipt before retrying.
+                    </p>
                   )}
                   <form
                     action={async (formData: FormData) => {
                       "use server";
                       const reason = String(formData.get("reason") ?? "");
-                      await retryQBExportAction(row.id, reason);
+                      await retryQBQueueRowAction(row.queue, row.id, reason);
                     }}
                     className="mt-2 flex items-end gap-2"
                   >
@@ -1795,6 +1935,37 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                       className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white"
                     >
                       Retry
+                    </button>
+                  </form>
+                  {/* The other honest outcome. Some failed rows should never
+                      post — a duplicate refund, something already keyed into
+                      QuickBooks by hand. Without this they stay `failed`
+                      forever and the backlog alert can never legitimately
+                      clear. */}
+                  <form
+                    action={async (formData: FormData) => {
+                      "use server";
+                      const reason = String(formData.get("reason") ?? "");
+                      await skipQBQueueRowAction(row.queue, row.id, reason);
+                    }}
+                    className="mt-2 flex items-end gap-2"
+                  >
+                    <label className="flex-1 text-xs text-gray-600">
+                      Close without posting
+                      <input
+                        name="reason"
+                        type="text"
+                        required
+                        minLength={8}
+                        placeholder="Why this should never post to QuickBooks"
+                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white"
+                    >
+                      Skip
                     </button>
                   </form>
                 </li>

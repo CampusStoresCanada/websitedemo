@@ -6,7 +6,6 @@ import {
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle";
-import { enqueueNewContactCircleProvisioning } from "@/lib/circle/sync";
 import { loginSkipReason, type LoginSkipReason } from "@/lib/contacts/login-policy";
 import { provisionOrgLogin } from "@/lib/identity/org-login";
 
@@ -109,14 +108,21 @@ export async function addContact({
       return { success: false, error: "Contact name is required", invite: notAttempted };
     }
 
+    // Resolved before the row is created: ensureKnownPerson queues Circle
+    // provisioning off its insert and reads contact_type to decide whether
+    // this person gets an account, so the tags have to be on the row already.
+    const contactType = tags && tags.length > 0 ? ["directory", ...tags] : ["directory"];
+    const contactEmail = workEmail?.trim() || email?.trim() || null;
+
     const person = await ensureKnownPerson({
       organizationId,
       tenantId: (org as { tenant_id?: string | null }).tenant_id ?? null,
       name,
-      email: workEmail?.trim() || email?.trim() || null,
+      email: contactEmail,
       title: roleTitle ?? null,
       workPhone: workPhoneNumber ?? null,
       mobilePhone: phone ?? null,
+      contactType,
     });
 
     if (person.error || !person.personId) {
@@ -127,9 +133,6 @@ export async function addContact({
         invite: notAttempted,
       };
     }
-
-    const contactType = tags && tags.length > 0 ? ["directory", ...tags] : ["directory"];
-    const contactEmail = workEmail?.trim() || email?.trim() || null;
 
     const contact = await upsertPersonContact({
       organizationId,
@@ -151,8 +154,8 @@ export async function addContact({
       };
     }
 
-    // Queue Circle provisioning for the new contact (fire-and-forget)
-    void enqueueNewContactCircleProvisioning(contact.contactId, organizationId);
+    // Circle provisioning is queued by ensureKnownPerson's insert above, so
+    // every creation path gets it — not just this one.
 
     // Provision the portal login in the same pass. Same gate Circle
     // provisioning uses, so a contact never ends up with one and not the other.

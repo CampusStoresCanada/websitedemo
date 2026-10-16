@@ -153,7 +153,7 @@ function getSortValue(org: HomeMapOrg, key: SortKey, searchRanking?: Map<string,
     case "fulltimeEmployees":
       return org.fulltimeEmployees ?? null;
     case "hasCatalogue":
-      return org.catalogueUrl ? 0 : 1; // 0 = has catalogue (sorts first asc)
+      return org.hasCatalogue ? 0 : 1; // 0 = has catalogue (sorts first asc)
     case "fitScore":
       // For partner-viewing-members: negate member fit score
       // For member-viewing-partners: negate partner fit score
@@ -226,7 +226,7 @@ export default function DirectoryTable({
   }, [isMember]);
 
   // --- Catalogue gate modal (logged-out users) ---
-  const [gatedCatalogueUrl, setGatedCatalogueUrl] = useState<string | null>(null);
+  const [gatedCatalogueOrgId, setGatedCatalogueOrgId] = useState<string | null>(null);
   // Distinguish new visitor (no cookie) from returning user (has session cookie)
   const [isReturningVisitor, setIsReturningVisitor] = useState(false);
   useEffect(() => {
@@ -235,22 +235,22 @@ export default function DirectoryTable({
   const gateModalRef = useRef<HTMLDivElement>(null);
   // Close on outside click
   useEffect(() => {
-    if (!gatedCatalogueUrl) return;
+    if (!gatedCatalogueOrgId) return;
     const handler = (e: MouseEvent) => {
       if (gateModalRef.current && !gateModalRef.current.contains(e.target as Node)) {
-        setGatedCatalogueUrl(null);
+        setGatedCatalogueOrgId(null);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [gatedCatalogueUrl]);
+  }, [gatedCatalogueOrgId]);
   // Close on Escape
   useEffect(() => {
-    if (!gatedCatalogueUrl) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setGatedCatalogueUrl(null); };
+    if (!gatedCatalogueOrgId) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setGatedCatalogueOrgId(null); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [gatedCatalogueUrl]);
+  }, [gatedCatalogueOrgId]);
 
   // --- Table state ---
   // Partners viewing members default to fit score; members viewing partners also default to fit score
@@ -618,11 +618,13 @@ export default function DirectoryTable({
                         </td>
                         {/* Catalogue */}
                         <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                          {org.catalogueUrl ? (
-                            user ? (
-                              // Logged in — link goes straight through
+                          {org.hasCatalogue ? (
+                            isMember ? (
+                              // Member — resolve the URL through the route,
+                              // which re-checks the viewer server-side. The
+                              // URL is never in this page's payload.
                               <a
-                                href={org.catalogueUrl}
+                                href={`/api/org/${org.id}/catalogue`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#D92327] transition-colors whitespace-nowrap"
@@ -633,9 +635,10 @@ export default function DirectoryTable({
                                 Catalogue
                               </a>
                             ) : (
-                              // Logged out — intercept and show join/login gate
+                              // Not a member (anonymous, or a partner viewing
+                              // another partner) — show the join/login gate.
                               <button
-                                onClick={() => setGatedCatalogueUrl(org.catalogueUrl!)}
+                                onClick={() => setGatedCatalogueOrgId(org.id)}
                                 className="inline-flex items-center gap-1.5 rounded-lg bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#D92327] transition-colors whitespace-nowrap"
                               >
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -811,7 +814,7 @@ export default function DirectoryTable({
     </div>
 
     {/* ── Catalogue gate modal (logged-out users) ── */}
-    {gatedCatalogueUrl && (
+    {gatedCatalogueOrgId && (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
         <div
           ref={gateModalRef}
@@ -819,7 +822,7 @@ export default function DirectoryTable({
         >
           {/* Close */}
           <button
-            onClick={() => setGatedCatalogueUrl(null)}
+            onClick={() => setGatedCatalogueOrgId(null)}
             className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
             aria-label="Close"
           >

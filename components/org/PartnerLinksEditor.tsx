@@ -14,7 +14,8 @@ import {
   updatePartnerLink,
   reorderPartnerLinks,
 } from "@/lib/actions/manage-partner-links";
-import { uploadPartnerDocument } from "@/lib/actions/upload-partner-document";
+import { createPartnerDocumentUploadUrl } from "@/lib/actions/upload-partner-document";
+import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,47 +125,70 @@ function AddLinkForm({ orgId, primaryColor, onAdded, onCancel }: AddLinkFormProp
         url: url.trim(),
       };
       setUploading(true);
-      const result = await addPartnerLink(orgId, link);
-      setUploading(false);
-      if (!result.success) { setError(result.error ?? "Failed to save"); return; }
-      onAdded(link);
+      try {
+        const result = await addPartnerLink(orgId, link);
+        if (!result.success) { setError(result.error ?? "Failed to save"); return; }
+        onAdded(link);
+      } catch (err) {
+        console.error("[partner-links] save failed", err);
+        setError(err instanceof Error ? err.message : "Failed to save. Please try again.");
+      } finally {
+        setUploading(false);
+      }
     } else {
       if (!file) { setError("Please select a file"); return; }
       setUploading(true);
 
-      // Read file as base64
-      const fileData = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      try {
+        // Ask the server to authorize this upload and name the destination.
+        // The file itself never goes through a Server Action — those have a
+        // capped request body, and base64-ing a catalogue into one is what
+        // made anything past a few MB fail with no error at all.
+        const authorized = await createPartnerDocumentUploadUrl({
+          orgId,
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
+        });
 
-      const uploadResult = await uploadPartnerDocument({
-        orgId,
-        fileData,
-        fileName: file.name,
-        contentType: file.type,
-      });
+        if (!authorized.success || !authorized.path || !authorized.token) {
+          setError(authorized.error ?? "Upload failed");
+          return;
+        }
 
-      if (!uploadResult.success || !uploadResult.storagePath) {
+        // Browser → Supabase Storage directly. The bucket's own 50MB limit and
+        // MIME allowlist are the enforcement; the token only unlocks this path.
+        const { error: uploadError } = await createClient()
+          .storage.from("partner-documents")
+          .uploadToSignedUrl(authorized.path, authorized.token, file, {
+            contentType: file.type,
+          });
+
+        if (uploadError) {
+          setError(uploadError.message || "Upload failed");
+          return;
+        }
+
+        const link: PartnerLink = {
+          id: crypto.randomUUID(),
+          type,
+          label: trimmedLabel,
+          visibility,
+          storage_path: authorized.path,
+        };
+
+        const saveResult = await addPartnerLink(orgId, link);
+        if (!saveResult.success) { setError(saveResult.error ?? "Failed to save"); return; }
+        onAdded(link);
+      } catch (err) {
+        // ⛔ Without this the button sat on "Saving…" forever: a throw skipped
+        // setUploading(false) and no message was ever shown, so a failed
+        // upload was indistinguishable from a slow one.
+        console.error("[partner-links] upload failed", err);
+        setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+      } finally {
         setUploading(false);
-        setError(uploadResult.error ?? "Upload failed");
-        return;
       }
-
-      const link: PartnerLink = {
-        id: crypto.randomUUID(),
-        type,
-        label: trimmedLabel,
-        visibility,
-        storage_path: uploadResult.storagePath,
-      };
-
-      const saveResult = await addPartnerLink(orgId, link);
-      setUploading(false);
-      if (!saveResult.success) { setError(saveResult.error ?? "Failed to save"); return; }
-      onAdded(link);
     }
   };
 

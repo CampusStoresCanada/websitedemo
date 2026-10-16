@@ -332,9 +332,9 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
 
             {/* Actions */}
             <div className="space-y-2">
-              {org.catalogueUrl && (
+              {org.hasCatalogue && isMember && (
                 <a
-                  href={org.catalogueUrl}
+                  href={`/api/org/${org.id}/catalogue`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#EE2A2E] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"

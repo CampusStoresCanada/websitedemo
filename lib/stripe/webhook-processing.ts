@@ -801,6 +801,14 @@ async function handleInvoicePaid(
    * renewals and is unrelated, but an early return would skip it for an org that
    * had both. Fulfil the conference order and fall through.
    */
+  /**
+   * ⛔ Set when this invoice paid a CONFERENCE ORDER, which suppresses the
+   * `invoices`-table QB export below. See the long note at that call site —
+   * fulfilConferenceOrder already queues the conference sales receipt, and
+   * posting both books the same money twice.
+   */
+  let fulfilledConferenceOrder = false;
+
   if (stripeInvoice.id) {
     const { data: invoiceRow } = await db
       .from("invoices")
@@ -810,7 +818,7 @@ async function handleInvoicePaid(
     if (invoiceRow) {
       const { data: order } = await db
         .from("conference_orders")
-        .select("id, conference_id, organization_id, status")
+        .select("id, conference_id, organization_id, user_id, status")
         .eq("invoice_id", invoiceRow.id)
         .maybeSingle();
       if (order) {
@@ -818,10 +826,21 @@ async function handleInvoicePaid(
           orderId: order.id as string,
           conferenceId: (order.conference_id as string | null) ?? null,
           orgId: (order.organization_id as string | null) ?? null,
+          /**
+           * ⛔ Without this the invoice path silently loses two things, both
+           * gated on `conferenceId && orgId && userId` inside
+           * fulfilConferenceOrder: the cart is never cleared (so the buyer's
+           * cart keeps the booth they just paid for), and
+           * triggerConferencePaymentConfirmation never fires — they pay and
+           * hear nothing. The card path passes it from the Stripe session;
+           * here it comes off the order row, which has had it all along.
+           */
+          userId: (order.user_id as string | null) ?? null,
           checkoutSessionId: null,
           paymentIntentId: extractStringField(raw, "payment_intent"),
           source: "invoice",
         });
+        fulfilledConferenceOrder = true;
       }
     }
   }
@@ -859,7 +878,34 @@ async function handleInvoicePaid(
 
     updatedInvoice = data;
 
-    if (updatedInvoice?.id) {
+    /**
+     * ⛔ ONE PAID CONFERENCE ORDER = ONE QBO DOCUMENT.
+     *
+     * fulfilConferenceOrder above already queued this order onto
+     * qbo_conference_receipt_queue, which posts a Sales Receipt built from the
+     * order's own lines: per-line catalog items, pre-tax amounts, and the tax
+     * code resolved PER LINE (conference rate for booths/sponsorships, the
+     * buyer's province for a bundled dues line).
+     *
+     * enqueueQBExport posts a second, *different* document from the `invoices`
+     * row: mapToQBInvoice emits exactly ONE line for the whole invoice, picks
+     * its item by grepping the description for "connected"/"exhibitor", and
+     * taxes it with resolveMembershipTaxCode — the ORIGIN-based resolver. For
+     * an out-of-Canada buyer that is tax code 3 (no HST) on a sale Stripe just
+     * charged 13% on, and it then posts a Payment for the full tax-inclusive
+     * total against that under-taxed invoice, leaving an unapplied credit.
+     *
+     * Both queues firing was unreachable until the cart could invoice: card
+     * checkouts only ever hit the receipt queue, and the hand-made August
+     * booth invoices only ever hit this one. The invoice path is the first
+     * thing to do both, so it is the first thing that would double-book.
+     *
+     * ⚠️ Only suppressed when a conference order is actually linked. A
+     * type="conference" invoice with no order — the hand-made, off-checkout
+     * kind resolveManualConferenceInvoiceItemId was written for — still
+     * exports here, because nothing else would ever post it.
+     */
+    if (updatedInvoice?.id && !fulfilledConferenceOrder) {
       await enqueueQBExport(updatedInvoice.id);
     }
   }

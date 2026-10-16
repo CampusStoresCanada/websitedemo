@@ -40,7 +40,12 @@ export const ALLOWED_TRANSITIONS: Record<OrgMembershipStatus, OrgMembershipStatu
   grace:       ['active', 'locked', 'canceled'],
   locked:      ['reactivated'],
   reactivated: ['grace', 'canceled'],
-  canceled:    [],
+  // canceled → active is the revive path for an org that paid for a new
+  // coverage period after being canceled. It is reachable only through an
+  // admin/webhook-initiated settlement: the self-serve renewal gate in
+  // lib/actions/renewal.ts keeps its own renewableStatuses list, which still
+  // excludes `canceled`, so a deliberate opt-out cannot un-cancel itself.
+  canceled:    ['active'],
 }
 
 /** Status metadata for UI rendering. */

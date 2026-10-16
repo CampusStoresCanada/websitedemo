@@ -33,6 +33,30 @@ const CATEGORY_COLORS: Record<string, string> = {
   general: "bg-gray-100 text-gray-600",
 };
 
+/**
+ * Why the address is suppressed — and, since 2026-09-02, how far the block
+ * reaches. Worth showing plainly: two rows that look identical here behave
+ * very differently, and "Resubscribe" on a bounce row is how you re-enable an
+ * address whose owner has since fixed their mailbox.
+ */
+const KIND_LABELS: Record<string, { label: string; title: string; className: string }> = {
+  unsubscribe: {
+    label: "unsubscribe",
+    title: "Stated preference. Blocks marketing email only — transactional mail still sends.",
+    className: "bg-gray-100 text-gray-600",
+  },
+  bounce: {
+    label: "hard bounce",
+    title: "Mailbox does not exist. Blocks every send, transactional included.",
+    className: "bg-amber-100 text-amber-800",
+  },
+  complaint: {
+    label: "spam report",
+    title: "Marked us as spam. Treated as an unsubscribe — transactional mail still sends.",
+    className: "bg-rose-100 text-rose-700",
+  },
+};
+
 async function addSuppressionAction(formData: FormData) {
   "use server";
   const email = (formData.get("email") as string)?.trim();
@@ -64,7 +88,7 @@ export default async function SuppressionsPage({
     <main>
       <AdminPageHeader
         title="Suppressions"
-        description="Everyone who's unsubscribed from marketing emails, globally or by category. Transactional emails are never affected by this list."
+        description="Everyone suppressed from email, globally or by category. Unsubscribes affect marketing only — transactional mail still goes. Hard bounces are different: the mailbox is gone, so those block every send, transactional included."
         actions={
           <Link
             href="/admin/comms"
@@ -157,6 +181,7 @@ export default async function SuppressionsPage({
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Email</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Category</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Kind</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Reason</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Added</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600"></th>
@@ -174,6 +199,19 @@ export default async function SuppressionsPage({
                     >
                       {row.category}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const kind = KIND_LABELS[row.kind] ?? KIND_LABELS.unsubscribe;
+                      return (
+                        <span
+                          title={kind.title}
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${kind.className}`}
+                        >
+                          {kind.label}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{row.reason ?? "—"}</td>
                   <td className="px-4 py-3 text-gray-500">

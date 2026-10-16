@@ -32,7 +32,7 @@ function org(overrides: Partial<HomeMapOrg> = {}): HomeMapOrg {
     fulltimeEmployees: null,
     companyDescription: null,
     highlightProductName: null,
-    catalogueUrl: null,
+    hasCatalogue: false,
     certifications: [],
     isCancollMember: false,
     procurementCategories: [],

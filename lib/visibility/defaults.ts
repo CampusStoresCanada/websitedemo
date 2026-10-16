@@ -36,7 +36,6 @@ export const DEFAULT_VISIBILITY_CONFIG: VisibilityConfig = {
     "organizations.website",
     "organizations.action_link_url",
     "organizations.action_link_text",
-    "organizations.catalogue_url",
     "organizations.square_footage",
     "organizations.fte",
     "organizations.membership_status",
@@ -107,6 +106,22 @@ export const DEFAULT_CROSS_VISIBILITY_RULES: CrossVisibilityRules = {
     "organizations.company_description",
     "organizations.primary_category",
     "contacts.role_title",
+    // The partner's own promotional pitch — a featured product and whatever
+    // deal is currently on the table. These are unlisted everywhere else, so
+    // they failed closed and were reaching admins only, withheld from the
+    // members the offer is written for. Listing them here (rather than in
+    // public_allowlist) shows them to member viewers without opening them to
+    // competing partners, who get nothing from cross rules by design.
+    "organizations.highlight_product_name",
+    "organizations.highlight_product_description",
+    "organizations.highlight_the_deal",
+    // The partner's uploaded catalogue. Moved out of public_allowlist —
+    // it is the partner's own sales material and belongs to member buyers,
+    // not to anonymous traffic or to competing partners (who get nothing
+    // from cross rules). NOTE: the ISR-cached directory loaders never call
+    // applyFieldMask, so this list alone does not protect it there — see
+    // hasCatalogue in lib/homepage.ts and the resolver route.
+    "organizations.catalogue_url",
   ],
   // Partner viewers can see selected member purchasing-facing fields.
   partner_to_member_fields: [

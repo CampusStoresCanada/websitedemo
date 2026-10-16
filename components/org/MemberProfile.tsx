@@ -42,6 +42,8 @@ import type { AssignableEntityColumn } from "@/app/org/[slug]/page";
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { updateOrgProfileVisibilitySettings, setContactHidden } from "@/lib/actions/user-management";
 import { fieldProps } from "@/lib/editable-fields";
+import { CANCOLL_CERT } from "@/lib/certifications";
+import { updateCancollStatus } from "@/lib/actions/update-certifications";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import RenewMembershipCard from "@/components/org/RenewMembershipCard";
@@ -157,6 +159,7 @@ export default function MemberProfile({
   const { editMode, canEditOrg } = useToolkit();
   const [savingContactId, setSavingContactId] = useState<string | null>(null);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const [assigningContactId, setAssigningContactId] = useState<string | null>(null);
   const rawPrimaryColor = brandColors[0]?.hex || "#EE2A2E";
   const primaryColor = rawPrimaryColor.startsWith("#") ? rawPrimaryColor : `#${rawPrimaryColor}`;
   const heroImage = organization.hero_image_url ?? null;
@@ -281,6 +284,86 @@ export default function MemberProfile({
   const canViewAsPartner = isOrgAdminForThisOrg || isAdmin;
   const [partnerViewMode, setPartnerViewMode] = useState(false);
 
+  // CANCOLL — purchasing-group standing, admin-managed. Optimistic local state,
+  // same as PartnerProfile's copy of this toggle.
+  //
+  // On a member store this control is the flag's ONLY surface: the badge array
+  // that carries CANCOLL on a partner profile is deliberately not written for
+  // members (updateCancollStatus explains why), so there is no chip grid here
+  // to hang it off — and the eight self-declared certifications that fill that
+  // grid are a vendor's claims about itself, which a member store has no
+  // business declaring. Before this, the 51 member holders were settable only
+  // by raw SQL.
+  const [cancollMember, setCancollMember] = useState<boolean>(
+    organization.is_cancoll_member ?? false
+  );
+  const [cancollSaving, setCancollSaving] = useState(false);
+  const [cancollError, setCancollError] = useState<string | null>(null);
+
+  // CSC staff only, and rendered in BOTH the desktop and the mobile layout —
+  // those are two separate trees in this file, so a section added to one is
+  // simply invisible at the other width.
+  //
+  // Shown outside edit mode too, as a read-only line: on a member store this is
+  // the only place CANCOLL standing is legible at all, so staff shouldn't have
+  // to enter edit mode to answer "are they in the purchasing group?".
+  function CancollSection({ spacing }: { spacing: string }) {
+    return (
+      <div className={spacing}>
+        <div className="flex items-center gap-3 mb-3">
+          <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Purchasing Group</h3>
+          {cancollSaving && <span className="text-[10px] text-gray-400">Saving…</span>}
+          {cancollError && !cancollSaving && (
+            <span className="text-[10px] text-red-600" role="alert">{cancollError}</span>
+          )}
+        </div>
+        {editMode ? (
+          <button
+            type="button"
+            onClick={handleToggleCancoll}
+            disabled={cancollSaving}
+            aria-pressed={cancollMember}
+            className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium border transition-all ${
+              cancollMember
+                ? "bg-gray-900 text-white border-gray-900"
+                : "bg-white text-gray-500 border-gray-300 hover:border-gray-500"
+            }`}
+          >
+            <img
+              src={`/certifications/${CANCOLL_CERT.filename ?? `${CANCOLL_CERT.slug}.svg`}`}
+              alt=""
+              className="w-5 h-5 rounded-full object-cover"
+            />
+            {CANCOLL_CERT.name}
+            {cancollMember && <span className="text-white/70">✓</span>}
+          </button>
+        ) : (
+          <p className="text-sm text-[#1A1A1A]">
+            {cancollMember ? `${CANCOLL_CERT.name} member` : `Not in ${CANCOLL_CERT.name}`}
+            <span className="ml-2 text-xs text-gray-400">Turn on Edit to change</span>
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const handleToggleCancoll = async () => {
+    const previous = cancollMember;
+    setCancollMember(!previous);
+    setCancollSaving(true);
+    setCancollError(null);
+    const result = await updateCancollStatus(organization.id, !previous);
+    setCancollSaving(false);
+    // Roll the optimistic flip back on refusal rather than leaving the chip
+    // asserting standing the database doesn't hold — indistinguishable from a
+    // save that worked until the next reload, which is exactly how the
+    // certification chips next door got reported as "not saving".
+    if (!result.success) {
+      setCancollMember(previous);
+      setCancollError(result.error ?? "Couldn't save CANCOLL standing — try again.");
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Helpers for rendering pre-masked contact fields
   // ---------------------------------------------------------------------------
@@ -306,6 +389,9 @@ export default function MemberProfile({
     const value = (primary || fallback) as string | null;
     if (!value) return <BlurredField placeholderWidth={type === "email" ? 20 : 12} />;
     if (isMaskedValue(value)) return <BlurredField maskedValue={value} />;
+    // In edit mode the row itself is the control (opens the contact editor), so a
+    // mailto:/tel: link here would swallow the click. Render plain text instead.
+    if (editMode) return value;
     // Full value — render as clickable link
     if (type === "email") {
       return (
@@ -510,6 +596,12 @@ export default function MemberProfile({
     (canEditThisOrg || permissionState === "admin" || permissionState === "super_admin");
   const showAdminColumn =
     canEditThisOrg || permissionState === "admin" || permissionState === "super_admin";
+  // Board Registration is a seat-assignment control, not roster information:
+  // the org conference page redirects here precisely because this matrix is
+  // the only place seats get named. So it follows the Admin column's gate —
+  // CSC staff and the org's own admins — rather than being shown to every
+  // signed-in member looking at someone else's store.
+  const visibleEntityColumns = showAdminColumn ? assignableEntities : [];
   const adminUserIds = new Set(
     orgAssignableUsers.filter((u) => u.role === "org_admin").map((u) => u.userId)
   );
@@ -530,13 +622,26 @@ export default function MemberProfile({
     return { checked, disabled };
   };
 
+  // What a person is attending AS — one registration, plus any event add-ons.
+  // Verified against live data: 26 people assigned, none holding two
+  // registrations, so this reads as a single value rather than a column per
+  // product. The seat matrix still does the writing; this only decides what
+  // the one column reads out.
+  const getAttendingSummary = (contact: VisibleContact) => {
+    const held = visibleEntityColumns.filter((e) => getEntityAttendanceCell(contact, e).checked);
+    return {
+      registration: held.find((e) => e.kind === "registration") ?? null,
+      extras: held.filter((e) => e.kind !== "registration"),
+    };
+  };
+
   return (
     <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]" data-org-id={organization.id}>
       {/* Desktop Layout — flex row; hero panel sticky until contacts end */}
       <div className="hidden lg:flex">
 
         {/* Left visual panel — sticky, viewport height, releases naturally after Zone 1 */}
-        <div className="sticky top-0 h-screen flex-shrink-0 relative overflow-hidden" style={{ width: '51.61vw' }}>
+        <div className="sticky top-0 h-screen flex-shrink-0 relative overflow-hidden" style={{ width: '46vw' }}>
 
         {/* Background image layer — fills the left panel behind everything */}
         <div
@@ -645,7 +750,7 @@ export default function MemberProfile({
 
         {/* Right content panel — Zone 1: logo through contacts */}
         <div
-          className="flex-1 relative z-10"
+          className="flex-1 min-w-0 relative z-10"
           style={{
             paddingRight: '8.78%',
             paddingTop: '108px',
@@ -914,13 +1019,6 @@ export default function MemberProfile({
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Information</h3>
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
-              <ProtectedSection
-                bypass={isOwnOrgPage}
-              requiredPermission="member"
-                bannerMessage="Sign in as a member or partner to view store details."
-                ctaText="Sign In"
-                ctaLink="/login"
-              >
                 <div className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm">
                   {(organization.square_footage || benchmarking?.total_square_footage || (editMode && canEditThisOrg)) && (
                     <>
@@ -976,9 +1074,10 @@ export default function MemberProfile({
                     <span className="text-gray-400 col-span-2 italic">Store information not yet available</span>
                   )}
                 </div>
-              </ProtectedSection>
             </div>
           )}
+
+          {isAdmin && CancollSection({ spacing: "mb-10" })}
 
           {/* Staffing — Names visible to all, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
@@ -1006,6 +1105,7 @@ export default function MemberProfile({
                     </button>
                   )}
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
@@ -1013,9 +1113,9 @@ export default function MemberProfile({
                       <th className="pb-2 pr-4 font-semibold">Email</th>
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
-                      {assignableEntities.map((entity) => (
-                        <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
-                      ))}
+                      {visibleEntityColumns.length > 0 && (
+                        <th className="pb-2 pl-3 font-semibold">Attending</th>
+                      )}
                       {/* Badge/check-in status is a CSC staff concern, not something an org admin manages or needs to see. */}
                       {showAdminColumn && <th className="pb-2 pl-3 font-semibold">Admin</th>}
                       {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Badge</th>}
@@ -1040,7 +1140,7 @@ export default function MemberProfile({
                         <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
-                              contact.circle_id ? (
+                              contact.circle_id && !editMode ? (
                                 <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
                               ) : (contact.name as string)
                             )
@@ -1055,21 +1155,54 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        {assignableEntities.map((entity) => {
-                          const cell = getEntityAttendanceCell(contact, entity);
+                        {visibleEntityColumns.length > 0 && (() => {
+                          const { registration, extras } = getAttendingSummary(contact);
+                          const open = assigningContactId === contact.id;
                           return (
-                            <td key={entity.entityId} className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                aria-label={`${entity.name} for ${contact.name ?? "contact"}`}
-                                checked={cell.checked}
-                                disabled={cell.disabled}
-                                onChange={(event) => void handleEntityToggle(contact, entity, event.target.checked)}
-                                className="h-4 w-4"
-                              />
+                            <td className="py-2 pl-3 text-xs align-top relative" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-start gap-2">
+                                <div className="min-w-0">
+                                  <div className={registration ? "text-[#1A1A1A]" : "text-gray-400"}>
+                                    {registration ? registration.name : "\u2014"}
+                                  </div>
+                                  {extras.map((x) => (
+                                    <div key={x.entityId} className="text-gray-400">+ {x.name}</div>
+                                  ))}
+                                </div>
+                                {canEditConferenceAttendance && currentConferenceId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAssigningContactId(open ? null : contact.id)}
+                                    className="shrink-0 px-2 py-0.5 rounded-full border border-gray-300 text-gray-600 hover:border-gray-400 transition-colors"
+                                  >
+                                    {open ? "Done" : "Assign"}
+                                  </button>
+                                )}
+                              </div>
+                              {open && (
+                                <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-3 shadow-lg text-left">
+                                  <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Attending</div>
+                                  {visibleEntityColumns.map((entity) => {
+                                    const cell = getEntityAttendanceCell(contact, entity);
+                                    return (
+                                      <label key={entity.entityId} className="flex items-center gap-2 py-1 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`${entity.name} for ${contact.name ?? "contact"}`}
+                                          checked={cell.checked}
+                                          disabled={cell.disabled}
+                                          onChange={(event) => void handleEntityToggle(contact, entity, event.target.checked)}
+                                          className="h-4 w-4"
+                                        />
+                                        <span className="text-[#1A1A1A]">{entity.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </td>
                           );
-                        })}
+                        })()}
                         {showAdminColumn && (() => {
                           const adminState = getContactAdminState(contact);
                           return (
@@ -1113,7 +1246,7 @@ export default function MemberProfile({
                         data-add-contact
                         data-organization-id={organization.id}
                       >
-                        <td colSpan={4 + assignableEntities.length + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
+                        <td colSpan={4 + (visibleEntityColumns.length > 0 ? 1 : 0) + (showAdminColumn ? 1 : 0) + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
                           <span className="flex items-center justify-center gap-2">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1125,6 +1258,7 @@ export default function MemberProfile({
                     )}
                   </tbody>
                 </table>
+                </div>
                 {attendanceError ? (
                   <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
                 ) : null}
@@ -1543,13 +1677,6 @@ export default function MemberProfile({
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Information</h3>
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
-              <ProtectedSection
-                bypass={isOwnOrgPage}
-              requiredPermission="member"
-                bannerMessage="Sign in as a member or partner to view store details."
-                ctaText="Sign In"
-                ctaLink="/login"
-              >
                 <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
                   {(organization.square_footage || benchmarking?.total_square_footage || (editMode && canEditThisOrg)) && (
                     <>
@@ -1589,9 +1716,10 @@ export default function MemberProfile({
                     <span className="text-gray-400 col-span-2 italic">Store information not yet available</span>
                   )}
                 </div>
-              </ProtectedSection>
             </div>
           )}
+
+          {isAdmin && CancollSection({ spacing: "mb-8" })}
 
           {/* Staffing — Names visible, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
@@ -1633,7 +1761,7 @@ export default function MemberProfile({
                         <div className="font-medium text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
-                              contact.circle_id ? (
+                              contact.circle_id && !editMode ? (
                                 <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
                               ) : (contact.name as string)
                             )
@@ -1645,7 +1773,7 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
-                        {assignableEntities.map((entity) => {
+                        {visibleEntityColumns.map((entity) => {
                           const cell = getEntityAttendanceCell(contact, entity);
                           return (
                             <div key={entity.entityId} className="text-xs mt-1 font-medium">

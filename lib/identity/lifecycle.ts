@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueNewContactCircleProvisioning } from "@/lib/circle/sync";
 
 /**
  * Identity lifecycle, backed by `contacts`.
@@ -124,6 +125,14 @@ export async function ensureKnownPerson(params: {
   title?: string | null;
   workPhone?: string | null;
   mobilePhone?: string | null;
+  /**
+   * Tags for the row when this call *creates* one. Set it whenever the caller
+   * knows them: Circle provisioning fires off the insert below and reads
+   * `contact_type` to decide whether this person gets an account at all, so a
+   * conference-only or board contact left to default to ["directory"] would be
+   * provisioned before the caller's own update could correct it.
+   */
+  contactType?: string[];
 }): Promise<{ personId: string | null; error?: string }> {
   const adminClient = createAdminClient();
   const normalizedEmail = params.email?.trim().toLowerCase() ?? null;
@@ -200,12 +209,24 @@ export async function ensureKnownPerson(params: {
       role_title: keepIfAbsent(params.title) ?? null,
       work_phone_number: keepIfAbsent(params.workPhone) ?? null,
       phone: keepIfAbsent(params.mobilePhone) ?? null,
-      contact_type: ["directory"],
+      contact_type: params.contactType ?? ["directory"],
     })
     .select("id")
     .single();
 
   if (createError) return { personId: null, error: createError.message };
+
+  // Every path that creates a contact runs through this insert, so this is the
+  // one place Circle provisioning can be hooked without leaving a caller out.
+  // It used to hang off addContact alone, which meant a contact created by the
+  // conference tools, account recovery, org login or application approval got
+  // an account in Circle and never the access group that comes with it.
+  // Fire-and-forget: never throws, re-checks the org's own status, and keys
+  // its queue rows by contact id so a repeat is a no-op.
+  if (created?.id) {
+    void enqueueNewContactCircleProvisioning(created.id, params.organizationId);
+  }
+
   return { personId: created?.id ?? null };
 }
 
@@ -269,6 +290,7 @@ export async function upsertPersonContact(params: {
     title: params.roleTitle,
     workPhone: params.workPhone,
     mobilePhone: params.phone,
+    contactType: params.contactType,
   });
 
   if (ensured.error || !ensured.personId) {

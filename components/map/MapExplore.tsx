@@ -400,7 +400,7 @@ export default function MapExplore({
     }
     if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
-    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
+    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.hasCatalogue);
     if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
     // Refine panel category checkboxes — applied outside partner_category lens
     // so they work on /partners where the lens is forced to "partners"
@@ -669,7 +669,7 @@ export default function MapExplore({
     }
     if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
-    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
+    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.hasCatalogue);
     if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
     if (lens !== "partner_category") {
       if (checkedSubcategories.size > 0) {
@@ -1186,11 +1186,11 @@ export default function MapExplore({
                   })}
 
                 {/* Resources / presence filters */}
-                {(partners.some((o) => o.catalogueUrl) ||
+                {(partners.some((o) => o.hasCatalogue) ||
                   partners.some((o) => (o.exhibitorBooths?.length ?? 0) > 0)) && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 mb-1">Resources</p>
-                    {partners.some((o) => o.catalogueUrl) && (
+                    {partners.some((o) => o.hasCatalogue) && (
                       <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer">
                         <input
                           type="checkbox"
@@ -1199,7 +1199,7 @@ export default function MapExplore({
                           className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
                         />
                         <span className="text-sm text-gray-700">Has catalogue</span>
-                        <span className="text-xs text-gray-400 tabular-nums ml-auto">{partners.filter((o) => o.catalogueUrl).length}</span>
+                        <span className="text-xs text-gray-400 tabular-nums ml-auto">{partners.filter((o) => o.hasCatalogue).length}</span>
                       </label>
                     )}
                     {/* Exhibiting — derived from booth ownership, same source as
