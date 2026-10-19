@@ -24,8 +24,6 @@ interface Row {
   startsAt: string;
   endsAt: string | null;
   isActive: boolean;
-  /** Desk staff: the conference this appointment is for. */
-  conferenceName: string | null;
 }
 
 // Cross-domain board, so each label carries its domain. The nouns come from
@@ -33,13 +31,7 @@ interface Row {
 const CAPABILITY_LABEL: Record<string, string> = Object.fromEntries(
   Object.entries(CAPABILITY_LABELS).map(([capability, noun]) => [
     capability,
-    `${
-      capability.startsWith("elections.")
-        ? "Elections"
-        : capability.startsWith("conference.")
-          ? "Conference"
-          : "Benchmarking"
-    } — ${noun.toLowerCase()}`,
+    `${capability.startsWith("elections.") ? "Elections" : "Benchmarking"} — ${noun.toLowerCase()}`,
   ]),
 );
 
@@ -68,11 +60,9 @@ function daysLeft(iso: string | null) {
 export default function AccessGrantsBoard({
   rows,
   year,
-  conferences,
 }: {
   rows: Row[];
   year: number;
-  conferences: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -163,7 +153,7 @@ export default function AccessGrantsBoard({
 
       {tab === "active" && (
         <>
-          <GrantForm conferences={conferences} onDone={() => router.refresh()} onError={setError} />
+          <GrantForm onDone={() => router.refresh()} onError={setError} />
           {active.length === 0 ? (
             <p className="text-sm text-gray-500 py-8 text-center bg-gray-50 rounded-lg">
               Nobody currently holds a grant.
@@ -189,11 +179,6 @@ export default function AccessGrantsBoard({
                         <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-700">
                           {CAPABILITY_LABEL[r.capability] ?? r.capability}
                         </span>
-                        {r.conferenceName ? (
-                          <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">
-                            {r.conferenceName}
-                          </span>
-                        ) : null}
                       </div>
                       <p className="text-sm text-gray-600 mt-1">{r.reason}</p>
                       <p className="text-xs text-gray-400 mt-1">
@@ -253,8 +238,7 @@ export default function AccessGrantsBoard({
                   <ul className="mt-1 space-y-1">
                     {person.items.map((i, idx) => (
                       <li key={idx} className="text-xs text-gray-600">
-                        {CAPABILITY_LABEL[i.capability] ?? i.capability}
-                        {i.conferenceName ? ` (${i.conferenceName})` : ""} —{" "}
+                        {CAPABILITY_LABEL[i.capability] ?? i.capability} —{" "}
                         {i.reason}{" "}
                         <span className="text-gray-400">
                           ({fmt(i.startsAt)} to {i.endsAt ? fmt(i.endsAt) : "ongoing"})
@@ -275,11 +259,9 @@ export default function AccessGrantsBoard({
 // ─────────────────────────────────────────────────────────────────
 
 function GrantForm({
-  conferences,
   onDone,
   onError,
 }: {
-  conferences: Array<{ id: string; name: string }>;
   onDone: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -295,11 +277,6 @@ function GrantForm({
   const [capability, setCapability] = useState("benchmarking.content_review");
   const [reason, setReason] = useState("");
   const [endsAt, setEndsAt] = useState("");
-  // Desk staff: which conference, and optionally which days.
-  const [conferenceId, setConferenceId] = useState(conferences[0]?.id ?? "");
-  const [firstDay, setFirstDay] = useState("");
-  const [lastDay, setLastDay] = useState("");
-  const isDesk = capability === "conference.desk_staff";
   const [saving, setSaving] = useState(false);
 
   // Search as you type. An Enter-only binding is invisible, and this form is
@@ -324,19 +301,12 @@ function GrantForm({
     const iso = endsAt
       ? new Date(`${endsAt}T23:59:59-06:00`).toISOString()
       : "";
-    const result = await appointToCapability(
-      isDesk
-        ? {
-            subjectId: subjectId.trim(),
-            capability,
-            reason,
-            endsAt: "",
-            conferenceId,
-            firstDay: firstDay || undefined,
-            lastDay: lastDay || undefined,
-          }
-        : { subjectId: subjectId.trim(), capability, reason, endsAt: iso }
-    );
+    const result = await appointToCapability({
+      subjectId: subjectId.trim(),
+      capability,
+      reason,
+      endsAt: iso,
+    });
     setSaving(false);
     if (result.success) {
       setSubjectId("");
@@ -345,8 +315,6 @@ function GrantForm({
       setResults([]);
       setReason("");
       setEndsAt("");
-      setFirstDay("");
-      setLastDay("");
       setOpen(false);
       onDone();
     } else {
@@ -426,7 +394,10 @@ function GrantForm({
             onChange={(e) => setCapability(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
           >
-            {Object.entries(CAPABILITY_LABEL).map(([k, v]) => (
+            {Object.entries(CAPABILITY_LABEL)
+              // Desk staff are added from their conference's Days & Setup page.
+              .filter(([k]) => k !== "conference.desk_staff")
+              .map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
               </option>
@@ -445,61 +416,17 @@ function GrantForm({
           className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
         />
       </div>
-      {isDesk ? (
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Conference</label>
-            <select
-              value={conferenceId}
-              onChange={(e) => setConferenceId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
-            >
-              {conferences.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">First day (optional)</label>
-              <input
-                type="date"
-                value={firstDay}
-                onChange={(e) => setFirstDay(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Last day (optional)</label>
-              <input
-                type="date"
-                value={lastDay}
-                onChange={(e) => setLastDay(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-              />
-            </div>
-          </div>
-          <p className="text-xs text-gray-500">
-            Leave the days blank for registration opening through the conference&apos;s last day.
-            Days are the conference&apos;s own dates, in its time zone. For two separate days,
-            appoint twice.
-          </p>
-        </div>
-      ) : (
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Until (end of that day, Mountain)
-          </label>
-          <input
-            type="date"
-            value={endsAt}
-            onChange={(e) => setEndsAt(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-          />
-        </div>
-      )}
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">
+          Until (end of that day, Mountain)
+        </label>
+        <input
+          type="date"
+          value={endsAt}
+          onChange={(e) => setEndsAt(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+        />
+      </div>
       {/*
         The delegation checkbox lived here and set state that nothing sent.
         can_delegate is a property of the ROLE (governance_role_capabilities),
@@ -510,7 +437,7 @@ function GrantForm({
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={saving || !subjectId || !reason || (isDesk ? !conferenceId : !endsAt)}
+          disabled={saving || !subjectId || !reason || !endsAt}
           className="text-sm font-medium px-4 py-2 rounded bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
         >
           {saving ? "Granting…" : "Grant"}

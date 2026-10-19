@@ -26,13 +26,47 @@ const DEFAULT_TIME_ZONE = "America/Toronto";
 
 export type DeskTerm = { termStart: string; termEnd: string | null };
 
+/** One desk appointment as stored. */
+export type DeskAppointment = {
+  /** NULL: permanent staff — every conference, no end date. */
+  conferenceId: string | null;
+  termStart: string;
+  /** NULL: blank days — follows the conference's own dates. */
+  termEnd: string | null;
+};
+
+/** The conference's dates, read fresh every time. */
+export type DeskWindow = {
+  /** Registration opening, as a date at the venue. NULL: no lower bound. */
+  opensOn: string | null;
+  /** The conference's last day. NULL: no upper bound. */
+  lastDay: string | null;
+};
+
 /**
- * Is `today` inside any of these terms? `termEnd` is EXCLUSIVE, as everywhere
- * in governance_role_assignments: a Wednesday-only shift is
- * { termStart: Wed, termEnd: Thu }.
+ * Is this appointment in force today?
+ *
+ *   PERMANENT (no conference)  always.
+ *   DAYS (an end date)         today is in [start, end). The end is EXCLUSIVE:
+ *                              a Wednesday-only shift is { Wed, Thu }.
+ *   BLANK (no end date)        from registration opening (or the day they were
+ *                              added, if later) to the conference's last day —
+ *                              read from the conference NOW, so moving its
+ *                              dates moves the access with them.
  */
-export function deskTermsCover(terms: DeskTerm[], today: string): boolean {
-  return terms.some((t) => t.termStart <= today && (t.termEnd === null || t.termEnd > today));
+export function deskAppointmentActive(
+  appointment: DeskAppointment,
+  window: DeskWindow,
+  today: string
+): boolean {
+  if (appointment.conferenceId === null) return true;
+  if (appointment.termEnd !== null) {
+    return appointment.termStart <= today && appointment.termEnd > today;
+  }
+  const from =
+    window.opensOn && window.opensOn > appointment.termStart ? window.opensOn : appointment.termStart;
+  if (today < from) return false;
+  return window.lastDay === null || today <= window.lastDay;
 }
 
 /** The day after an ISO date, for an exclusive end. */
@@ -42,26 +76,28 @@ export function nextIsoDate(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/**
- * The term for an appointment made with no days chosen: from registration
- * opening to the conference's last day.
- *
- * ⚠️ Worked out when the appointment is MADE and stored, so the Access page
- * shows a real end date and the appointment expires like every other one. If
- * the conference's dates move afterwards, extend the appointment there.
- * Starts no earlier than `today` — an appointment cannot begin in the past.
- */
-export function defaultDeskTerm(
-  conference: { registration_open_at: string | null; end_date: string | null; timezone: string | null },
-  today: string
-): DeskTerm | null {
-  if (!conference.end_date) return null;
+type ConferenceDates = {
+  id: string;
+  name: string;
+  timezone: string | null;
+  registration_open_at: string | null;
+  end_date: string | null;
+};
+
+function windowAndToday(conference: ConferenceDates, now: Date): { window: DeskWindow; today: string } {
   const tz = conference.timezone || DEFAULT_TIME_ZONE;
-  const opens = conference.registration_open_at
-    ? isoDateInZone(new Date(conference.registration_open_at), tz)
-    : today;
-  return { termStart: opens > today ? opens : today, termEnd: nextIsoDate(conference.end_date) };
+  return {
+    today: isoDateInZone(now, tz),
+    window: {
+      opensOn: conference.registration_open_at
+        ? isoDateInZone(new Date(conference.registration_open_at), tz)
+        : null,
+      lastDay: conference.end_date,
+    },
+  };
 }
+
+const CONFERENCE_DATES = "id, name, timezone, registration_open_at, end_date";
 
 /** Today at the conference, in its own time zone. */
 export async function conferenceToday(conferenceId: string, now: Date = new Date()): Promise<string> {
@@ -74,6 +110,24 @@ export async function conferenceToday(conferenceId: string, now: Date = new Date
   return isoDateInZone(now, data?.timezone || DEFAULT_TIME_ZONE);
 }
 
+/** This person's desk appointments: for this conference, or permanent. */
+async function appointmentsFor(profileId: string, conferenceId?: string): Promise<DeskAppointment[]> {
+  const db = createAdminClient();
+  let query = db
+    .from("capability_contributions")
+    .select("conference_id, term_start, term_end")
+    .eq("subject_id", profileId)
+    .eq("capability", DESK_STAFF_CAPABILITY);
+  if (conferenceId) query = query.or(`conference_id.eq.${conferenceId},conference_id.is.null`);
+  const { data, error } = await query;
+  if (error || !data) return [];
+  return data.map((r) => ({
+    conferenceId: (r.conference_id as string | null) ?? null,
+    termStart: r.term_start as string,
+    termEnd: (r.term_end as string | null) ?? null,
+  }));
+}
+
 /**
  * Does this person hold desk staff for this conference today?
  *
@@ -82,20 +136,13 @@ export async function conferenceToday(conferenceId: string, now: Date = new Date
 export async function holdsDeskStaff(profileId: string, conferenceId: string): Promise<boolean> {
   try {
     const db = createAdminClient();
-    const [{ data: rows, error }, today] = await Promise.all([
-      db
-        .from("capability_contributions")
-        .select("term_start, term_end")
-        .eq("subject_id", profileId)
-        .eq("capability", DESK_STAFF_CAPABILITY)
-        .eq("conference_id", conferenceId),
-      conferenceToday(conferenceId),
+    const [appointments, { data: conference }] = await Promise.all([
+      appointmentsFor(profileId, conferenceId),
+      db.from("conference_instances").select(CONFERENCE_DATES).eq("id", conferenceId).maybeSingle(),
     ]);
-    if (error || !rows) return false;
-    return deskTermsCover(
-      rows.map((r) => ({ termStart: r.term_start as string, termEnd: (r.term_end as string | null) ?? null })),
-      today
-    );
+    if (!conference || appointments.length === 0) return false;
+    const { window, today } = windowAndToday(conference as ConferenceDates, new Date());
+    return appointments.some((a) => deskAppointmentActive(a, window, today));
   } catch {
     return false;
   }
@@ -103,40 +150,67 @@ export async function holdsDeskStaff(profileId: string, conferenceId: string): P
 
 /**
  * The conferences whose desk this person can run today — for the link on
- * their own account page. Empty for nearly everyone.
+ * their own account page. Permanent staff see every conference that is on
+ * (registration open to its last day). Empty for nearly everyone.
  */
 export async function deskConferencesFor(
   profileId: string
 ): Promise<Array<{ conferenceId: string; name: string }>> {
   try {
-    const db = createAdminClient();
-    const { data: rows } = await db
-      .from("capability_contributions")
-      .select("conference_id, term_start, term_end")
-      .eq("subject_id", profileId)
-      .eq("capability", DESK_STAFF_CAPABILITY)
-      .not("conference_id", "is", null);
-    if (!rows || rows.length === 0) return [];
+    const appointments = await appointmentsFor(profileId);
+    if (appointments.length === 0) return [];
+    const permanent = appointments.some((a) => a.conferenceId === null);
 
-    const ids = [...new Set(rows.map((r) => r.conference_id as string))];
-    const { data: conferences } = await db
-      .from("conference_instances")
-      .select("id, name, timezone")
-      .in("id", ids);
+    const db = createAdminClient();
+    let query = db.from("conference_instances").select(CONFERENCE_DATES);
+    if (!permanent) {
+      query = query.in("id", [...new Set(appointments.map((a) => a.conferenceId as string))]);
+    }
+    const { data: conferences } = await query;
 
     const now = new Date();
-    return (conferences ?? [])
+    return ((conferences ?? []) as ConferenceDates[])
       .filter((c) => {
-        const today = isoDateInZone(now, (c.timezone as string | null) || DEFAULT_TIME_ZONE);
-        return deskTermsCover(
-          rows
-            .filter((r) => r.conference_id === c.id)
-            .map((r) => ({ termStart: r.term_start as string, termEnd: (r.term_end as string | null) ?? null })),
-          today
+        const { window, today } = windowAndToday(c, now);
+        return appointments.some((a) =>
+          a.conferenceId === null
+            ? // Permanent staff: only conferences that are actually on.
+              deskAppointmentActive({ conferenceId: c.id, termStart: today, termEnd: null }, window, today)
+            : a.conferenceId === c.id && deskAppointmentActive(a, window, today)
         );
       })
-      .map((c) => ({ conferenceId: c.id as string, name: c.name as string }));
+      .map((c) => ({ conferenceId: c.id, name: c.name }));
   } catch {
     return [];
   }
+}
+
+/**
+ * What adding someone as desk staff does to their link to the staff
+ * organisation's end date.
+ *
+ * ⛔ The trap: an ACTIVE link with no end date is a permanent staffer
+ * (Carolyn). Adding her to a desk must never give her one, ticked box or not —
+ * that would schedule her removal from staff. Only a link we just created or
+ * reactivated, or one that already ends, gets a date.
+ *
+ *   permanent ticked                  → clear any end date
+ *   new or reactivated link           → ends the day after their last day
+ *   active link that already ends     → pushed later, never earlier
+ *   active link with no end date      → left alone
+ */
+export function staffLinkEndDecision(params: {
+  linkBefore: { status: string; expires_at: string | null } | null;
+  permanent: boolean;
+  /** Their last day at this desk (or the conference's last day). Null: unknown. */
+  lastDayWorked: string | null;
+}): { action: "clear" } | { action: "set"; endsOn: string } | { action: "keep" } {
+  const { linkBefore, permanent, lastDayWorked } = params;
+  if (permanent) return { action: "clear" };
+  const isNew = !linkBefore || linkBefore.status !== "active";
+  if (!isNew && linkBefore.expires_at === null) return { action: "keep" };
+  if (!lastDayWorked) return { action: "keep" };
+  const endsOn = nextIsoDate(lastDayWorked);
+  if (!isNew && linkBefore.expires_at && linkBefore.expires_at >= endsOn) return { action: "keep" };
+  return { action: "set", endsOn };
 }

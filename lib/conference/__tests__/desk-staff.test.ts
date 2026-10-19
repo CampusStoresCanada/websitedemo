@@ -1,55 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { defaultDeskTerm, deskTermsCover, nextIsoDate } from "../desk-staff";
+import { deskAppointmentActive, nextIsoDate, staffLinkEndDecision, type DeskWindow } from "../desk-staff";
 import { isoDateInZone } from "../tz";
 
-/**
- * ⛔ Desk staff are appointed FOR a conference, optionally for days. Suzie on
- * Wednesday at Conference 2027 is { start: Wed, end: Thu } — the end is
- * exclusive, as everywhere in governance_role_assignments.
- */
-describe("deskTermsCover", () => {
-  const wednesdayOnly = [{ termStart: "2027-02-03", termEnd: "2027-02-04" }];
+/** CSC 2027: registration opened 10 Aug 2026, last day 4 Feb 2027. */
+const window2027: DeskWindow = { opensOn: "2026-08-10", lastDay: "2027-02-04" };
+const conf = "conf-2027";
 
-  it("covers the day the shift is for", () => {
-    expect(deskTermsCover(wednesdayOnly, "2027-02-03")).toBe(true);
+describe("an appointment for specific days", () => {
+  // ⛔ The end is EXCLUSIVE: Wednesday only is { Wed, Thu }.
+  const wednesday = { conferenceId: conf, termStart: "2027-02-03", termEnd: "2027-02-04" };
+
+  it("is on for that day", () => {
+    expect(deskAppointmentActive(wednesday, window2027, "2027-02-03")).toBe(true);
   });
 
-  it("does not cover the day before or the day after", () => {
-    expect(deskTermsCover(wednesdayOnly, "2027-02-02")).toBe(false);
-    expect(deskTermsCover(wednesdayOnly, "2027-02-04")).toBe(false);
-  });
-
-  it("covers any of several shifts", () => {
-    const twoShifts = [...wednesdayOnly, { termStart: "2027-02-01", termEnd: "2027-02-02" }];
-    expect(deskTermsCover(twoShifts, "2027-02-01")).toBe(true);
-    expect(deskTermsCover(twoShifts, "2027-02-02")).toBe(false);
-  });
-
-  it("covers nothing with no appointments", () => {
-    expect(deskTermsCover([], "2027-02-03")).toBe(false);
+  it("is off the day before and the day after", () => {
+    expect(deskAppointmentActive(wednesday, window2027, "2027-02-02")).toBe(false);
+    expect(deskAppointmentActive(wednesday, window2027, "2027-02-04")).toBe(false);
   });
 });
 
-describe("defaultDeskTerm (no days chosen)", () => {
-  const conference = {
-    registration_open_at: "2026-08-10T14:30:00+00:00",
-    end_date: "2027-02-04",
-    timezone: "America/Toronto",
-  };
+describe("an appointment with the days left blank", () => {
+  const blank = { conferenceId: conf, termStart: "2026-10-19", termEnd: null };
 
-  it("runs from registration opening to the conference's last day", () => {
-    expect(defaultDeskTerm(conference, "2026-07-01")).toEqual({
-      termStart: "2026-08-10",
-      termEnd: "2027-02-05",
-    });
+  it("is on from the day it was made while registration is open", () => {
+    expect(deskAppointmentActive(blank, window2027, "2026-10-19")).toBe(true);
   });
 
-  it("starts today when registration is already open", () => {
-    expect(defaultDeskTerm(conference, "2026-10-19")?.termStart).toBe("2026-10-19");
+  it("is on through the conference's last day, and off after", () => {
+    expect(deskAppointmentActive(blank, window2027, "2027-02-04")).toBe(true);
+    expect(deskAppointmentActive(blank, window2027, "2027-02-05")).toBe(false);
   });
 
-  it("cannot be made for a conference with no end date", () => {
-    expect(defaultDeskTerm({ ...conference, end_date: null }, "2026-10-19")).toBeNull();
+  it("is off before registration opens, even if made earlier", () => {
+    const early = { conferenceId: conf, termStart: "2026-07-01", termEnd: null };
+    expect(deskAppointmentActive(early, window2027, "2026-08-09")).toBe(false);
+    expect(deskAppointmentActive(early, window2027, "2026-08-10")).toBe(true);
+  });
+
+  // ⛔ The whole point of blank: it reads the conference's dates NOW.
+  it("follows the conference when its dates move", () => {
+    const extended: DeskWindow = { ...window2027, lastDay: "2027-02-06" };
+    expect(deskAppointmentActive(blank, window2027, "2027-02-06")).toBe(false);
+    expect(deskAppointmentActive(blank, extended, "2027-02-06")).toBe(true);
+  });
+});
+
+describe("permanent desk access", () => {
+  const permanent = { conferenceId: null, termStart: "2026-10-19", termEnd: null };
+
+  it("is on regardless of any conference's dates", () => {
+    expect(deskAppointmentActive(permanent, window2027, "2030-06-01")).toBe(true);
   });
 });
 
@@ -64,5 +65,57 @@ describe("dates at the venue", () => {
 
   it("steps an ISO date forward across a month end", () => {
     expect(nextIsoDate("2027-02-28")).toBe("2027-03-01");
+  });
+});
+
+describe("the staff link's end date when someone is added", () => {
+  // ⛔ Carolyn: on staff, no end date. Adding her to a desk without ticking
+  // permanent must NOT schedule her removal.
+  it("leaves a permanent staffer's link alone even when permanent is not ticked", () => {
+    expect(
+      staffLinkEndDecision({
+        linkBefore: { status: "active", expires_at: null },
+        permanent: false,
+        lastDayWorked: "2027-02-04",
+      })
+    ).toEqual({ action: "keep" });
+  });
+
+  it("gives a new temp's link an end the day after their last day", () => {
+    expect(staffLinkEndDecision({ linkBefore: null, permanent: false, lastDayWorked: "2027-02-04" })).toEqual({
+      action: "set",
+      endsOn: "2027-02-05",
+    });
+  });
+
+  it("treats a switched-off link being brought back as new", () => {
+    expect(
+      staffLinkEndDecision({
+        linkBefore: { status: "inactive", expires_at: null },
+        permanent: false,
+        lastDayWorked: "2027-02-04",
+      })
+    ).toEqual({ action: "set", endsOn: "2027-02-05" });
+  });
+
+  it("pushes a temp's end later for a later conference, never earlier", () => {
+    const linkBefore = { status: "active", expires_at: "2027-02-05" };
+    expect(staffLinkEndDecision({ linkBefore, permanent: false, lastDayWorked: "2027-06-10" })).toEqual({
+      action: "set",
+      endsOn: "2027-06-11",
+    });
+    expect(staffLinkEndDecision({ linkBefore, permanent: false, lastDayWorked: "2027-01-10" })).toEqual({
+      action: "keep",
+    });
+  });
+
+  it("clears any end date when permanent access is ticked", () => {
+    expect(
+      staffLinkEndDecision({
+        linkBefore: { status: "active", expires_at: "2027-02-05" },
+        permanent: true,
+        lastDayWorked: "2027-02-04",
+      })
+    ).toEqual({ action: "clear" });
   });
 });
