@@ -1,6 +1,6 @@
 import { getConference } from "@/lib/actions/conference";
 import { listConferencePeople } from "@/lib/actions/conference-people";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import CheckInDeskClient from "@/components/admin/conference/CheckInDeskClient";
 import { loadCheckInFacts } from "@/lib/conference/badges/checkin";
 
@@ -18,7 +18,8 @@ export default async function ConferenceCheckInDeskPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return (
       <main className="h-screen w-screen bg-white p-6 text-sm text-red-700">

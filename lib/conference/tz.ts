@@ -59,3 +59,19 @@ export function zonedWallTimeToUtcIso(
   const offset = timeZoneOffsetMs(utcGuess, timeZone);
   return new Date(utcGuess - offset).toISOString();
 }
+
+/**
+ * The calendar date (`YYYY-MM-DD`) it is right now in `timeZone`.
+ *
+ * ⛔ Not the database's CURRENT_DATE, which is UTC: in Ontario that rolls over
+ * to tomorrow at 7–8pm, so anything keyed to "today" at the venue — a
+ * Wednesday-only desk shift — would end in the middle of the evening.
+ */
+export function isoDateInZone(now: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}

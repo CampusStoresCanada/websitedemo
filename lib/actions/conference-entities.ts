@@ -422,7 +422,7 @@ export async function listConferenceOffers(
   conferenceId: string,
   organizationId: string
 ): Promise<Result<ConferenceOffer[]>> {
-  const auth = await requireOrgCommerceAccess(organizationId);
+  const auth = await requireOrgCommerceAccess(organizationId, conferenceId);
   if (!auth.ok) return { success: false, error: "Not authorized for this organization." };
 
   const db = createAdminClient();

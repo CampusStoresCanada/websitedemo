@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { CAPABILITY } from "@/lib/constants/capabilities";
-import { getIntegrationConfig } from "@/lib/policy/engine";
+import { holdsDeskStaff } from "@/lib/conference/desk-staff";
 import type { GlobalRole, UserOrganization, UserProfile } from "./types";
 import {
   readPresentationMode,
@@ -340,106 +340,101 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   return auth;
 }
 
-/** Is this person an org admin of an organisation on the conference-ops list? */
-async function inConferenceOpsAllowlist(ctx: AuthContext): Promise<boolean> {
-  const integration = await getIntegrationConfig();
-  const allowlist = integration.conference_ops_masthead_org_ids ?? [];
-  return ctx.orgAdminOrgIds.some((orgId) => allowlist.includes(orgId));
+/**
+ * May this person run THIS conference's desk today? Answers QUIETLY.
+ *
+ * Global admins, or anyone appointed `conference.desk_staff` for this
+ * conference on the Access page, for today (in the conference's time zone).
+ * See lib/conference/desk-staff.ts.
+ *
+ * ⛔ For deciding what a page SHOWS, or as a fallback inside another check.
+ * requireConferenceDeskAccess writes an "auth_guard_denied" row on every no,
+ * which feeds the Ops Health denial gauge and its >25/hour alarm; asking it to
+ * decide whether to show a company picker would log every browsing member.
+ */
+export async function isConferenceDeskStaff(
+  ctx: AuthContext,
+  conferenceId: string,
+): Promise<boolean> {
+  if (isGlobalAdmin(ctx.globalRole)) return true;
+  return holdsDeskStaff(ctx.userId, conferenceId);
 }
 
 /**
- * Is this signed-in person conference staff? Answers QUIETLY.
- *
- * ⛔ For deciding what a page SHOWS (a company picker, an invoice option) or
- * as a fallback inside another check. requireConferenceOpsAccess writes an
- * "auth_guard_denied" row on every no, which is right for a staff-only door and
- * wrong here: every member browsing the offers page would be logged as refused,
- * burying the refusals that mean somebody is actually locked out.
+ * The door to a conference's desk, war room and roster. Logs a refusal.
  */
-export async function isConferenceOps(ctx: AuthContext): Promise<boolean> {
-  if (isGlobalAdmin(ctx.globalRole)) return true;
-  try {
-    return await inConferenceOpsAllowlist(ctx);
-  } catch (error) {
-    unstable_rethrow(error);
-    return false;
-  }
+export async function requireConferenceDeskAccess(conferenceId: string): Promise<GuardResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return auth;
+  if (await isConferenceDeskStaff(auth.ctx, conferenceId)) return auth;
+
+  await logAuditEventSafe({
+    action: "auth_guard_denied",
+    entityType: "auth_guard",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      guard: "requireConferenceDeskAccess",
+      reason: "no_desk_staff_appointment_for_today",
+      status: 403,
+      conferenceId,
+      role: auth.ctx.globalRole,
+    },
+  });
+  return { ok: false, status: 403, error: "Conference desk access required" };
 }
 
+/**
+ * Conference DESIGN and back-office work: badges, catalogue, schedule ops,
+ * legal, the scheduler. Global admins only.
+ *
+ * ⛔ Desk staff never pass this. They operate a conference, they do not design
+ * it — their door is requireConferenceDeskAccess. This used to also admit org
+ * admins of an allowlisted "masthead" organisation; that list was never filled
+ * in, and per-conference appointments replaced it.
+ */
 export async function requireConferenceOpsAccess(): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;
+  if (isGlobalAdmin(auth.ctx.globalRole)) return auth;
 
-  if (isGlobalAdmin(auth.ctx.globalRole)) {
-    return auth;
-  }
-
-  try {
-    if (!(await inConferenceOpsAllowlist(auth.ctx))) {
-      await logAuditEventSafe({
-        action: "auth_guard_denied",
-        entityType: "auth_guard",
-        actorId: auth.ctx.userId,
-        actorType: "user",
-        details: {
-          guard: "requireConferenceOpsAccess",
-          reason: "missing_masthead_ops_allowlist_membership",
-          status: 403,
-          role: auth.ctx.globalRole,
-          orgAdminOrgIds: auth.ctx.orgAdminOrgIds,
-        },
-      });
-      return {
-        ok: false,
-        status: 403,
-        error: "Conference ops access required",
-      };
-    }
-    return auth;
-  } catch (error) {
-    unstable_rethrow(error);
-    console.error("[auth/guards] requireConferenceOpsAccess failed", error);
-    await logAuditEventSafe({
-      action: "auth_guard_error",
-      entityType: "auth_guard",
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        guard: "requireConferenceOpsAccess",
-        status: 403,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-    return {
-      ok: false,
+  await logAuditEventSafe({
+    action: "auth_guard_denied",
+    entityType: "auth_guard",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      guard: "requireConferenceOpsAccess",
+      reason: "not_global_admin",
       status: 403,
-      error: "Conference ops access required",
-    };
-  }
+      role: auth.ctx.globalRole,
+    },
+  });
+  return { ok: false, status: 403, error: "Conference ops access required" };
 }
 
 /**
  * May this person buy for, or manage the conference cart of, this organisation?
  *
  * ⛔ ONE ANSWER for every storefront action — offers, cart, attendee naming,
- * checkout. It used to be copied inline in five places, and the desk could not
- * sell because conference ops passed none of them.
+ * checkout. Global admins, members of that organisation, and THIS
+ * conference's desk staff, who sell to walk-ups through the same offers page
+ * and cart everybody else uses.
  *
- * Conference ops staff transact for ANY attending organisation: selling a fifth
- * registration to a walk-up at the check-in desk is their job, and the desk does
- * it through the same offers page and cart everybody else uses.
- *
- * ⚠️ This is not the invoicing check. Deferring payment stays staff-only inside
- * createConferenceCheckout, because an org admin buying for their own org passes
- * this and must still fail that.
+ * ⚠️ This is not the invoicing check. Deferring payment needs desk access
+ * inside createConferenceCheckout, because an org admin buying for their own
+ * org passes this and must still fail that.
  */
-export async function requireOrgCommerceAccess(organizationId: string): Promise<GuardResult> {
+export async function requireOrgCommerceAccess(
+  organizationId: string,
+  conferenceId: string,
+): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;
   if (isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(organizationId)) {
     return auth;
   }
-  if (await isConferenceOps(auth.ctx)) return auth;
+  if (await isConferenceDeskStaff(auth.ctx, conferenceId)) return auth;
   return {
     ok: false,
     status: 403,

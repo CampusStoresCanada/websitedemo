@@ -3,6 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import {
+  DESK_STAFF_CAPABILITY,
+  defaultDeskTerm,
+  nextIsoDate,
+  type DeskTerm,
+} from "@/lib/conference/desk-staff";
+import { isoDateInZone } from "@/lib/conference/tz";
 
 /**
  * Appointing someone to a capability, for a term.
@@ -83,9 +90,21 @@ export async function appointToCapability(input: {
    */
   dueDate?: string;
   bodyKey?: string;
+  /** Desk staff only: the conference they work. */
+  conferenceId?: string;
+  /**
+   * Desk staff only: the first and last day they work, as calendar dates,
+   * both inclusive. Omit both for "registration open to the last day".
+   */
+  firstDay?: string;
+  lastDay?: string;
 }): Promise<AppointmentResult> {
   const admin = await requireAdmin();
   if (!admin.ok) return { success: false, error: admin.error };
+
+  if (input.capability === DESK_STAFF_CAPABILITY) {
+    return appointDeskStaff({ ...input, conferenceId: input.conferenceId ?? "" });
+  }
 
   if (!input.reason?.trim()) {
     // The reason is the whole audit trail. An appointment nobody can explain
@@ -172,6 +191,90 @@ export async function appointToCapability(input: {
   return invite.sent
     ? { success: true }
     : { success: true, inviteWarning: invite.reason ?? "Could not send the invitation email." };
+}
+
+/**
+ * Desk staff are appointed FOR a conference, optionally for days.
+ *
+ * ⛔ Same table, same Access page, same revoke as every other appointment —
+ * the only difference is the conference column and how the term is worked out.
+ * No invitation email: the account invite they set their password from is the
+ * welcome, and there is no committee task to describe.
+ */
+async function appointDeskStaff(input: {
+  subjectId: string;
+  reason: string;
+  conferenceId: string;
+  firstDay?: string;
+  lastDay?: string;
+}): Promise<AppointmentResult> {
+  if (!input.reason?.trim()) {
+    return { success: false, error: "Say why this person is being appointed." };
+  }
+  if (!input.conferenceId) return { success: false, error: "Pick the conference they will work." };
+
+  const db = createAdminClient();
+  const { data: conference } = await db
+    .from("conference_instances")
+    .select("id, registration_open_at, end_date, timezone")
+    .eq("id", input.conferenceId)
+    .maybeSingle();
+  if (!conference) return { success: false, error: "That conference does not exist." };
+
+  const today = isoDateInZone(new Date(), conference.timezone || "America/Toronto");
+  let term: DeskTerm | null;
+  if (input.firstDay || input.lastDay) {
+    const first = (input.firstDay || input.lastDay) as string;
+    const last = (input.lastDay || input.firstDay) as string;
+    if (last < first) return { success: false, error: "The last day is before the first day." };
+    term = { termStart: first, termEnd: nextIsoDate(last) };
+  } else {
+    term = defaultDeskTerm(conference, today);
+    if (!term) {
+      return { success: false, error: "This conference has no end date yet, so pick the days." };
+    }
+  }
+
+  const roleKey = await appointableRoleFor(DESK_STAFF_CAPABILITY);
+  const { data: body } = await db
+    .from("governance_bodies")
+    .select("id")
+    .eq("key", "conference_operations")
+    .maybeSingle();
+  if (!roleKey || !body?.id) {
+    return { success: false, error: "Desk staff appointments are not set up in this database." };
+  }
+
+  // Already appointed to this conference for any of these days? A second row
+  // would say the same thing twice and expire on a different day.
+  const { data: overlapping } = await db
+    .from("capability_contributions")
+    .select("assignment_id, term_end")
+    .eq("subject_id", input.subjectId)
+    .eq("capability", DESK_STAFF_CAPABILITY)
+    .eq("conference_id", input.conferenceId)
+    .lt("term_start", term.termEnd ?? "9999-12-31");
+  if ((overlapping ?? []).some((r) => r.term_end === null || (r.term_end as string) > term.termStart)) {
+    return { success: false, error: "They are already desk staff for this conference on some of those days." };
+  }
+
+  const { error } = await db.from("governance_role_assignments").insert({
+    body_id: body.id,
+    person_profile_id: input.subjectId,
+    role_key: roleKey,
+    conference_id: input.conferenceId,
+    term_start: term.termStart,
+    term_end: term.termEnd,
+    appointing_resolution: input.reason.trim(),
+    counts_toward_cap: false,
+  });
+  if (error) {
+    console.error("[appointDeskStaff]", error);
+    return { success: false, error: "Could not save that appointment." };
+  }
+
+  revalidatePath("/admin/access");
+  return { success: true };
 }
 
 /**

@@ -284,16 +284,23 @@ export function visibleNavGroups(
 }
 
 /**
- * The conference pages conference ops staff reach without being global admins.
+ * The conference pages desk staff reach without being global admins: they
+ * OPERATE a conference. Badges, catalogue, schedule ops and every other
+ * conference page are design work and stay admin-only.
  *
  * ⛔ The ONE list. The /admin gate admits on it and the conference sub-nav shows
- * only these tabs to ops staff. Each page still runs requireConferenceOpsAccess
- * itself — this list opens the door, it is not the lock.
+ * only these tabs to desk staff. Each page still runs
+ * requireConferenceDeskAccess itself — this list opens the door, it is not the
+ * lock.
  */
-export const CONFERENCE_OPS_SEGMENTS = ["check-in", "war-room", "badges", "schedule-ops"] as const;
+export const CONFERENCE_DESK_SEGMENTS = ["check-in", "war-room"] as const;
 
-/** True for /admin/conference/<id>/<one of the ops pages>[/...]. */
-export function isConferenceOpsPath(pathname: string): boolean {
-  const match = /^\/admin\/conference\/[^/]+\/([^/?#]+)/.exec(pathname);
-  return match !== null && (CONFERENCE_OPS_SEGMENTS as readonly string[]).includes(match[1]);
+/**
+ * The conference id when the path is one of its desk pages
+ * (/admin/conference/<id>/<desk page>[/...]), otherwise null.
+ */
+export function conferenceDeskPathId(pathname: string): string | null {
+  const match = /^\/admin\/conference\/([^/]+)\/([^/?#]+)/.exec(pathname);
+  if (!match) return null;
+  return (CONFERENCE_DESK_SEGMENTS as readonly string[]).includes(match[2]) ? match[1] : null;
 }

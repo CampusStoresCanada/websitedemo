@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
-import { isConferenceOpsPath } from "@/lib/admin/nav";
+import { requireAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
+import { conferenceDeskPathId } from "@/lib/admin/nav";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
@@ -19,15 +19,16 @@ export default async function AdminLayout({
 }) {
   const auth = await requireAdmin();
   if (!auth.ok && auth.status === 403) {
-    // ⛔ Conference ops staff who are not global admins reach the desk, war
-    // room and badge pages, and nothing else under /admin. No admin sidebar:
-    // its links would all bounce them. The pathname is stamped by proxy.ts and
-    // overwritten on every /admin request, and each page checks ops access
+    // ⛔ Desk staff who are not global admins reach THEIR conference's desk
+    // and war room, and nothing else under /admin. No admin sidebar: its links
+    // would all bounce them. The pathname is stamped by proxy.ts and
+    // overwritten on every /admin request, and each page checks desk access
     // again itself.
     const requestHeaders = await headers();
     const pathname = requestHeaders.get(REQUEST_PATHNAME_HEADER) ?? "";
-    if (isConferenceOpsPath(pathname)) {
-      const ops = await requireConferenceOpsAccess();
+    const deskConferenceId = conferenceDeskPathId(pathname);
+    if (deskConferenceId) {
+      const ops = await requireConferenceDeskAccess(deskConferenceId);
       if (ops.ok) {
         if (ops.ctx.presentationMode) {
           return <PresentationBlock level={ops.ctx.presentationMode} area="The admin area" />;

@@ -10,7 +10,8 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireConferenceOpsAccess,
-  isConferenceOps,
+  isConferenceDeskStaff,
+  requireConferenceDeskAccess,
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
@@ -336,9 +337,9 @@ export async function listConferencePeople(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = conferencePeopleClient();
-  // Conference ops see the whole roster: the desk and war room are theirs.
+  // This conference's desk staff see its whole roster: the desk and war room are theirs.
   const isAdmin =
-    await isConferenceOps(auth.ctx);
+    await isConferenceDeskStaff(auth.ctx, conferenceId);
   const orgScope = auth.ctx.orgAdminOrgIds;
 
   const { data, error } = await db
@@ -976,8 +977,8 @@ export async function markConferencePersonCheckedInManual(
   personId: string,
   options?: { testMode?: boolean }
 ): Promise<{ success: boolean; error?: string; data?: { checkedInAt: string } }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
+  const signedIn = await requireAuthenticated();
+  if (!signedIn.ok) return { success: false, error: signedIn.error };
 
   const db = createAdminClient();
   const { data: person, error: personError } = await db
@@ -988,6 +989,9 @@ export async function markConferencePersonCheckedInManual(
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
   }
+  // ⛔ Desk staff for THIS person's conference, today.
+  const auth = await requireConferenceDeskAccess(person.conference_id);
+  if (!auth.ok) return { success: false, error: auth.error };
 
   const checkedInAt = person.checked_in_at ?? new Date().toISOString();
   if (!person.checked_in_at) {
@@ -1048,8 +1052,8 @@ export async function reprintConferenceBadge(
     qrPayload: string;
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
+  const signedIn = await requireAuthenticated();
+  if (!signedIn.ok) return { success: false, error: signedIn.error };
 
   const db = createAdminClient();
   const { data: person, error: personError } = await db
@@ -1060,6 +1064,9 @@ export async function reprintConferenceBadge(
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
   }
+  // ⛔ Desk staff for THIS person's conference, today.
+  const auth = await requireConferenceDeskAccess(person.conference_id);
+  if (!auth.ok) return { success: false, error: auth.error };
 
   // ⛔ Transport stays "pdf" even when the plan says ql_label, and that is
   // deliberate until the bridge exists.
@@ -1326,7 +1333,7 @@ export type CheckInScanResultState =
 export async function countTestCheckIns(
   conferenceId: string
 ): Promise<{ success: boolean; error?: string; data?: { people: number; events: number } }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -1366,7 +1373,7 @@ export async function countTestCheckIns(
 export async function resetTestCheckIns(
   conferenceId: string
 ): Promise<{ success: boolean; error?: string; data?: { peopleCleared: number; eventsDeleted: number } }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -1434,7 +1441,7 @@ export async function scanConferenceCheckInToken(params: {
     checkedInAt: string | null;
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const conferenceId = params.conferenceId;

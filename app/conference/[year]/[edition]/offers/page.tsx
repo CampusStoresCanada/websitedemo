@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin, isConferenceOps } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, isConferenceDeskStaff } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import {
   listConferenceOffers,
@@ -49,10 +49,10 @@ export default async function ConferenceOffersPage({
   const conference = conferenceResult.data;
   const db = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
-  // Conference ops shop for any org too — that is how the check-in desk sells
+  // This conference's desk staff shop for any org too — that is how the check-in desk sells
   // to a walk-up. The actions enforce it (requireOrgCommerceAccess); this is the
   // picker that reaches it.
-  const canShopForAnyOrg = await isConferenceOps(auth.ctx);
+  const canShopForAnyOrg = await isConferenceDeskStaff(auth.ctx, conference.id);
 
   // Global admins can shop on behalf of ANY org, not just ones they belong to —
   // the commerce actions already permit this (isGlobalAdmin bypass), this is

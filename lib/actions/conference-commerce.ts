@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import {
   isGlobalAdmin,
   requireAuthenticated,
-  requireConferenceOpsAccess,
+  requireConferenceDeskAccess,
   requireOrgCommerceAccess,
 } from "@/lib/auth/guards";
 import { stripe } from "@/lib/stripe/client";
@@ -100,11 +100,12 @@ interface CheckoutInput {
  */
 async function assertUserCanManageOrg(params: {
   organizationId: string;
+  conferenceId: string;
 }): Promise<
   | { ok: true; userId: string; userEmail: string | null }
   | { ok: false; error: string }
 > {
-  const auth = await requireOrgCommerceAccess(params.organizationId);
+  const auth = await requireOrgCommerceAccess(params.organizationId, params.conferenceId);
   if (!auth.ok) return { ok: false, error: auth.error };
   return { ok: true, userId: auth.ctx.userId, userEmail: auth.ctx.userEmail };
 }
@@ -474,7 +475,7 @@ export async function getConferenceMembershipGateInfo(params: {
     }>
   | CommerceFailure
 > {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
@@ -542,7 +543,7 @@ export async function getConferenceCart(
   taxCents: number;
   totalCents: number;
 }> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId, conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
@@ -632,7 +633,7 @@ export async function addOfferToCart(params: {
     }>
   | CommerceFailure
 > {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const quantity = Math.max(1, params.quantity ?? 1);
@@ -1078,7 +1079,7 @@ export async function updateCartItemQuantity(params: {
     if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
     if (item.user_id !== auth.ctx.userId) {
-      const authz = await assertUserCanManageOrg({ organizationId: item.organization_id });
+      const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
       if (!authz.ok) return { success: false, error: "Not authorized" };
     }
 
@@ -1155,7 +1156,7 @@ export async function setCartItemAttendee(params: {
   if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
   if (item.user_id !== auth.ctx.userId) {
-    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id });
+    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
     if (!authz.ok) return { success: false, error: "Not authorized" };
   }
 
@@ -1248,14 +1249,14 @@ export async function removeCartItem(cartItemId: string): Promise<CommerceSucces
   const adminClient = createAdminClient();
   const { data: item, error: itemError } = await adminClient
     .from("cart_items")
-    .select("id, user_id, organization_id, metadata")
+    .select("id, user_id, organization_id, conference_id, metadata")
     .eq("id", cartItemId)
     .single();
 
   if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
   if (item.user_id !== auth.ctx.userId) {
-    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id });
+    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
     if (!authz.ok) return { success: false, error: "Not authorized" };
   }
 
@@ -1297,7 +1298,7 @@ export async function clearCart(params: {
   conferenceId: string;
   organizationId: string;
 }): Promise<CommerceSuccess<null> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const adminClient = createAdminClient();
@@ -1327,7 +1328,7 @@ export async function clearCart(params: {
 export async function createConferenceCheckout(
   input: CheckoutInput
 ): Promise<CommerceSuccess<{ checkoutUrl: string; orderId: string; checkoutSessionId: string }> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: input.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: input.organizationId, conferenceId: input.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   /**
@@ -1354,8 +1355,10 @@ export async function createConferenceCheckout(
    * branch.
    */
   if (input.paymentMethod === "invoice") {
-    const opsForInvoice = await requireConferenceOpsAccess();
-    if (!opsForInvoice.ok) {
+    // Desk staff for THIS conference may invoice an existing company; nobody
+    // buying for themselves may.
+    const deskForInvoice = await requireConferenceDeskAccess(input.conferenceId);
+    if (!deskForInvoice.ok) {
       return { success: false, error: "Invoicing is only available to conference staff." };
     }
   }
@@ -1792,7 +1795,7 @@ export async function listConferenceOrdersForOrganization(params: {
   conferenceId: string;
   organizationId: string;
 }): Promise<CommerceSuccess<OrderRow[]> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const adminClient = createAdminClient();

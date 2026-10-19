@@ -7781,6 +7781,7 @@ export type Database = {
         Row: {
           appointing_resolution: string | null
           body_id: string
+          conference_id: string | null
           counts_toward_cap: boolean
           created_at: string
           elected_at_election_id: string | null
@@ -7798,6 +7799,7 @@ export type Database = {
         Insert: {
           appointing_resolution?: string | null
           body_id: string
+          conference_id?: string | null
           counts_toward_cap?: boolean
           created_at?: string
           elected_at_election_id?: string | null
@@ -7815,6 +7817,7 @@ export type Database = {
         Update: {
           appointing_resolution?: string | null
           body_id?: string
+          conference_id?: string | null
           counts_toward_cap?: boolean
           created_at?: string
           elected_at_election_id?: string | null
@@ -14092,6 +14095,7 @@ export type Database = {
       user_organizations: {
         Row: {
           created_at: string | null
+          expires_at: string | null
           hidden: boolean
           id: string
           organization_id: string
@@ -14102,6 +14106,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          expires_at?: string | null
           hidden?: boolean
           id?: string
           organization_id: string
@@ -14112,6 +14117,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          expires_at?: string | null
           hidden?: boolean
           id?: string
           organization_id?: string
@@ -14502,6 +14508,7 @@ export type Database = {
           assignment_id: string | null
           body_name: string | null
           capability: string | null
+          conference_id: string | null
           display_name: string | null
           is_active: boolean | null
           reason: string | null

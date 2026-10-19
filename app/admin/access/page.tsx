@@ -34,6 +34,15 @@ export default async function AccessGrantsPage({
     .select("*")
     .order("term_start", { ascending: false })) as { data: any[] | null };
 
+  // Desk staff are appointed FOR a conference; the board names it, and the
+  // form offers the conferences to pick from.
+  const { data: conferenceRows } = await createAdminClient()
+    .from("conference_instances")
+    .select("id, name, end_date")
+    .order("start_date", { ascending: false });
+  const conferences = (conferenceRows ?? []).map((c) => ({ id: c.id as string, name: c.name as string }));
+  const conferenceName = new Map(conferences.map((c) => [c.id, c.name]));
+
   const rows = (appointments ?? []).map((a) => ({
     id: a.assignment_id as string,
     subjectId: a.subject_id as string,
@@ -48,7 +57,8 @@ export default async function AccessGrantsPage({
     startsAt: a.term_start as string,
     endsAt: (a.term_end as string) ?? null,
     isActive: a.is_active as boolean,
+    conferenceName: a.conference_id ? conferenceName.get(a.conference_id as string) ?? null : null,
   }));
 
-  return <AccessGrantsBoard rows={rows} year={year} />;
+  return <AccessGrantsBoard rows={rows} year={year} conferences={conferences} />;
 }

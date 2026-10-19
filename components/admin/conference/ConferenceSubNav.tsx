@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CONFERENCE_OPS_SEGMENTS } from "@/lib/admin/nav";
+import { CONFERENCE_DESK_SEGMENTS } from "@/lib/admin/nav";
 
 interface ConferenceSubNavProps {
   conferenceId: string;
   conferenceName: string;
   year: number;
   editionCode: string;
-  /** Conference ops staff who are not global admins: show only their pages. */
+  /** Desk staff who are not global admins: show only their pages. */
   opsOnly?: boolean;
 }
 
@@ -63,7 +63,7 @@ export default function ConferenceSubNav({
   editionCode,
   opsOnly = false,
 }: ConferenceSubNavProps) {
-  const opsSegments = new Set<string>(CONFERENCE_OPS_SEGMENTS);
+  const opsSegments = new Set<string>(CONFERENCE_DESK_SEGMENTS);
   const stages = opsOnly
     ? STAGES.map((stage) => ({ ...stage, tabs: stage.tabs.filter((t) => opsSegments.has(t.segment)) })).filter(
         (stage) => stage.tabs.length > 0

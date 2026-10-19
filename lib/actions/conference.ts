@@ -1,6 +1,6 @@
 "use server";
 
-import { isGlobalAdmin, isSuperAdmin, requireAdmin, requireAuthenticated, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { isGlobalAdmin, isSuperAdmin, requireAdmin, requireAuthenticated, requireConferenceDeskAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe, type AuditActorType } from "@/lib/ops/audit";
 import {
@@ -53,9 +53,9 @@ export async function getConference(id: string): Promise<{
   error?: string;
   data?: ConferenceWithRelations;
 }> {
-  // Conference ops read it too: the desk and war room load it. Admin-only
-  // pages are still shut by the /admin layout.
-  const auth = await requireConferenceOpsAccess();
+  // This conference's desk staff read it too: the desk and war room load it.
+  // Admin-only pages are still shut by the /admin layout.
+  const auth = await requireConferenceDeskAccess(id);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const adminClient = createAdminClient();

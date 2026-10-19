@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   applyCanonicalConferencePersonIdentityEdit,
@@ -14,7 +14,8 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string; personId: string }> }
 ) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await context.params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin, isConferenceOps } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, isConferenceDeskStaff } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
@@ -45,9 +45,9 @@ export default async function ConferenceCartPage({
   const conference = conferenceResult.data;
   const adminClient = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
-  // Conference ops can open any org's cart: the desk names and invoices a
+  // This conference's desk staff can open any org's cart: the desk names and invoices a
   // walk-up here. Same rule as the actions (requireOrgCommerceAccess).
-  const isOps = await isConferenceOps(auth.ctx);
+  const isOps = await isConferenceDeskStaff(auth.ctx, conference.id);
   const canShopForAnyOrg = isOps;
 
   const { data: userOrgs } = await adminClient

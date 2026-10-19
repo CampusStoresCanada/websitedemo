@@ -6,7 +6,7 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireAuthenticated,
-  isConferenceOps,
+  isConferenceDeskStaff,
   type AuthContext,
 } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -82,14 +82,18 @@ export type OrgEntitySeat = {
 };
 
 /**
- * Who may manage an organisation's conference people and seats: its org admin,
- * a global admin, or conference ops staff — who name walk-ups to a company's
- * open seats at the check-in desk.
+ * Who may manage an organisation's people and seats at a conference: its org
+ * admin, a global admin, or THAT conference's desk staff — who name walk-ups
+ * to a company's open seats at the check-in desk.
  * ⛔ The one check for this file; do not inline it again.
  */
-async function canManageOrgSeats(ctx: AuthContext, organizationId: string): Promise<boolean> {
+async function canManageOrgSeats(
+  ctx: AuthContext,
+  organizationId: string,
+  conferenceId: string | null
+): Promise<boolean> {
   if (canManageOrganization(ctx, organizationId) || isGlobalAdmin(ctx.globalRole)) return true;
-  return isConferenceOps(ctx);
+  return conferenceId ? isConferenceDeskStaff(ctx, conferenceId) : false;
 }
 
 /** Every allocatable seat an org holds for a conference, with who (if anyone) sits in it. */
@@ -99,7 +103,7 @@ export async function listEntitySeatsForOrg(
 ): Promise<Result<OrgEntitySeat[]>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -156,7 +160,7 @@ export async function allocateSeat(
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id, seat.conference_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -241,11 +245,11 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   const db = createAdminClient();
   const { data: seat, error: seatErr } = await db
     .from("entity_balance_seats")
-    .select("organization_id, holder_person_id")
+    .select("organization_id, conference_id, holder_person_id")
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id, seat.conference_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -278,7 +282,7 @@ export async function setEntityUsageIntent(
 ): Promise<Result<null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
   if (!Number.isInteger(intendedQuantity) || intendedQuantity < 0) {
@@ -358,7 +362,7 @@ export async function addConferenceAttendee(
 ): Promise<Result<{ id: string; assignmentStatus: "assigned" | "pending_user_activation"; invited: boolean }>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -453,11 +457,11 @@ export async function removeConferenceAttendee(personId: string): Promise<Result
   const db = createAdminClient();
   const { data: person, error: personErr } = await db
     .from("conference_people")
-    .select("organization_id, source_type")
+    .select("organization_id, conference_id, source_type")
     .eq("id", personId)
     .single();
   if (personErr || !person) return { success: false, error: personErr?.message ?? "Person not found." };
-  if (!person.organization_id || !(await canManageOrgSeats(auth.ctx, person.organization_id))) {
+  if (!person.organization_id || !(await canManageOrgSeats(auth.ctx, person.organization_id, person.conference_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
   if (person.source_type !== "manual") {
