@@ -5,7 +5,13 @@ import {
   canManageOrganization,
   requireAuthenticated,
 } from "@/lib/auth/guards";
-import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle";
+import {
+  createPersonOnAddress,
+  ensureKnownPerson,
+  peopleOnAddress,
+  upsertPersonContact,
+} from "@/lib/identity/lifecycle";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { loginSkipReason, type LoginSkipReason } from "@/lib/contacts/login-policy";
 import { provisionOrgLogin } from "@/lib/identity/org-login";
 
@@ -27,6 +33,12 @@ interface AddContactParams {
   invite?: boolean;
   /** Role for the login being provisioned. Ignored when no invite is sent. */
   inviteRole?: "member" | "org_admin";
+  /**
+   * The human's answer when the email already belongs to someone ELSE at this
+   * organisation (a SHARED_EMAIL result): that existing person, or someone new
+   * who shares the address. Omit on the first try.
+   */
+  sharedAddress?: { contactId: string } | "new";
 }
 
 export interface AddContactInviteResult {
@@ -45,6 +57,15 @@ interface AddContactResult {
    * an admin would have to guess whether to retry and risk a duplicate.
    */
   invite: AddContactInviteResult;
+  /**
+   * SHARED_EMAIL: the email already belongs to someone with a different name
+   * at this organisation. Nothing was written — ask which, then call again
+   * with `sharedAddress`.
+   */
+  code?: "SHARED_EMAIL";
+  sharedWith?: Array<{ contactId: string; name: string }>;
+  /** The person's name as on file — differs from the input when an existing person was chosen. */
+  name?: string;
 }
 
 /**
@@ -71,6 +92,7 @@ export async function addContact({
   tags,
   invite,
   inviteRole = "member",
+  sharedAddress,
 }: AddContactParams): Promise<AddContactResult> {
   const notAttempted: AddContactInviteResult = { status: "skipped" };
 
@@ -113,6 +135,71 @@ export async function addContact({
     // this person gets an account, so the tags have to be on the row already.
     const contactType = tags && tags.length > 0 ? ["directory", ...tags] : ["directory"];
     const contactEmail = workEmail?.trim() || email?.trim() || null;
+
+    // ⛔ Stephen's rules (project_shared_email_walkup_rules). An address is not
+    // a person: info@store.ca can be two people. ensureKnownPerson matches on
+    // email first, so adding Bob there used to hand back Alice's record and
+    // then RENAME it to Bob. So: same name → that person; a different name →
+    // ask; someone new on a shared address gets their own record but no login
+    // and no Circle account — whoever holds those keeps them.
+    if (contactEmail) {
+      const onAddress = await peopleOnAddress(createAdminClient(), organizationId, contactEmail, name);
+      if ("error" in onAddress) {
+        return { success: false, error: onAddress.error, invite: notAttempted };
+      }
+      const shared = onAddress.others.length > 0;
+      const sharedSkip: AddContactInviteResult = { status: "skipped", reason: "shared_address" };
+
+      if (sharedAddress && sharedAddress !== "new") {
+        // "It's them": confirm, never edit.
+        const chosen = [onAddress.sameName, ...onAddress.others].find((m) => m?.contactId === sharedAddress.contactId);
+        if (!chosen) return { success: false, error: "That person is not on this address.", invite: notAttempted };
+        return { success: true, contactId: chosen.contactId, name: chosen.name, invite: { status: "skipped", reason: "existing_person" } };
+      }
+
+      if (onAddress.sameName && shared) {
+        // Already on file, on an address someone else shares — an org admin's
+        // edit of THAT person, never a match by email that could land on the
+        // other one. (Alone on the address, the ordinary path below finds them.)
+        const contact = await upsertPersonContact({
+          organizationId,
+          personId: onAddress.sameName.contactId,
+          name: name.trim(),
+          email: contactEmail,
+          roleTitle: roleTitle ?? null,
+          phone: phone ?? null,
+          workPhone: workPhoneNumber ?? null,
+          contactType,
+        });
+        if (contact.error || !contact.contactId) {
+          return { success: false, error: contact.error ?? "Failed to add contact", invite: notAttempted };
+        }
+        revalidateTag("org-profile", "max");
+        return { success: true, contactId: contact.contactId, invite: sharedSkip };
+      } else if (!onAddress.sameName && shared && sharedAddress !== "new") {
+        return {
+          success: false,
+          code: "SHARED_EMAIL",
+          error: `${contactEmail} is already used by ${onAddress.others.map((m) => m.name).join(", ")}.`,
+          sharedWith: onAddress.others.map((m) => ({ contactId: m.contactId, name: m.name })),
+          invite: notAttempted,
+        };
+      } else if (!onAddress.sameName && shared) {
+        const created = await createPersonOnAddress({
+          organizationId,
+          name: name.trim(),
+          email: contactEmail,
+          title: roleTitle ?? null,
+          phone: phone ?? null,
+          contactType,
+        });
+        if (!created.personId) {
+          return { success: false, error: created.error ?? "Failed to add contact", invite: notAttempted };
+        }
+        revalidateTag("org-profile", "max");
+        return { success: true, contactId: created.personId, invite: sharedSkip };
+      }
+    }
 
     const person = await ensureKnownPerson({
       organizationId,

@@ -63,6 +63,19 @@ describe("resolveChosenPerson", () => {
     expect(r?.userId).toBe("user-alice");
   });
 
+  it("links the login on an address that is theirs alone, even before the record is linked", async () => {
+    findExistingUserByEmailMock.mockResolvedValue("user-bob");
+    const r = await resolveChosenPerson(fakeDb(BOB, 0), ORG, BOB.id, "bob@store.ca");
+    expect(r?.userId).toBe("user-bob");
+  });
+
+  it("never links a login already linked to someone else", async () => {
+    findExistingUserByEmailMock.mockResolvedValue("user-bob");
+    const other = { ...BOB, profile_id: "user-someone" };
+    const r = await resolveChosenPerson(fakeDb(other, 0), ORG, other.id, "bob@store.ca");
+    expect(r?.userId).toBeNull();
+  });
+
   it("does not invite anyone on a shared address nobody has a login for yet", async () => {
     findExistingUserByEmailMock.mockResolvedValue(null);
     const r = await resolveChosenPerson(fakeDb(BOB, 1), ORG, BOB.id, "info@store.ca");

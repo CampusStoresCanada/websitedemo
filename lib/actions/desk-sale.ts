@@ -16,8 +16,12 @@ import { personAdmittedDates } from "@/lib/conference/badges/checkin";
 import { conferenceToday } from "@/lib/conference/desk-staff";
 import { rankDeskOffers, type DeskOfferGroup } from "@/lib/conference/desk-offers";
 import { loadSeatHoldings } from "@/lib/conference/seats";
-import { createKnownPerson } from "@/lib/identity/lifecycle";
-import { findUserByEmail } from "@/lib/supabase/user-lookup";
+import {
+  cleanEmailForFilter,
+  createPersonOnAddress,
+  peopleOnAddress,
+  type AddressMatch,
+} from "@/lib/identity/lifecycle";
 import { stripe } from "@/lib/stripe/client";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
@@ -104,16 +108,7 @@ export async function loadDeskSaleOffers(params: {
   };
 }
 
-/**
- * An address safe to put into a PostgREST `or` filter: no spaces, commas or
- * brackets, which would change the query rather than match an address.
- */
-function cleanEmail(raw: string): string | null {
-  const email = raw.trim().toLowerCase();
-  return /^[^\s,()]+@[^\s,()]+\.[^\s,()]+$/.test(email) ? email : null;
-}
-
-export type WalkUpMatch = { contactId: string; name: string; title: string | null; phone: string | null };
+export type WalkUpMatch = AddressMatch;
 
 /**
  * Who already uses this email at this company — so the desk can apply
@@ -130,33 +125,16 @@ export async function lookupWalkUpEmail(params: {
 }): Promise<Result<{ sameName: WalkUpMatch | null; others: WalkUpMatch[] }>> {
   const auth = await requireOrgCommerceAccess(params.organizationId, params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
-  const email = cleanEmail(params.email);
-  if (!email) return { success: false, error: "That does not look like an email address." };
-
-  const { data, error } = await createAdminClient()
-    .from("contacts")
-    .select("id, name, role_title, phone, work_phone_number")
-    .eq("organization_id", params.organizationId)
-    .is("archived_at", null)
-    .or(`work_email.eq.${email},email.eq.${email}`);
-  if (error) return { success: false, error: error.message };
-
-  const matches: WalkUpMatch[] = (data ?? []).map((c) => ({
-    contactId: c.id as string,
-    name: (c.name as string | null) ?? "",
-    title: (c.role_title as string | null) ?? null,
-    phone: (c.phone as string | null) ?? (c.work_phone_number as string | null) ?? null,
-  }));
-  const wanted = params.name.trim().toLowerCase();
-  const sameName = matches.find((m) => m.name.trim().toLowerCase() === wanted) ?? null;
-  return { success: true, data: { sameName, others: matches.filter((m) => m !== sameName) } };
+  const found = await peopleOnAddress(createAdminClient(), params.organizationId, params.email, params.name);
+  if ("error" in found) return { success: false, error: found.error };
+  return { success: true, data: found };
 }
 
 /**
  * A NEW person at this company, for a walk-up nobody has on file — or someone
  * the operator said is NOT the person already on a shared address.
  *
- * ⛔ Never matches by email (createKnownPerson), so it cannot merge two people.
+ * ⛔ Never matches by email (createPersonOnAddress), so it cannot merge two people.
  * ⛔ Circle is set up only for an address nobody is on yet. If anyone already
  * holds a login there, or anyone at all is on file with it, nothing is set up:
  * an existing account is theirs and is not touched.
@@ -172,37 +150,19 @@ export async function createWalkUpPerson(params: {
   const auth = await requireOrgCommerceAccess(params.organizationId, params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
   const name = params.name.trim();
-  const email = cleanEmail(params.email);
+  const email = cleanEmailForFilter(params.email);
   const title = params.title.trim();
   if (!name || !email || !title) {
     return { success: false, error: "Name, email and job title are all needed." };
   }
 
-  const db = createAdminClient();
-  // ⛔ "New" means NOBODY is on this address yet — no login, and no contact at
-  // any company. A second person sharing an address gets no Circle account:
-  // otherwise whoever was added first would hold one under their name and the
-  // other would inherit it (same rule as resolveChosenPerson at seating).
-  const [existingLogin, { count: othersOnAddress }] = await Promise.all([
-    findUserByEmail(db, email),
-    db
-      .from("contacts")
-      .select("id", { count: "exact", head: true })
-      .is("archived_at", null)
-      .or(`work_email.eq.${email},email.eq.${email}`),
-  ]);
-  const addressIsNew = !existingLogin && (othersOnAddress ?? 0) === 0;
-
-  const created = await createKnownPerson(
-    {
-      organizationId: params.organizationId,
-      name,
-      email,
-      title,
-      mobilePhone: params.phone?.trim() || null,
-    },
-    { provisionCircle: addressIsNew }
-  );
+  const created = await createPersonOnAddress({
+    organizationId: params.organizationId,
+    name,
+    email,
+    title,
+    phone: params.phone,
+  });
   if (!created.personId) return { success: false, error: created.error ?? "Could not add them." };
   return { success: true, data: { contactId: created.personId } };
 }
