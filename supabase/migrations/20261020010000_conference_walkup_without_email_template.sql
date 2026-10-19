@@ -17,7 +17,7 @@ values (
   'Heads up: {{person_name}} has no login',
   $body$<p>Hi {{first_name}},</p>
 <p>Just a heads up. {{person_name}} was added for {{organization_name}} at the {{conference_name}} check-in desk.</p>
-<p>This person was minted for your company but without an email address they are not given the ability to log in, which affects their abilities throughout the conference and CSC.</p>
+<p>This person was added for your company but without an email address they are not given the ability to log in, which affects their abilities throughout the conference and CSC.</p>
 <p>To give them a login, open them in your organization's contacts, add their email address and send the invite.</p>
 <div style="text-align:left;margin:16px 0;">
   <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="left" style="margin:0;">
@@ -28,7 +28,7 @@ values (
     </tr>
   </table>
 </div>$body$,
-  $blocks$[{"id": "hi", "type": "text", "html": "<p>Hi {{first_name}},</p>"}, {"id": "what", "type": "text", "html": "<p>Just a heads up. {{person_name}} was added for {{organization_name}} at the {{conference_name}} check-in desk.</p>"}, {"id": "why", "type": "text", "html": "<p>This person was minted for your company but without an email address they are not given the ability to log in, which affects their abilities throughout the conference and CSC.</p>"}, {"id": "fix", "type": "text", "html": "<p>To give them a login, open them in your organization's contacts, add their email address and send the invite.</p>"}, {"id": "cta", "type": "button", "text": "Open {{organization_name}}", "href": "{{org_url}}", "align": "left", "color": "#EE2A2E"}]$blocks$::jsonb,
+  $blocks$[{"id": "hi", "type": "text", "html": "<p>Hi {{first_name}},</p>"}, {"id": "what", "type": "text", "html": "<p>Just a heads up. {{person_name}} was added for {{organization_name}} at the {{conference_name}} check-in desk.</p>"}, {"id": "why", "type": "text", "html": "<p>This person was added for your company but without an email address they are not given the ability to log in, which affects their abilities throughout the conference and CSC.</p>"}, {"id": "fix", "type": "text", "html": "<p>To give them a login, open them in your organization's contacts, add their email address and send the invite.</p>"}, {"id": "cta", "type": "button", "text": "Open {{organization_name}}", "href": "{{org_url}}", "align": "left", "color": "#EE2A2E"}]$blocks$::jsonb,
   array['first_name', 'person_name', 'organization_name', 'conference_name', 'org_url'],
   true,
   true

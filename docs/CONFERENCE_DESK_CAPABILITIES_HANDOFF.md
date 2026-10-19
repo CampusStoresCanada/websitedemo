@@ -251,6 +251,9 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - [ ] The form says "No email: they get a badge but no login…"
 - [ ] Their badge prints from the green card
 - [ ] A real company's admin gets "Heads up: … has no login" (test orgs get none)
+- [ ] Their admin opens them on /org/[slug], adds an email, saves: the modal stays open with Send invite
+- [ ] They accept the invite and sign in: their conference registration is theirs (claimed by person, not email)
+- [ ] An address someone else already logs in with: "No login of their own… belongs to X", no invite button
 
 ## 4. Database changes (live on the shared database)
 

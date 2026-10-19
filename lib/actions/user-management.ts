@@ -663,6 +663,12 @@ export interface ContactLoginStatus {
   hasSignedIn: boolean;
   /** Null when they qualify for a login; otherwise why they don't. */
   skipReason: LoginSkipReason | null;
+  /**
+   * The address's login belongs to SOMEONE ELSE here (a shared address).
+   * ⛔ Whoever holds a login keeps it (project_shared_email_walkup_rules), so
+   * this contact has none of their own — never report the holder's as theirs.
+   */
+  loginHeldBy?: string | null;
 }
 
 /**
@@ -691,7 +697,7 @@ export async function getContactLoginStatus(
     const [{ data: contact }, { data: org }] = await Promise.all([
       adminClient
         .from("contacts")
-        .select("email, work_email, contact_type")
+        .select("email, work_email, contact_type, profile_id")
         .eq("id", contactId)
         .eq("organization_id", orgId)
         .maybeSingle(),
@@ -724,6 +730,33 @@ export async function getContactLoginStatus(
         success: true,
         status: { email, hasAccount: false, membership: null, hasSignedIn: false, skipReason },
       };
+    }
+
+    // Someone else on this address holds the login: it is theirs, not this
+    // contact's. (This contact holds it when its own profile_id is that user.)
+    if (contact.profile_id !== user.id) {
+      const { data: holder } = await adminClient
+        .from("contacts")
+        .select("id, name")
+        .eq("profile_id", user.id)
+        .eq("organization_id", orgId)
+        .is("archived_at", null)
+        .neq("id", contactId)
+        .limit(1)
+        .maybeSingle();
+      if (holder) {
+        return {
+          success: true,
+          status: {
+            email,
+            hasAccount: false,
+            membership: null,
+            hasSignedIn: false,
+            skipReason,
+            loginHeldBy: (holder.name as string | null) ?? "someone else",
+          },
+        };
+      }
     }
 
     const [{ data: membership }, { data: userRes }] = await Promise.all([

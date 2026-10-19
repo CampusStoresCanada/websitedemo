@@ -1292,6 +1292,59 @@ export async function finalizePendingConferenceAssignmentsForCurrentUser(): Prom
     });
   }
 
+  // ⛔ Second route: registrations tied to THIS person's own contact record
+  // rather than to an email. A walk-up named at the desk without an email
+  // (recordNameOnlyWalkUp) has no email to match; when their company's admin
+  // later adds one and invites them, the login is stamped on that contact
+  // (contacts.profile_id), and that is how their registration finds them.
+  // By person, never by address: on a shared address the login stays with
+  // whoever holds it, so this cannot hand anyone a registration not theirs.
+  const { data: myContacts, error: myContactsError } = await db
+    .from("contacts")
+    .select("id")
+    .eq("profile_id", auth.ctx.userId)
+    .in("organization_id", activeOrgIds)
+    .is("archived_at", null);
+  if (myContactsError) {
+    return { success: false, error: `Failed to resolve conference registrations: ${myContactsError.message}` };
+  }
+  const myContactIds = (myContacts ?? []).map((c) => c.id as string);
+  if (myContactIds.length > 0) {
+    const { data: unclaimed, error: unclaimedError } = await db
+      .from("conference_people")
+      .select("id, conference_id, organization_id")
+      .in("canonical_person_id", myContactIds)
+      .is("user_id", null)
+      .neq("assignment_status", "canceled");
+    if (unclaimedError) {
+      return { success: false, error: `Failed to resolve conference registrations: ${unclaimedError.message}` };
+    }
+    for (const row of unclaimed ?? []) {
+      const { error: claimError } = await db
+        .from("conference_people")
+        .update({ user_id: auth.ctx.userId, updated_at: new Date().toISOString() })
+        .eq("id", row.id)
+        .is("user_id", null);
+      if (claimError) {
+        return { success: false, error: `Failed to finalize pending assignment: ${claimError.message}` };
+      }
+      personIds.push(row.id as string);
+      claimedConferenceIds.add(row.conference_id as string);
+      await logAuditEventSafe({
+        action: "conference_assignment_notification_hook",
+        entityType: "conference_people",
+        entityId: row.id as string,
+        actorId: auth.ctx.userId,
+        actorType: "user",
+        details: {
+          hook: "registration_claimed_by_person",
+          conferenceId: row.conference_id,
+          organizationId: row.organization_id,
+        },
+      });
+    }
+  }
+
   // After claiming the seats, surface the assignee legal gate for each conference
   // the user just joined, so the activation surface can prompt them to accept
   // their personal documents before participating. Best-effort — never fail the

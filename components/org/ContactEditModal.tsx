@@ -300,6 +300,22 @@ export default function ContactEditModal({
       }));
     }
 
+    // An email just added to someone with none (e.g. a walk-up named at the
+    // conference desk without one): stay open, because the login section
+    // below can now offer the invite. Closing here made the admin reopen the
+    // contact to find the button.
+    if (changed.includes("work_email") && !original.work_email.trim() && fields.work_email.trim()) {
+      const refreshed = await getContactLoginStatus(organizationId, contact.id);
+      setLoginStatus(refreshed.status ?? null);
+      setSaving(false);
+      if (refreshed.status && !refreshed.status.hasAccount && !refreshed.status.skipReason && !refreshed.status.loginHeldBy) {
+        setInviteNotice("Saved. Send the invite to give them a login.");
+        return;
+      }
+      onClose();
+      return;
+    }
+
     setSaving(false);
     onClose();
   }
@@ -582,6 +598,10 @@ export default function ContactEditModal({
                         {loginStatus.hasSignedIn
                           ? `Has a login (${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"}).`
                           : `Invited as ${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"} — hasn't signed in yet.`}
+                      </p>
+                    ) : loginStatus.loginHeldBy ? (
+                      <p className="text-xs text-gray-500 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
+                        No login of their own. This address&apos;s login belongs to {loginStatus.loginHeldBy}, who shares it.
                       </p>
                     ) : loginStatus.skipReason ? (
                       <p className="text-xs text-gray-500 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
