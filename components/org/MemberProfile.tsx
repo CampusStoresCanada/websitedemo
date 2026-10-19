@@ -46,6 +46,8 @@ import { fieldProps } from "@/lib/editable-fields";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import RenewMembershipCard from "@/components/org/RenewMembershipCard";
+import { CANCOLL_CERT } from "@/lib/certifications";
+import { updateCancollStatus } from "@/lib/actions/update-certifications";
 import GracePeriodBanner from "@/components/membership/GracePeriodBanner";
 import { isOrgAccessActive, isOrgInGrace } from "@/lib/membership/status";
 
@@ -296,6 +298,92 @@ export default function MemberProfile({
   // untouched — turning presentation mode off brings the toggle straight back.
   const isAdmin = permissionState === "admin" || permissionState === "super_admin";
   const canViewAsPartner = (isOrgAdminForThisOrg || isAdmin) && presentationMode === null;
+
+  // CANCOLL — purchasing-group standing, admin-managed. Optimistic local state,
+  // same as PartnerProfile's copy of this toggle.
+  //
+  // On a member store this control is the flag's ONLY surface: the badge array
+  // that carries CANCOLL on a partner profile is deliberately not written for
+  // members (updateCancollStatus explains why), so there is no chip grid here
+  // to hang it off — and the eight self-declared certifications that fill that
+  // grid are a vendor's claims about itself, which a member store has no
+  // business declaring. Before this, the 51 member holders were settable only
+  // by raw SQL.
+  const [cancollMember, setCancollMember] = useState<boolean>(
+    organization.is_cancoll_member ?? false
+  );
+  const [cancollSaving, setCancollSaving] = useState(false);
+  const [cancollError, setCancollError] = useState<string | null>(null);
+
+  // CSC staff only, and hidden in presentation mode for the same reason
+  // canViewAsPartner is: neither a member nor a visitor has this control, so
+  // leaving it on screen would put a staff affordance in the middle of the view
+  // being shown.
+  const canEditCancoll = isAdmin && presentationMode === null;
+
+  // Rendered in BOTH the desktop and the mobile layout — those are two separate
+  // trees in this file, so a section added to one is simply invisible at the
+  // other width.
+  //
+  // Shown outside edit mode too, as a read-only line: on a member store this is
+  // the only place CANCOLL standing is legible at all, so staff shouldn't have
+  // to enter edit mode to answer "are they in the purchasing group?".
+  function CancollSection({ spacing }: { spacing: string }) {
+    return (
+      <div className={spacing}>
+        <div className="flex items-center gap-3 mb-3">
+          <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Purchasing Group</h3>
+          {cancollSaving && <span className="text-[10px] text-gray-400">Saving…</span>}
+          {cancollError && !cancollSaving && (
+            <span className="text-[10px] text-red-600" role="alert">{cancollError}</span>
+          )}
+        </div>
+        {editMode ? (
+          <button
+            type="button"
+            onClick={handleToggleCancoll}
+            disabled={cancollSaving}
+            aria-pressed={cancollMember}
+            className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium border transition-all ${
+              cancollMember
+                ? "bg-gray-900 text-white border-gray-900"
+                : "bg-white text-gray-500 border-gray-300 hover:border-gray-500"
+            }`}
+          >
+            <img
+              src={`/certifications/${CANCOLL_CERT.filename ?? `${CANCOLL_CERT.slug}.svg`}`}
+              alt=""
+              className="w-5 h-5 rounded-full object-cover"
+            />
+            {CANCOLL_CERT.name}
+            {cancollMember && <span className="text-white/70">✓</span>}
+          </button>
+        ) : (
+          <p className="text-sm text-[#1A1A1A]">
+            {cancollMember ? `${CANCOLL_CERT.name} member` : `Not in ${CANCOLL_CERT.name}`}
+            <span className="ml-2 text-xs text-gray-400">Turn on Edit to change</span>
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const handleToggleCancoll = async () => {
+    const previous = cancollMember;
+    setCancollMember(!previous);
+    setCancollSaving(true);
+    setCancollError(null);
+    const result = await updateCancollStatus(organization.id, !previous);
+    setCancollSaving(false);
+    // Roll the optimistic flip back on refusal rather than leaving the chip
+    // asserting standing the database doesn't hold — indistinguishable from a
+    // save that worked until the next reload, which is exactly how the
+    // certification chips next door got reported as "not saving".
+    if (!result.success) {
+      setCancollMember(previous);
+      setCancollError(result.error ?? "Couldn't save CANCOLL standing — try again.");
+    }
+  };
   const [partnerViewMode, setPartnerViewMode] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -1000,6 +1088,8 @@ export default function MemberProfile({
             </div>
           )}
 
+          {canEditCancoll && CancollSection({ spacing: "mb-10" })}
+
           {/* Staffing — Names visible to all, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
@@ -1639,6 +1729,8 @@ export default function MemberProfile({
               </ProtectedSection>
             </div>
           )}
+
+          {canEditCancoll && CancollSection({ spacing: "mb-8" })}
 
           {/* Staffing — Names visible, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
