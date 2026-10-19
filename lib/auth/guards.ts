@@ -397,6 +397,36 @@ export async function requireConferenceOpsAccess(): Promise<GuardResult> {
   }
 }
 
+/**
+ * May this person buy for, or manage the conference cart of, this organisation?
+ *
+ * ⛔ ONE ANSWER for every storefront action — offers, cart, attendee naming,
+ * checkout. It used to be copied inline in five places, and the desk could not
+ * sell because conference ops passed none of them.
+ *
+ * Conference ops staff transact for ANY attending organisation: selling a fifth
+ * registration to a walk-up at the check-in desk is their job, and the desk does
+ * it through the same offers page and cart everybody else uses.
+ *
+ * ⚠️ This is not the invoicing check. Deferring payment stays staff-only inside
+ * createConferenceCheckout, because an org admin buying for their own org passes
+ * this and must still fail that.
+ */
+export async function requireOrgCommerceAccess(organizationId: string): Promise<GuardResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return auth;
+  if (isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(organizationId)) {
+    return auth;
+  }
+  const ops = await requireConferenceOpsAccess();
+  if (ops.ok) return ops;
+  return {
+    ok: false,
+    status: 403,
+    error: "You are not authorized to manage commerce for this organization.",
+  };
+}
+
 export async function requireReviewerOrAdmin(): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;

@@ -174,6 +174,8 @@ interface CheckInDeskClientProps {
   testMode: boolean;
   /** Pretend it is this date, so the today verdict is rehearsable. Test only. */
   asOf: string | null;
+  /** The conference's public storefront, e.g. /conference/2027/main. */
+  storefrontPath: string;
 }
 
 export default function CheckInDeskClient({
@@ -183,6 +185,7 @@ export default function CheckInDeskClient({
   conferenceDates,
   testMode,
   asOf,
+  storefrontPath,
 }: CheckInDeskClientProps) {
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [facts, setFacts] = useState<Record<string, CheckInFacts>>(initialFacts);
@@ -975,10 +978,24 @@ export default function CheckInDeskClient({
             {nameLookup.trim().length < 2 ? (
               <p className="text-[11px] text-gray-400">Type at least two characters.</p>
             ) : lookupMatches.length === 0 ? (
-              <p className="text-[11px] text-amber-200">
-                Nobody on the roster matches. ⚠️ Somebody registered in the last minute
-                may not be here yet — the desk refreshes every 30 seconds.
-              </p>
+              <div className="space-y-1">
+                <p className="text-[11px] text-amber-200">
+                  Nobody on the roster matches. ⚠️ Somebody registered in the last minute
+                  may not be here yet — the desk refreshes every 30 seconds.
+                </p>
+                {/* ⛔ A walk-up is a sale, then a seat, then a badge. The desk
+                    sells through the SAME offers page and cart as everybody
+                    else: pick their company, add the registration, name them in
+                    the cart, then card or invoice. No desk checkout. */}
+                <a
+                  href={`${storefrontPath}/offers`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block rounded border border-white/40 px-2 py-0.5 text-[11px] text-white hover:border-white"
+                >
+                  Not registered? Sell them a registration →
+                </a>
+              </div>
             ) : (
               lookupMatches.map((row) => {
                 const rowFacts = facts[row.id] ?? null;

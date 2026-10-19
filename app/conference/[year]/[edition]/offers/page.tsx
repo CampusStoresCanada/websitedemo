@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import {
   listConferenceOffers,
@@ -49,6 +49,10 @@ export default async function ConferenceOffersPage({
   const conference = conferenceResult.data;
   const db = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  // Conference ops shop for any org too — that is how the check-in desk sells
+  // to a walk-up. The actions enforce it (requireOrgCommerceAccess); this is the
+  // picker that reaches it.
+  const canShopForAnyOrg = isAdmin || (await requireConferenceOpsAccess()).ok;
 
   // Global admins can shop on behalf of ANY org, not just ones they belong to —
   // the commerce actions already permit this (isGlobalAdmin bypass), this is
@@ -63,8 +67,8 @@ export default async function ConferenceOffersPage({
     (row) => (row as unknown as { organizations: OrganizationMembership }).organizations
   );
 
-  const allOrgs = isAdmin ? await getOrganizations() : [];
-  const orgOptions: OrganizationMembership[] = isAdmin
+  const allOrgs = canShopForAnyOrg ? await getOrganizations() : [];
+  const orgOptions: OrganizationMembership[] = canShopForAnyOrg
     ? allOrgs.map((o) => ({ id: o.id, name: o.name, type: o.type }))
     : memberships;
 
@@ -85,7 +89,7 @@ export default async function ConferenceOffersPage({
     );
   }
 
-  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (isAdmin ? null : orgOptions[0]);
+  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (canShopForAnyOrg ? null : orgOptions[0]);
 
   if (!selectedOrg) {
     return (
@@ -143,7 +147,7 @@ export default async function ConferenceOffersPage({
         <p className="text-sm text-gray-600">Exhibit &amp; register — buy for {selectedOrg.name}</p>
       </div>
 
-      {isAdmin ? (
+      {canShopForAnyOrg ? (
         <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={selectedOrg.id} basePath={`/conference/${year}/${edition}/offers`} />
       ) : memberships.length > 1 ? (
         <div className="flex flex-wrap gap-2">

@@ -74,6 +74,7 @@ export default async function ConferenceCheckInDeskPage({
         conferenceDates={facts.conferenceDates}
         testMode={testMode}
         asOf={asOf}
+        storefrontPath={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}`}
       />
     </main>
   );

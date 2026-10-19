@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin, requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireAuthenticated, requireOrgCommerceAccess, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements, resolveSurfaces, type FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
@@ -422,14 +422,8 @@ export async function listConferenceOffers(
   conferenceId: string,
   organizationId: string
 ): Promise<Result<ConferenceOffer[]>> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (
-    !isGlobalAdmin(auth.ctx.globalRole) &&
-    !auth.ctx.activeOrgIds.includes(organizationId)
-  ) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
+  const auth = await requireOrgCommerceAccess(organizationId);
+  if (!auth.ok) return { success: false, error: "Not authorized for this organization." };
 
   const db = createAdminClient();
   const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([

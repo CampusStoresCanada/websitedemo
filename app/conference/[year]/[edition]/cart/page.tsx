@@ -45,6 +45,10 @@ export default async function ConferenceCartPage({
   const conference = conferenceResult.data;
   const adminClient = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  // Conference ops can open any org's cart: the desk names and invoices a
+  // walk-up here. Same rule as the actions (requireOrgCommerceAccess).
+  const opsAccess = await requireConferenceOpsAccess();
+  const canShopForAnyOrg = isAdmin || opsAccess.ok;
 
   const { data: userOrgs } = await adminClient
     .from("user_organizations")
@@ -56,8 +60,8 @@ export default async function ConferenceCartPage({
     (row) => (row as unknown as { organizations: OrganizationMembership }).organizations
   );
 
-  const allOrgs = isAdmin ? await getOrganizations() : [];
-  const orgOptions: OrganizationMembership[] = isAdmin
+  const allOrgs = canShopForAnyOrg ? await getOrganizations() : [];
+  const orgOptions: OrganizationMembership[] = canShopForAnyOrg
     ? allOrgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug }))
     : memberships;
 
@@ -72,7 +76,7 @@ export default async function ConferenceCartPage({
     );
   }
 
-  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (isAdmin ? null : orgOptions[0]);
+  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (canShopForAnyOrg ? null : orgOptions[0]);
 
   if (!selectedOrg) {
     return (
@@ -94,7 +98,6 @@ export default async function ConferenceCartPage({
    * payment is a staff decision, so an org admin buying for their own org
    * passes the manage-org check and must still fail this one.
    */
-  const opsAccess = await requireConferenceOpsAccess();
   const canInvoice = opsAccess.ok;
 
   const [cartResult, orgContacts, orgSeatsResult] = await Promise.all([
@@ -131,7 +134,7 @@ export default async function ConferenceCartPage({
         </Link>
       </div>
 
-      {isAdmin ? (
+      {canShopForAnyOrg ? (
         <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={selectedOrg.id} basePath={`/conference/${year}/${edition}/cart`} />
       ) : memberships.length > 1 ? (
         <div className="flex flex-wrap gap-2">
