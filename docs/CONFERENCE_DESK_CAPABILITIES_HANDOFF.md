@@ -106,6 +106,11 @@ stale end date.
 
 ## 3. Still open
 
+- **Name-only walk-ups cannot print.** A walk-up named at the desk without an
+  email has no person record (`canonical_person_id`), and badge printing
+  refuses without one. Badge Ops' "Attempt Auto Link" creates one from the
+  name; the desk does not call it. Identity decision for Stephen.
+
 - **Kiosk / PIN** — design first (§1.7).
 - **Second label (John's back QR code)** — `renderReprintLabel` is reachable only
   from the job PDF route, and `badge_print_stock` is `NULL` for CSC 2027, so no
@@ -119,6 +124,68 @@ stale end date.
   (`policy_values`); nothing reads them. Deleting them is Stephen's call.
 - **`requireConferenceOpsAccess` is a misleading name** now that it means global
   admin; renaming touches ~30 files.
+
+## 3a. Device test checklist (before pushing)
+
+Not testable on a laptop: the webcam never read a code (no scan reached the
+server), the browser pane has no camera or sound, and there is no on-screen
+keyboard. Needs a **preview deploy of this branch** (not `main`) for an
+`https://` link — phones only allow the camera on secure pages.
+
+**Devices:** iPad (Safari), iPhone (Safari), one Android phone (Chrome).
+
+**Test badges** (printed 2026-10-19; real codes, shared database, so they work
+on any deploy). Rehearse with `…/check-in?test=1`; pretend a day with
+`&as_of=2027-02-02`. Press **Leave test mode → reset** when done.
+
+| Badge | Rehearse as | Expect |
+|---|---|---|
+| Desk Test Full Conference | any conference day | green flash + tone, "Checked in" |
+| Desk Test Full Conference | scanned again | amber, "Already checked in" |
+| Desk Test Thursday Only | `as_of=2027-02-02` (Tue) | red, "Not valid today", **Sell them a day pass** |
+| Desk Test Thursday Only | `as_of=2027-02-04` (Thu) | green |
+| Any QR that is not a badge | — | red, "Not one of our badges" |
+
+**Camera and scanning**
+- [ ] Camera permission prompt appears; the feed fills the screen
+- [ ] Guide square and caption show; a printed badge reads at a normal arm's length
+- [ ] A code on another phone's screen reads
+- [ ] Reads in poor light (a dim corner of the room)
+- [ ] Camera picker (+ → Camera) switches front/back and retries
+
+**Result feedback**
+- [ ] Full-screen flash: green / amber / red
+- [ ] Sound plays (only after the first tap anywhere — expected); Android vibrates
+- [ ] Red cards stay until **Dismiss**; green cards fade after 30s
+- [ ] Two stops in a row both stay
+
+**Find**
+- [ ] + → Find opens at the TOP; the keyboard does not cover the search box
+- [ ] Camera feed blurs and the square disappears while Find is open
+- [ ] Typing a name with a badge in view does NOT check that badge in
+- [ ] A badge code pasted into Find offers "Check in by badge code"
+- [ ] A company name shows its open seats
+
+**Layout and touch**
+- [ ] No site header, admin sidebar or toolkit; no sideways scroll
+- [ ] Portrait and landscape both usable
+- [ ] Every button easy to hit with a finger
+
+**Desk staff (sign in as a non-admin)**
+- [ ] `/me` shows "Check-in desk" only on their days
+- [ ] They reach the desk and war room; badges, schedule ops, Days & Setup and `/admin` send them away
+- ⚠️ Appoint a test staffer by inserting a scratch appointment, or use an
+  account already on CSC staff. **Never Add Staff with a test email** — it
+  creates a real Circle account.
+
+**Not ready — do not test yet**
+- Naming a walk-up WITHOUT an email, then printing their badge: fails ("missing
+  canonical person linkage"). Decision pending (§3).
+
+**Test data to remove afterwards:** the two "Desk Test …" people, their seats
+and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)), and
+the expired scratch desk appointments (reason "Scratch test by Claude, remove
+after").
 
 ## 4. Database changes (live on the shared database)
 
