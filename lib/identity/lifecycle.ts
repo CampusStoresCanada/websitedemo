@@ -1,5 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueNewContactCircleProvisioning } from "@/lib/circle/sync";
+import { findUserByEmail } from "@/lib/supabase/user-lookup";
+
+type AdminClient = ReturnType<typeof createAdminClient>;
 
 /**
  * Identity lifecycle, backed by `contacts`.
@@ -265,6 +268,97 @@ export async function createKnownPerson(
   }
 
   return { personId: created?.id ?? null };
+}
+
+/**
+ * An address safe to put into a PostgREST `or` filter: no spaces, commas or
+ * brackets, which would change the query rather than match an address.
+ */
+export function cleanEmailForFilter(raw: string): string | null {
+  const email = raw.trim().toLowerCase();
+  return /^[^\s,()]+@[^\s,()]+\.[^\s,()]+$/.test(email) ? email : null;
+}
+
+export type AddressMatch = { contactId: string; name: string; title: string | null; phone: string | null };
+
+/**
+ * Who already uses this email at this company, split by Stephen's rules
+ * (project_shared_email_walkup_rules):
+ *   same name  → the same person (B);
+ *   other name → a HUMAN chooses: them, or someone new sharing it (A).
+ * ⛔ Reads only. Shared by every place a person is named against an address —
+ * the check-in desk, the online cart, the org's Add contact.
+ */
+export async function peopleOnAddress(
+  db: AdminClient,
+  organizationId: string,
+  email: string,
+  name: string
+): Promise<{ sameName: AddressMatch | null; others: AddressMatch[] } | { error: string }> {
+  const clean = cleanEmailForFilter(email);
+  if (!clean) return { error: "That does not look like an email address." };
+  const { data, error } = await db
+    .from("contacts")
+    .select("id, name, role_title, phone, work_phone_number")
+    .eq("organization_id", organizationId)
+    .is("archived_at", null)
+    .or(`work_email.eq.${clean},email.eq.${clean}`);
+  if (error) return { error: error.message };
+
+  const matches: AddressMatch[] = (data ?? []).map((c) => ({
+    contactId: c.id as string,
+    name: (c.name as string | null) ?? "",
+    title: (c.role_title as string | null) ?? null,
+    phone: (c.phone as string | null) ?? (c.work_phone_number as string | null) ?? null,
+  }));
+  const wanted = name.trim().toLowerCase();
+  const sameName = matches.find((m) => m.name.trim().toLowerCase() === wanted) ?? null;
+  return { sameName, others: matches.filter((m) => m !== sameName) };
+}
+
+/**
+ * A NEW person at a company — someone nobody has on file, or someone a human
+ * said is NOT the person already on a shared address.
+ *
+ * ⛔ Never matches by email (createKnownPerson), so it cannot merge two people.
+ * ⛔ Circle is set up only for an address nobody is on yet. If anyone already
+ * holds a login there, or anyone at all is on file with it, nothing is set up:
+ * an existing account is theirs and is not touched. Same rule as
+ * resolveChosenPerson at seating.
+ */
+export async function createPersonOnAddress(params: {
+  organizationId: string;
+  name: string;
+  email: string;
+  title?: string | null;
+  phone?: string | null;
+  contactType?: string[];
+}): Promise<{ personId: string | null; addressIsNew: boolean; error?: string }> {
+  const email = cleanEmailForFilter(params.email);
+  if (!email) return { personId: null, addressIsNew: false, error: "That does not look like an email address." };
+  const db = createAdminClient();
+  const [existingLogin, { count: othersOnAddress }] = await Promise.all([
+    findUserByEmail(db, email),
+    db
+      .from("contacts")
+      .select("id", { count: "exact", head: true })
+      .is("archived_at", null)
+      .or(`work_email.eq.${email},email.eq.${email}`),
+  ]);
+  const addressIsNew = !existingLogin && (othersOnAddress ?? 0) === 0;
+
+  const created = await createKnownPerson(
+    {
+      organizationId: params.organizationId,
+      name: params.name,
+      email,
+      title: params.title ?? null,
+      mobilePhone: params.phone?.trim() || null,
+      contactType: params.contactType,
+    },
+    { provisionCircle: addressIsNew }
+  );
+  return { ...created, addressIsNew };
 }
 
 /**

@@ -1186,6 +1186,19 @@ export async function setCartItemAttendee(params: {
 
   const slots = parseAttendees(item.metadata, item.quantity);
 
+  // A picked person must be someone at THIS organisation — the id is what the
+  // seat will be minted for, so it is never taken on the browser's word.
+  if (params.attendee?.contactId) {
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("id")
+      .eq("id", params.attendee.contactId)
+      .eq("organization_id", item.organization_id)
+      .is("archived_at", null)
+      .maybeSingle();
+    if (!contact) return { success: false, error: "That person isn't on this organization's contacts." };
+  }
+
   // Same person, two units of the same line — never legitimate (both units
   // grant the exact same access), so this is a hard block, not a warning.
   if (params.attendee) {
@@ -1217,12 +1230,21 @@ export async function setCartItemAttendee(params: {
     const email = params.attendee.email.trim().toLowerCase();
 
     const [{ data: people }, { data: siblingItems }, entitiesRes, refsRes] = await Promise.all([
-      adminClient
-        .from("conference_people")
-        .select("id")
-        .eq("conference_id", item.conference_id)
-        .eq("organization_id", item.organization_id)
-        .ilike("contact_email", email),
+      // By WHO they are when known — on a shared address, by email would
+      // warn about the other person's registration.
+      params.attendee.contactId
+        ? adminClient
+            .from("conference_people")
+            .select("id")
+            .eq("conference_id", item.conference_id)
+            .eq("organization_id", item.organization_id)
+            .eq("canonical_person_id", params.attendee.contactId)
+        : adminClient
+            .from("conference_people")
+            .select("id")
+            .eq("conference_id", item.conference_id)
+            .eq("organization_id", item.organization_id)
+            .ilike("contact_email", email),
       adminClient
         .from("cart_items")
         .select("offer_entity_id, quantity, metadata")
@@ -1247,7 +1269,13 @@ export async function setCartItemAttendee(params: {
         : { data: [] as Array<{ entity_id: string }> };
 
     const siblingEntityIds = (siblingItems ?? [])
-      .filter((row) => parseAttendees(row.metadata, row.quantity).some((a) => a && a.email?.trim().toLowerCase() === email))
+      .filter((row) =>
+        parseAttendees(row.metadata, row.quantity).some((a) =>
+          a && params.attendee?.contactId && a.contactId
+            ? a.contactId === params.attendee.contactId
+            : a?.email?.trim().toLowerCase() === email
+        )
+      )
       .map((row) => row.offer_entity_id)
       .filter((id): id is string => Boolean(id));
 

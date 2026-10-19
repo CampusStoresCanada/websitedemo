@@ -24,7 +24,11 @@ export default function PersonPickerModal({
   title?: string;
   people: PickablePerson[];
   organizationId: string;
-  onSelect: (person: { name: string; email: string | null }) => void;
+  /**
+   * `contactId` is the exact person picked or added — carry it, never re-find
+   * them by email: two people can share info@store.ca.
+   */
+  onSelect: (person: { name: string; email: string | null; contactId: string }) => void;
   /** Omit to hide the "assign later" option entirely (e.g. org/slug's roster, where there's always a specific contact already in hand). */
   onDeferLater?: () => void;
   onClose: () => void;
@@ -38,7 +42,7 @@ export default function PersonPickerModal({
         organizationId={organizationId}
         onClose={() => setAddingNew(false)}
         onCreated={(created) => {
-          onSelect({ name: created.name, email: created.email });
+          onSelect({ name: created.name, email: created.email, contactId: created.id });
         }}
       />
     );
@@ -74,7 +78,7 @@ export default function PersonPickerModal({
               people.map((person) => (
                 <button
                   key={person.id}
-                  onClick={() => onSelect({ name: person.name, email: person.email })}
+                  onClick={() => onSelect({ name: person.name, email: person.email, contactId: person.id })}
                   className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
                 >
                   <span className="min-w-0">

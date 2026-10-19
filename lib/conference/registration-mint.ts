@@ -1,5 +1,6 @@
 import { resolveAssigneeForEmail } from "@/lib/actions/conference-people";
 import { findExistingUserByEmail } from "@/lib/actions/conference-entity-commerce";
+import { createPersonOnAddress, peopleOnAddress } from "@/lib/identity/lifecycle";
 import { deriveRegistrationTier } from "./registration-tier";
 import { triggerConferenceRegistrationConfirmation } from "../comms/conference-triggers";
 import type { createAdminClient } from "@/lib/supabase/admin";
@@ -35,11 +36,11 @@ async function mintOneRegistrationAttendee(
   let assignmentStatus: "assigned" | "pending_user_activation" = "assigned";
   let assignedEmailSnapshot: string | null = null;
 
-  // ⛔ A person someone already CONFIRMED (the desk) — never re-matched by
-  // email, which would hand Bob's seat to Alice when they share info@store.ca.
-  const chosen = attendee.contactId
-    ? await resolveChosenPerson(db, organizationId, attendee.contactId, attendee.email)
-    : null;
+  // ⛔ A person someone already CONFIRMED (the desk, the cart's picker) — never
+  // re-matched by email, which would hand Bob's seat to Alice when they share
+  // info@store.ca.
+  const contactId = await personNamedForSeat(db, organizationId, attendee);
+  const chosen = contactId ? await resolveChosenPerson(db, organizationId, contactId, attendee.email) : null;
 
   if (chosen) {
     canonicalPersonId = chosen.contactId;
@@ -266,6 +267,32 @@ export async function mintRegistrationAttendeesFromOrder(
 }
 
 /**
+ * Which contact a paid seat is for, before anything is matched by email.
+ *
+ * The contact a human picked, when there is one. Otherwise — a cart filled
+ * before the picker carried ids — by Stephen's rules
+ * (project_shared_email_walkup_rules), because a seat can't wait for a human:
+ *   - nobody else on the address → null, the ordinary path (unchanged);
+ *   - the same name among several on it → that person;
+ *   - only OTHER names on it → someone new sharing the address, with their own
+ *     record and no login or Circle account. A duplicate a human can tidy is
+ *     recoverable; a badge printed with someone else's name is not.
+ */
+export async function personNamedForSeat(
+  db: AdminClient,
+  organizationId: string,
+  attendee: { name: string; email: string | null; contactId?: string | null }
+): Promise<string | null> {
+  if (attendee.contactId) return attendee.contactId;
+  if (!attendee.email || !attendee.name.trim()) return null;
+  const onAddress = await peopleOnAddress(db, organizationId, attendee.email, attendee.name);
+  if ("error" in onAddress || onAddress.others.length === 0) return null;
+  if (onAddress.sameName) return onAddress.sameName.contactId;
+  const created = await createPersonOnAddress({ organizationId, name: attendee.name.trim(), email: attendee.email });
+  return created.personId;
+}
+
+/**
  * A person someone already confirmed, made ready for a seat.
  *
  * ⛔ Logins and Circle accounts are ONE per email address, and whoever holds one
@@ -300,19 +327,25 @@ export async function resolveChosenPerson(
   const none = { contactId, userId: null, assignmentStatus: "assigned" as const, assignedEmailSnapshot: null };
   if (!normalizedEmail) return none;
 
-  const existingUserId = await findExistingUserByEmail(normalizedEmail);
+  const [existingUserId, { count: sharers }] = await Promise.all([
+    findExistingUserByEmail(normalizedEmail),
+    db
+      .from("contacts")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .is("archived_at", null)
+      .neq("id", contactId)
+      .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`),
+  ]);
+  const alone = (sharers ?? 0) === 0;
   if (existingUserId) {
-    return { ...none, userId: contact.profile_id === existingUserId ? existingUserId : null };
+    // Theirs when it is linked to them — or when nobody else here is on the
+    // address and the record is not linked to anyone yet (the online cart's
+    // picker names most people this way; they must keep their own login).
+    const theirs = contact.profile_id === existingUserId || (alone && !contact.profile_id);
+    return { ...none, userId: theirs ? existingUserId : null };
   }
-
-  const { count: sharers } = await db
-    .from("contacts")
-    .select("id", { count: "exact", head: true })
-    .eq("organization_id", organizationId)
-    .is("archived_at", null)
-    .neq("id", contactId)
-    .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`);
-  if ((sharers ?? 0) > 0) return none;
+  if (!alone) return none;
 
   const resolved = await resolveAssigneeForEmail({
     organizationId,
