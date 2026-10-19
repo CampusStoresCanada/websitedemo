@@ -38,8 +38,13 @@ export type ScanDirection = (typeof SCAN_DIRECTIONS)[number];
  * `capture` is the only one that discloses anything, and only after the
  * attendee says so. `circle` needs a community to send people to — a conference
  * without one points those scans somewhere else instead of dead-ending.
+ *
+ * `me` is the scanner's own account page. Distinct from `map` because it is the
+ * one destination that can ACT: it carries what this person still owes, and the
+ * extras their organisation can buy. A map answers "where do I go"; `me`
+ * answers "what do I do".
  */
-export const SCAN_DESTINATIONS = ["org", "circle", "capture", "map", "none"] as const;
+export const SCAN_DESTINATIONS = ["me", "org", "circle", "capture", "map", "none"] as const;
 export type ScanDestination = (typeof SCAN_DESTINATIONS)[number];
 
 export type BadgeScanRules = {
@@ -67,9 +72,14 @@ export type BadgeScanRules = {
  * as the starting point so a new conference is usable before anyone opens the
  * editor. Scanning a peer goes to their community profile because that is a bid
  * to connect with a person; scanning a company's staffer is a company lookup.
+ *
+ * ⚠️ Changing a DEFAULT changes nothing for a conference that already stored an
+ * answer. `normalizeDestinations` falls back per direction, so a stored
+ * `self: "map"` keeps winning until somebody saves a new one in the editor.
+ * Flipping the default and expecting live behaviour to move is the trap here.
  */
 export const DEFAULT_SCAN_DESTINATIONS: Record<ScanDirection, ScanDestination> = {
-  self: "map",
+  self: "me",
   attendeeToCompany: "org",
   attendeeToAttendee: "circle",
   companyToCompany: "org",
