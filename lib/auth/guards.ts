@@ -340,6 +340,32 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   return auth;
 }
 
+/** Is this person an org admin of an organisation on the conference-ops list? */
+async function inConferenceOpsAllowlist(ctx: AuthContext): Promise<boolean> {
+  const integration = await getIntegrationConfig();
+  const allowlist = integration.conference_ops_masthead_org_ids ?? [];
+  return ctx.orgAdminOrgIds.some((orgId) => allowlist.includes(orgId));
+}
+
+/**
+ * Is this signed-in person conference staff? Answers QUIETLY.
+ *
+ * ⛔ For deciding what a page SHOWS (a company picker, an invoice option) or
+ * as a fallback inside another check. requireConferenceOpsAccess writes an
+ * "auth_guard_denied" row on every no, which is right for a staff-only door and
+ * wrong here: every member browsing the offers page would be logged as refused,
+ * burying the refusals that mean somebody is actually locked out.
+ */
+export async function isConferenceOps(ctx: AuthContext): Promise<boolean> {
+  if (isGlobalAdmin(ctx.globalRole)) return true;
+  try {
+    return await inConferenceOpsAllowlist(ctx);
+  } catch (error) {
+    unstable_rethrow(error);
+    return false;
+  }
+}
+
 export async function requireConferenceOpsAccess(): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;
@@ -349,12 +375,7 @@ export async function requireConferenceOpsAccess(): Promise<GuardResult> {
   }
 
   try {
-    const integration = await getIntegrationConfig();
-    const allowlist = integration.conference_ops_masthead_org_ids ?? [];
-    const hasAllowedOpsOrg = auth.ctx.orgAdminOrgIds.some((orgId) =>
-      allowlist.includes(orgId),
-    );
-    if (!hasAllowedOpsOrg) {
+    if (!(await inConferenceOpsAllowlist(auth.ctx))) {
       await logAuditEventSafe({
         action: "auth_guard_denied",
         entityType: "auth_guard",
@@ -418,8 +439,7 @@ export async function requireOrgCommerceAccess(organizationId: string): Promise<
   if (isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(organizationId)) {
     return auth;
   }
-  const ops = await requireConferenceOpsAccess();
-  if (ops.ok) return ops;
+  if (await isConferenceOps(auth.ctx)) return auth;
   return {
     ok: false,
     status: 403,

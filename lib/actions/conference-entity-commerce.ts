@@ -6,7 +6,7 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireAuthenticated,
-  requireConferenceOpsAccess,
+  isConferenceOps,
   type AuthContext,
 } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -89,7 +89,7 @@ export type OrgEntitySeat = {
  */
 async function canManageOrgSeats(ctx: AuthContext, organizationId: string): Promise<boolean> {
   if (canManageOrganization(ctx, organizationId) || isGlobalAdmin(ctx.globalRole)) return true;
-  return (await requireConferenceOpsAccess()).ok;
+  return isConferenceOps(ctx);
 }
 
 /** Every allocatable seat an org holds for a conference, with who (if anyone) sits in it. */

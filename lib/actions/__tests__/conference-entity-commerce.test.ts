@@ -7,7 +7,7 @@ const {
   createAdminClientMock,
   resolveAssigneeForEmailMock,
   logAuditEventSafeMock,
-  requireConferenceOpsAccessMock,
+  isConferenceOpsMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
   canManageOrganizationMock: vi.fn(),
@@ -16,13 +16,13 @@ const {
   resolveAssigneeForEmailMock: vi.fn(),
   logAuditEventSafeMock: vi.fn(),
   // Not conference ops unless a test says so.
-  requireConferenceOpsAccessMock: vi.fn(async () => ({ ok: false })),
+  isConferenceOpsMock: vi.fn(async () => false),
 }));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   requireAdmin: vi.fn(),
-  requireConferenceOpsAccess: requireConferenceOpsAccessMock,
+  isConferenceOps: isConferenceOpsMock,
   canManageOrganization: canManageOrganizationMock,
   isGlobalAdmin: isGlobalAdminMock,
 }));
@@ -301,7 +301,7 @@ describe("conference-entity-commerce attendees", () => {
   it("lets conference ops add an attendee for a company they do not manage", async () => {
     canManageOrganizationMock.mockReturnValue(false);
     isGlobalAdminMock.mockReturnValue(false);
-    requireConferenceOpsAccessMock.mockResolvedValueOnce({ ok: true });
+    isConferenceOpsMock.mockResolvedValueOnce(true);
     const fake = fakeClientForAdd();
     createAdminClientMock.mockReturnValue(fake.client);
 

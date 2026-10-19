@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, isConferenceOps } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
@@ -47,8 +47,8 @@ export default async function ConferenceCartPage({
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
   // Conference ops can open any org's cart: the desk names and invoices a
   // walk-up here. Same rule as the actions (requireOrgCommerceAccess).
-  const opsAccess = await requireConferenceOpsAccess();
-  const canShopForAnyOrg = isAdmin || opsAccess.ok;
+  const isOps = await isConferenceOps(auth.ctx);
+  const canShopForAnyOrg = isOps;
 
   const { data: userOrgs } = await adminClient
     .from("user_organizations")
@@ -98,7 +98,7 @@ export default async function ConferenceCartPage({
    * payment is a staff decision, so an org admin buying for their own org
    * passes the manage-org check and must still fail this one.
    */
-  const canInvoice = opsAccess.ok;
+  const canInvoice = isOps;
 
   const [cartResult, orgContacts, orgSeatsResult] = await Promise.all([
     getConferenceCart(conference.id, selectedOrg.id),

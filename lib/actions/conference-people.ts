@@ -10,6 +10,7 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireConferenceOpsAccess,
+  isConferenceOps,
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
@@ -337,7 +338,7 @@ export async function listConferencePeople(
   const db = conferencePeopleClient();
   // Conference ops see the whole roster: the desk and war room are theirs.
   const isAdmin =
-    isGlobalAdmin(auth.ctx.globalRole) || (await requireConferenceOpsAccess()).ok;
+    await isConferenceOps(auth.ctx);
   const orgScope = auth.ctx.orgAdminOrgIds;
 
   const { data, error } = await db
