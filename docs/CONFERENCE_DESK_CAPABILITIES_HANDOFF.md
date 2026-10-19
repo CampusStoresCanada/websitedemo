@@ -112,7 +112,7 @@ consult is deleted from code.
   read from the session's own sign-in time (`amr` in the token,
   `signedInRecently` in guards).
 - Invoice: "Invoice the company instead" asks for the PIN first.
-- Hand-over: "Pay on this iPad" notes the sale in this browser
+- Hand-over: "Pay on this device" notes the sale in this browser
   (`desk-handover:<conference>`), then goes to Stripe. Success and cancel both
   bring staff back to the desk, which is locked behind the PIN — a reload
   stays locked. Unlocked, it checks the sale: paid shows the print cards; not
@@ -239,7 +239,7 @@ project_shared_email_walkup_rules):
 older than 15 minutes is asked to sign in again before choosing a PIN):
 - [ ] First open of the desk asks for a PIN, twice; a mismatch starts again
 - [ ] Invoice the company instead → PIN screen; Cancel goes back to the QR
-- [ ] Pay on this iPad → Stripe; back (paid or cancelled) lands on a locked desk
+- [ ] Pay on this device → Stripe; back (paid or cancelled) lands on a locked desk
 - [ ] Reload while locked: still locked
 - [ ] Right PIN unlocks: paid → green print cards; cancelled → red "Not paid"
 - [ ] Five wrong PINs → signed out; signing back in asks for a new PIN

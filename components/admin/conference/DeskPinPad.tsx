@@ -217,7 +217,7 @@ export function DeskPinSetup({
       title={first === null ? "Choose your desk PIN" : "Type it again"}
       subtitle={
         first === null
-          ? "4 to 6 digits. You will need it to approve an invoice and to take the iPad back after a customer pays on it."
+          ? "4 to 6 digits. You will need it to approve an invoice and to take the device back after a customer pays on it."
           : null
       }
       error={error}

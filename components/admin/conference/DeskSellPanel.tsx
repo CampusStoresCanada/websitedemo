@@ -330,7 +330,7 @@ export default function DeskSellPanel({
                 // eslint-disable-next-line @next/next/no-img-element -- a generated data URL
                 <img src={payment.qr} alt="Scan to pay by card" className="h-[min(60vw,360px)] w-[min(60vw,360px)]" />
               ) : (
-                <p className="text-base text-red-700">The QR code could not be drawn. Use Pay on this iPad.</p>
+                <p className="text-base text-red-700">The QR code could not be drawn. Use Pay on this device.</p>
               )}
               <p className="text-lg font-semibold">Scan with your phone to pay by card</p>
               <p className="text-sm text-gray-500">Waiting for payment… this screen moves on by itself.</p>
@@ -352,7 +352,7 @@ export default function DeskSellPanel({
                   }}
                   className="min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium"
                 >
-                  Pay on this iPad
+                  Pay on this device
                 </button>
               </div>
             </>

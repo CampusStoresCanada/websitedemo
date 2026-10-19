@@ -989,7 +989,7 @@ export default function CheckInDeskClient({
       ) : handOverOrderId ? (
         <DeskPinCheck
           conferenceId={conferenceId}
-          title="Please hand the iPad back"
+          title="Please hand the device back"
           subtitle="Staff: enter your PIN to unlock the desk."
           onPassed={() => {
             const orderId = handOverOrderId;
