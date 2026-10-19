@@ -449,7 +449,6 @@ export async function getIntegrationConfig(): Promise<IntegrationConfig> {
     'integration.circle_cutover_enabled',
     'integration.circle_canary_org_ids',
     'integration.circle_legacy_fallback_enabled',
-    'integration.conference_ops_masthead_org_ids',
   ])
 
   return {
@@ -459,9 +458,6 @@ export async function getIntegrationConfig(): Promise<IntegrationConfig> {
     circle_cutover_enabled: policies['integration.circle_cutover_enabled'] as boolean,
     circle_canary_org_ids: policies['integration.circle_canary_org_ids'] as string[],
     circle_legacy_fallback_enabled: policies['integration.circle_legacy_fallback_enabled'] as boolean,
-    conference_ops_masthead_org_ids:
-      (policies['integration.conference_ops_masthead_org_ids'] as string[] | undefined) ??
-      [],
   }
 }
 

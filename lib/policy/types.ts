@@ -154,7 +154,6 @@ export interface IntegrationConfig {
   circle_cutover_enabled: boolean
   circle_canary_org_ids: string[]
   circle_legacy_fallback_enabled: boolean
-  conference_ops_masthead_org_ids: string[]
 }
 
 export interface RetentionConsentConfig {
