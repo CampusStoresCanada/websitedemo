@@ -1287,6 +1287,18 @@ export default function CheckInDeskClient({
           >
             Scan
           </button>
+          {/* ⛔ Always reachable. A walk-up has no badge, so "Find" cannot live
+              only on a failed-scan card — the same panel, a second way in. */}
+          <button
+            type="button"
+            onClick={() => {
+              setLookupOpen(true);
+              setNameLookup("");
+            }}
+            className="rounded border border-white/50 px-3 py-1 text-xs font-medium text-white"
+          >
+            Find
+          </button>
           {scanResult ? (
             <p className={`text-xs ${SCAN_STATUS_COPY[scanResult]?.className ?? "text-gray-200"}`}>
               {SCAN_STATUS_COPY[scanResult]?.title ?? "Scan"}
