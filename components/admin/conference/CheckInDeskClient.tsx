@@ -28,7 +28,7 @@ type CheckInFacts = {
   dayDates: string[];
   admittedTo: string[];
   /** Resolved server-side — see lib/conference/badges/checkin.ts. */
-  reprintMode?: "variable_only" | "full_badge";
+  reprintStock?: "company_blank" | "spare" | "none";
   reprintReason?: string;
 };
 
@@ -586,7 +586,13 @@ export default function CheckInDeskClient({
         const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ op: "reprint_badge", reprintReason: reason }),
+          // The card the desk suggested, so the job is planned for what is
+          // actually in hand rather than always as a full badge.
+          body: JSON.stringify({
+            op: "reprint_badge",
+            reprintReason: reason,
+            stockInHand: facts[personId]?.reprintStock,
+          }),
         });
         const payload = (await response.json()) as { error?: string };
         if (!response.ok) {
@@ -602,7 +608,7 @@ export default function CheckInDeskClient({
         setReprintBusy(null);
       }
     },
-    [conferenceId, loadRows, pushScanCard]
+    [conferenceId, facts, loadRows, pushScanCard]
   );
 
   const activeCards = useMemo(
@@ -845,23 +851,25 @@ export default function CheckInDeskClient({
                       two different jobs and the operator has to walk to a
                       different machine for one of them — saying so after the
                       job is queued is saying it too late. */}
-                  {card.facts?.reprintMode ? (
+                  {card.facts?.reprintStock ? (
                     <p
                       className={`mt-1.5 rounded px-1.5 py-1 text-[11px] ${
-                        card.facts.reprintMode === "variable_only"
-                          ? "bg-emerald-500/20 text-emerald-100"
-                          : "bg-amber-500/20 text-amber-100"
+                        card.facts.reprintStock === "none"
+                          ? "bg-amber-500/20 text-amber-100"
+                          : "bg-emerald-500/20 text-emerald-100"
                       }`}
                     >
                       <strong>
-                        {card.facts.reprintMode === "variable_only"
-                          ? "Overprint a company blank"
-                          : "Full badge — colour printer"}
+                        {card.facts.reprintStock === "company_blank"
+                          ? "Label onto a company blank"
+                          : card.facts.reprintStock === "spare"
+                            ? "Label onto a spare"
+                            : "Full badge — colour printer"}
                       </strong>{" "}
                       {card.facts.reprintReason}
-                      {card.facts.reprintMode === "variable_only"
-                        ? " Check the pile first; print in full if it is empty."
-                        : ""}
+                      {card.facts.reprintStock === "none"
+                        ? ""
+                        : " Check the pile first; print in full if it is empty."}
                     </p>
                   ) : null}
                   <div className="mt-1.5 flex flex-wrap gap-1.5">

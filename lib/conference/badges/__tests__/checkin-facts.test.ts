@@ -182,7 +182,7 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("variable_only");
+    expect(facts.p1.reprintStock).toBe("company_blank");
   });
 
   it("prints the whole card when every seat at that company is named", () => {
@@ -199,7 +199,7 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("full_badge");
+    expect(facts.p1.reprintStock).toBe("none");
   });
 
   it("does not let one company's blank cover another company's person", () => {
@@ -219,6 +219,6 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("full_badge");
+    expect(facts.p1.reprintStock).toBe("none");
   });
 });

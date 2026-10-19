@@ -208,27 +208,48 @@ export function planReprint(params: {
 }
 
 /**
- * The default suggestion for which stock to reach for.
+ * Which card the desk should reach for. ⛔ The ONE answer: the desk card shows
+ * it and the reprint job is planned from it.
  *
  * ⚠️ An INFERENCE, not stock control: it says a blank for that company went to
  * print, not that one is still in the box — nobody counts them as they are used.
  * The operator overrides it by saying what they actually picked up, which is why
  * `planReprint` takes the stock rather than deriving it.
+ *
+ * ⛔ A spare must be THEIR type. A spare carries the schedule of the
+ * registration type it was printed for, so the nearest stack would put somebody
+ * else's four days on the back of their badge.
  */
 export function suggestStock(params: {
   organizationId: string | null;
   unnamedSeatOrganizationIds: Iterable<string>;
-  sparesWerePrinted: boolean;
+  /** The registration type this person's badge is printed as. */
+  registrationTypeId: string | null;
+  /** Spares the run printed, per registration type. Empty when spares are off. */
+  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }>;
 }): { stock: BadgeStock; reason: string } {
-  const { organizationId, sparesWerePrinted } = params;
+  const { organizationId, registrationTypeId, sparesByType } = params;
   if (organizationId && new Set(params.unnamedSeatOrganizationIds).has(organizationId)) {
     return {
       stock: "company_blank",
       reason: "This company has an unnamed seat, so a blank for it was printed.",
     };
   }
-  if (sparesWerePrinted) {
-    return { stock: "spare", reason: "No blank for this company; use desk stock." };
+  const printed = sparesByType.filter((t) => t.count > 0);
+  const match = printed.find((t) => t.entityId === registrationTypeId);
+  if (match) {
+    return {
+      stock: "spare",
+      reason: `No blank for this company; use one of the ${match.count} ${match.name} spares.`,
+    };
+  }
+  if (printed.length > 0) {
+    return {
+      stock: "none",
+      reason:
+        "No blank, and no spare was printed for their registration type. Another " +
+        "type's spare would carry the wrong schedule.",
+    };
   }
   return { stock: "none", reason: "No blank for this company and no spares in this run." };
 }

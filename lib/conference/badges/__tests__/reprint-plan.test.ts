@@ -50,25 +50,44 @@ describe("the write the desk must not skip", () => {
 
 describe("which stock to reach for", () => {
   const orgs = ["org-crestar"];
+  const spares = [
+    { entityId: "reg-full", name: "Full Delegate", count: 6 },
+    { entityId: "reg-day", name: "Day Pass", count: 0 },
+  ];
 
   it("suggests the company blank when that company has an unnamed seat", () => {
     expect(
       suggestStock({
         organizationId: "org-crestar",
         unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: true,
+        registrationTypeId: "reg-full",
+        sparesByType: spares,
       }).stock
     ).toBe("company_blank");
   });
 
-  it("falls back to desk stock when the company has none", () => {
+  it("falls back to a spare of THEIR type when the company has no blank", () => {
+    const r = suggestStock({
+      organizationId: "org-other",
+      unnamedSeatOrganizationIds: orgs,
+      registrationTypeId: "reg-full",
+      sparesByType: spares,
+    });
+    expect(r.stock).toBe("spare");
+    expect(r.reason).toContain("Full Delegate");
+  });
+
+  // ⛔ A spare carries its type's schedule. Day Pass printed none; Full
+  // Delegate spares exist but would print the wrong days on the back.
+  it("refuses another type's spare", () => {
     expect(
       suggestStock({
         organizationId: "org-other",
         unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: true,
+        registrationTypeId: "reg-day",
+        sparesByType: spares,
       }).stock
-    ).toBe("spare");
+    ).toBe("none");
   });
 
   it("says none when the run carried no spares", () => {
@@ -76,7 +95,8 @@ describe("which stock to reach for", () => {
       suggestStock({
         organizationId: "org-other",
         unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: false,
+        registrationTypeId: "reg-full",
+        sparesByType: [],
       }).stock
     ).toBe("none");
   });
@@ -86,7 +106,8 @@ describe("which stock to reach for", () => {
       suggestStock({
         organizationId: null,
         unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: false,
+        registrationTypeId: "reg-full",
+        sparesByType: [],
       }).stock
     ).toBe("none");
   });

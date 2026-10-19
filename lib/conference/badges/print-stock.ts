@@ -217,49 +217,6 @@ export function computeSpareCounts(params: {
 }
 
 /**
- * What a reprint has to produce for one person.
- *
- * ⛔ The desk is not always printing a whole badge. If that person's company
- * still has an outstanding seat, a blank for it went into the print run —
- * company name, logo and map already on the card — and the only thing missing
- * is the person: name, title, scan code. Overprinting those onto an existing
- * blank is a monochrome job, which is what the on-site thermal printer can
- * actually do. Reprinting the whole card is a colour job and a different
- * machine.
- *
- * ⚠️ This is an INFERENCE, not stock control. It says a blank was printed for
- * that company, not that one is still in the box — nobody counts them as they
- * are used. It is the difference between "look in the CRESTAR pile first" and
- * "print this from scratch", which is the decision the desk actually makes; if
- * the pile is empty the operator falls back and nothing breaks.
- */
-export type ReprintMode = "variable_only" | "full_badge";
-
-export function reprintModeForOrganization(params: {
-  organizationId: string | null;
-  unnamedSeatOrganizationIds: Iterable<string>;
-}): { mode: ReprintMode; reason: string } {
-  const { organizationId } = params;
-  if (!organizationId) {
-    return {
-      mode: "full_badge",
-      reason: "No organisation on this badge, so no company blank could exist.",
-    };
-  }
-  const outstanding = new Set(params.unnamedSeatOrganizationIds);
-  return outstanding.has(organizationId)
-    ? {
-        mode: "variable_only",
-        reason: "This company has an unnamed seat, so a blank card for it was printed.",
-      }
-    : {
-        mode: "full_badge",
-        reason: "Every seat at this company is named, so no blank was printed for it.",
-      };
-}
-
-
-/**
  * The three numbers the percentages are applied to, read from live data.
  *
  * ⛔ ONE implementation, two callers: the print pipeline sizing a real stack and

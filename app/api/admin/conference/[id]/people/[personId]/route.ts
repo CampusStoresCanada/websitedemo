@@ -46,6 +46,7 @@ export async function PATCH(
     patch?: Record<string, unknown>;
     reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
     reprintNote?: string | null;
+    stockInHand?: string;
     transportMethod?: "pdf" | "printer_bridge";
     canonicalPatch?: {
       displayName?: string | null;
@@ -60,6 +61,7 @@ export async function PATCH(
       patch?: Record<string, unknown>;
       reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
       reprintNote?: string | null;
+      stockInHand?: string;
       transportMethod?: "pdf" | "printer_bridge";
       canonicalPatch?: {
         displayName?: string | null;
@@ -113,7 +115,11 @@ export async function PATCH(
     const result = await reprintConferenceBadge(
       personId,
       payload.reprintReason,
-      payload.reprintNote ?? null
+      payload.reprintNote ?? null,
+      // Anything unrecognised is "did not say", which plans a full badge.
+      payload.stockInHand === "company_blank" || payload.stockInHand === "spare"
+        ? payload.stockInHand
+        : undefined
     );
     if (!result.success) {
       const lowerError = result.error?.toLowerCase() ?? "";

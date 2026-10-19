@@ -22,9 +22,11 @@ import {
 } from "@/lib/conference/badges/run";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  reprintModeForOrganization,
-  type ReprintMode,
+  getBadgePrintStock,
+  spareCountsByType,
+  spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
+import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
 import type { AccessSummary } from "@/lib/conference/entity-commerce";
 
 export type CheckInFacts = {
@@ -51,7 +53,7 @@ export type CheckInFacts = {
    * computed answer also keeps the print-stock module (and the database work
    * behind it) out of a client bundle.
    */
-  reprintMode: ReprintMode;
+  reprintStock: BadgeStock;
   /** Why, in words an operator can act on. */
   reprintReason: string;
 };
@@ -114,7 +116,9 @@ export function todayVerdict(
 export function checkInFactsFromRun(
   run: BadgeRun,
   /** Day entity name → ISO date, for the "is today included" answer. */
-  dateByDayName: Map<string, string> = new Map()
+  dateByDayName: Map<string, string> = new Map(),
+  /** Spares the run printed, per registration type. Empty when spares are off. */
+  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }> = []
 ): Record<string, CheckInFacts> {
   const entitlementByPerson = new Map(run.entitlements.map((e) => [e.personId, e]));
   const facts: Record<string, CheckInFacts> = {};
@@ -153,11 +157,13 @@ export function checkInFactsFromRun(
           .filter((date): date is string => Boolean(date)),
         admittedTo: deskAccessLines(access),
         ...(() => {
-          const { mode, reason } = reprintModeForOrganization({
+          const { stock, reason } = suggestStock({
             organizationId: seat.organizationId || null,
             unnamedSeatOrganizationIds,
+            registrationTypeId: resolved.entityId,
+            sparesByType,
           });
-          return { reprintMode: mode, reprintReason: reason };
+          return { reprintStock: stock, reprintReason: reason };
         })(),
       };
     }
@@ -191,14 +197,23 @@ export async function loadCheckInFacts(
   conferenceId: string
 ): Promise<CheckInFactsPayload> {
   const db = createAdminClient();
-  const [run, { data: dayRows }] = await Promise.all([
+  const [run, { data: dayRows }, printStock] = await Promise.all([
     resolveBadgeRun(conferenceId),
     db
       .from("conference_entities")
       .select("name, attributes")
       .eq("conference_id", conferenceId)
       .eq("kind", "day"),
+    getBadgePrintStock(conferenceId),
   ]);
+
+  // Spares by type, by the printer's own rule — the manifest is not stored.
+  // ⚠️ A failure here costs the spare suggestion, never the desk.
+  const sparesByType = printStock.enabled
+    ? await spareCountsForJob(db, conferenceId, run, printStock)
+        .then((counts) => spareCountsByType(run, counts.total))
+        .catch(() => [])
+    : [];
 
   const dateByDayName = new Map<string, string>();
   for (const row of (dayRows ?? []) as Array<Record<string, unknown>>) {
@@ -209,7 +224,7 @@ export async function loadCheckInFacts(
   }
 
   return {
-    facts: checkInFactsFromRun(run, dateByDayName),
+    facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
   };
 }
