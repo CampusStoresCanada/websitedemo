@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OfferCard from "@/components/conference/OfferCard";
-import { getConferenceCart } from "@/lib/actions/conference-commerce";
+import QRCode from "qrcode";
+import { createConferenceCheckout, getConferenceCart } from "@/lib/actions/conference-commerce";
 import {
+  cancelDeskCheckout,
+  getDeskSaleStatus,
+  type DeskSalePerson,
+  type DeskSaleState,
   createWalkUpPerson,
   listDeskSaleOrganizations,
   loadDeskSaleOffers,
@@ -42,11 +47,14 @@ export default function DeskSellPanel({
   storefrontPath,
   context,
   onClose,
+  onSold,
 }: {
   conferenceId: string;
   storefrontPath: string;
   context: DeskSellContext;
   onClose: () => void;
+  /** The sale landed: these people are seated and ready to print. */
+  onSold: (people: DeskSalePerson[], state: Extract<DeskSaleState, "paid" | "invoiced">) => void;
 }) {
   const [orgs, setOrgs] = useState<Org[] | null>(null);
   const [orgId, setOrgId] = useState<string | null>(context.organizationId ?? null);
@@ -54,6 +62,17 @@ export default function DeskSellPanel({
   const [groups, setGroups] = useState<DeskOfferGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cart, setCart] = useState<{ count: number; totalCents: number } | null>(null);
+  const [lines, setLines] = useState<Array<{ name: string; quantity: number; attendees: string[] }>>([]);
+
+  // The payment screen: a card checkout the attendee pays from their own phone
+  // by scanning the QR, or an invoice to their company.
+  const [payment, setPayment] = useState<{
+    orderId: string;
+    url: string;
+    qr: string | null;
+    method: "card" | "invoice";
+  } | null>(null);
+  const [paymentNote, setPaymentNote] = useState<string | null>(null);
 
   // Who a registration is for. Known when the desk sent a person; otherwise the
   // walk-up form below fills it — never by guessing from an email.
@@ -129,6 +148,7 @@ export default function DeskSellPanel({
     if (res.success) {
       const count = res.data.offerItems.reduce((n, item) => n + item.quantity, 0);
       setCart({ count, totalCents: res.data.totalCents });
+      setLines(cartLines(res.data.offerItems));
     }
   }, [conferenceId, orgId]);
 
@@ -151,6 +171,7 @@ export default function DeskSellPanel({
         count: res.data.offerItems.reduce((n, item) => n + item.quantity, 0),
         totalCents: res.data.totalCents,
       });
+      setLines(cartLines(res.data.offerItems));
     });
     return () => {
       cancelled = true;
@@ -163,6 +184,157 @@ export default function DeskSellPanel({
     window.addEventListener(CONFERENCE_CART_UPDATED_EVENT, onUpdate);
     return () => window.removeEventListener(CONFERENCE_CART_UPDATED_EVENT, onUpdate);
   }, [refreshCart]);
+
+  // ⛔ Where the payer lands afterwards: the attendee's phone (signed out) sees
+  // "payment received"; the desk's own iPad goes straight back to the desk.
+  const returnUrls = () => {
+    const origin = window.location.origin;
+    const query = `org=${orgId}&desk=${conferenceId}`;
+    return {
+      successUrl: `${origin}${storefrontPath}/checkout/success?${query}`,
+      cancelUrl: `${origin}${storefrontPath}/checkout/cancel?${query}`,
+    };
+  };
+
+  const startCard = async () => {
+    if (!orgId) return;
+    setBusy(true);
+    setError(null);
+    const res = await createConferenceCheckout({ conferenceId, organizationId: orgId, paymentMethod: "card", ...returnUrls() });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error);
+      return;
+    }
+    const qr = await QRCode.toDataURL(res.data.checkoutUrl, { margin: 1, width: 360 }).catch(() => null);
+    setPayment({ orderId: res.data.orderId, url: res.data.checkoutUrl, qr, method: "card" });
+  };
+
+  // ⛔ Switching to an invoice closes the card link FIRST (cancelDeskCheckout),
+  // so nobody can still pay it on their phone after the company is billed.
+  const switchToInvoice = async () => {
+    if (!orgId || !payment) return;
+    setBusy(true);
+    setError(null);
+    const closed = await cancelDeskCheckout({ conferenceId, orderId: payment.orderId });
+    if (!closed.success) {
+      setBusy(false);
+      setError(closed.error);
+      return;
+    }
+    const res = await createConferenceCheckout({
+      conferenceId,
+      organizationId: orgId,
+      paymentMethod: "invoice",
+      ...returnUrls(),
+    });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error);
+      setPayment(null);
+      return;
+    }
+    setPayment({ orderId: res.data.orderId, url: res.data.checkoutUrl, qr: null, method: "invoice" });
+    setPaymentNote("Invoice sent to the company. Their badge can print now.");
+  };
+
+  // Back to the cart: the open card link is closed and what it held released.
+  const leavePayment = async () => {
+    if (payment?.method === "card") await cancelDeskCheckout({ conferenceId, orderId: payment.orderId });
+    setPayment(null);
+    setPaymentNote(null);
+  };
+
+  // Watch the sale. Paid (webhook) or invoiced: the people it seated go back to
+  // the desk as "ready to print" cards.
+  useEffect(() => {
+    if (!payment) return;
+    let stopped = false;
+    const tick = async () => {
+      const res = await getDeskSaleStatus({ conferenceId, orderId: payment.orderId });
+      if (stopped || !res.success) return;
+      if ((res.data.state === "paid" || res.data.state === "invoiced") && res.data.people.length > 0) {
+        stopped = true;
+        onSold(res.data.people, res.data.state);
+      }
+    };
+    const id = window.setInterval(() => void tick(), 3000);
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [conferenceId, payment, onSold]);
+
+  if (payment) {
+    return (
+      <div className="fixed inset-0 z-[80] flex flex-col bg-white text-gray-900">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xl font-bold">{payment.method === "card" ? "Pay by card" : "Invoiced"}</p>
+            <p className="truncate text-base text-gray-600">
+              {org?.name}
+              {cart ? ` · ${formatCents(cart.totalCents)}` : ""}
+            </p>
+          </div>
+          {payment.method === "card" ? (
+            <button
+              type="button"
+              onClick={() => void leavePayment()}
+              className="min-h-12 shrink-0 rounded-lg border border-gray-300 px-5 text-base font-medium"
+            >
+              Back
+            </button>
+          ) : null}
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-5 overflow-y-auto px-5 py-6 text-center">
+          {error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-base text-red-700">{error}</p> : null}
+          <ul className="text-base text-gray-700">
+            {lines.map((line, i) => (
+              <li key={i}>
+                {line.quantity} × {line.name}
+                {line.attendees.length ? ` (for ${line.attendees.join(", ")})` : ""}
+              </li>
+            ))}
+          </ul>
+          {payment.method === "card" ? (
+            <>
+              {payment.qr ? (
+                // eslint-disable-next-line @next/next/no-img-element -- a generated data URL
+                <img src={payment.qr} alt="Scan to pay by card" className="h-[min(60vw,360px)] w-[min(60vw,360px)]" />
+              ) : (
+                <p className="text-base text-red-700">The QR code could not be drawn. Use Pay on this iPad.</p>
+              )}
+              <p className="text-lg font-semibold">Scan with your phone to pay by card</p>
+              <p className="text-sm text-gray-500">Waiting for payment… this screen moves on by itself.</p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void switchToInvoice()}
+                  className="min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium disabled:opacity-50"
+                >
+                  {busy ? "…" : "Invoice the company instead"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.location.assign(payment.url)}
+                  className="min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium"
+                >
+                  Pay on this iPad
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-semibold">{paymentNote}</p>
+              <p className="text-sm text-gray-500">Getting their badge ready…</p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-white text-gray-900">
@@ -351,21 +523,27 @@ export default function DeskSellPanel({
               ? `${cart.count} in the cart · ${formatCents(cart.totalCents)}`
               : "Nothing in the cart yet"}
           </p>
-          {/* ⚠️ Interim: opens the ordinary cart to name them and pay, until the
-              desk's own payment screen replaces it. */}
-          <a
-            href={`${storefrontPath}/cart?org=${org.id}`}
-            target="_blank"
-            rel="noreferrer"
-            aria-disabled={!cart || cart.count === 0}
-            className={`inline-flex min-h-12 items-center rounded-lg px-5 text-base font-semibold ${
-              cart && cart.count > 0 ? "bg-gray-900 text-white" : "pointer-events-none bg-gray-200 text-gray-500"
-            }`}
+          <button
+            type="button"
+            disabled={!cart || cart.count === 0 || busy}
+            onClick={() => void startCard()}
+            className="min-h-12 rounded-lg bg-gray-900 px-5 text-base font-semibold text-white disabled:bg-gray-200 disabled:text-gray-500"
           >
-            Review and pay →
-          </a>
+            {busy ? "…" : "Review and pay →"}
+          </button>
         </div>
       ) : null}
     </div>
   );
+}
+
+/** The cart, as lines the payment screen can read out. */
+function cartLines(
+  items: Array<{ name: string; quantity: number; attendees: Array<{ name: string } | null> }>
+): Array<{ name: string; quantity: number; attendees: string[] }> {
+  return items.map((item) => ({
+    name: item.name,
+    quantity: item.quantity,
+    attendees: item.attendees.filter((a): a is { name: string } => Boolean(a)).map((a) => a.name),
+  }));
 }

@@ -131,6 +131,17 @@ const SCAN_STATUS_COPY: Record<
   },
   // A walk-up named to a seat their company already owns. Not a check-in and
   // not a print: the operator reprints from this card onto the company blank.
+  // A desk sale landed: they hold a registration now. The card prints it.
+  sale_paid: {
+    title: "Paid: ready to print",
+    description: "Their registration is paid. Print their badge.",
+    className: "text-emerald-700",
+  },
+  sale_invoiced: {
+    title: "Invoiced: ready to print",
+    description: "Their company has been invoiced. Print their badge.",
+    className: "text-emerald-700",
+  },
   seat_named: {
     title: "Named to an open seat",
     description: "Named to a seat their company already holds. Print their badge from here.",
@@ -147,6 +158,8 @@ const SCAN_TONE: Record<string, ScanTone> = {
   valid: "go",
   manual_checked_in: "go",
   seat_named: "go",
+  sale_paid: "go",
+  sale_invoiced: "go",
   already_checked_in: "check",
   invalid_token: "stop",
   revoked_token: "stop",
@@ -794,7 +807,9 @@ export default function CheckInDeskClient({
    * affordance standing in for a desk control, at a desk, with a queue.
    */
   const reprintBadge = useCallback(
-    async (personId: string, reason: ReprintReason) => {
+    // ops_override is the desk's FIRST print for someone it just sold to — not
+    // one of the operator's reprint reasons, so it carries a note saying so.
+    async (personId: string, reason: ReprintReason | "ops_override") => {
       setReprintBusy(personId);
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
@@ -805,6 +820,7 @@ export default function CheckInDeskClient({
           body: JSON.stringify({
             op: "reprint_badge",
             reprintReason: reason,
+            ...(reason === "ops_override" ? { reprintNote: "First badge for a desk sale" } : {}),
             stockInHand: facts[personId]?.reprintStock,
           }),
         });
@@ -1159,6 +1175,16 @@ export default function CheckInDeskClient({
                   <p>Hotel confirm: {card.hotelConfirmationCode ?? "n/a"}</p>
                 </div>
               ) : null}
+              {(card.state === "sale_paid" || card.state === "sale_invoiced") && card.personId ? (
+                <button
+                  type="button"
+                  disabled={reprintBusy === card.personId}
+                  onClick={() => void reprintBadge(card.personId as string, "ops_override")}
+                  className="mt-3 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
+                >
+                  {reprintBusy === card.personId ? "…" : "Print badge"}
+                </button>
+              ) : null}
               {card.state === "not_valid_today" && card.personId ? (
                 <button
                   type="button"
@@ -1500,6 +1526,13 @@ export default function CheckInDeskClient({
           storefrontPath={storefrontPath}
           context={sellContext}
           onClose={() => setSellContext(null)}
+          onSold={(people, state) => {
+            setSellContext(null);
+            // Unknown people make the desk refetch roster and facts — see pushScanCard.
+            for (const person of people) {
+              pushScanCard(state === "paid" ? "sale_paid" : "sale_invoiced", person.personId);
+            }
+          }}
         />
       ) : null}
 

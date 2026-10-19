@@ -1670,6 +1670,11 @@ export async function createConferenceCheckout(
           error: `Invoice sent but the entitlement did not mint: ${mintV3Error.message}`,
         };
       }
+      // ⛔ And NAME them now, not on invoice.paid: an invoiced walk-up at the
+      // desk is printed while they are standing there, and an unnamed seat has
+      // no badge. Same call the paid path makes; it only fills OPEN seats, so
+      // when invoice.paid runs it later there is nothing left to do.
+      await mintRegistrationAttendeesFromOrder(adminClient, order.id, input.conferenceId, input.organizationId);
       /**
        * ⚠️ v3 ONLY, deliberately. process_conference_order_paid also calls
        * mint_grant_balances_for_order — the LEGACY grant model — but that

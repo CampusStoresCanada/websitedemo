@@ -74,6 +74,12 @@ export type SeatQuery = {
   entityKinds?: string[];
   /** Only seats nobody is named to, or only seats somebody is. */
   assigned?: boolean;
+  /**
+   * Only seats from these balances — what one order's purchases gave. Widened
+   * in for the check-in desk, which follows a sale it started to the people it
+   * seated.
+   */
+  balanceIds?: string[];
 };
 
 // The shape of the client this needs. Kept structural rather than importing a
@@ -108,6 +114,7 @@ export async function loadSeatHoldings(
   if (query.holderPersonId) seatQuery = seatQuery.eq("holder_person_id", query.holderPersonId);
   if (query.assigned === true) seatQuery = seatQuery.not("holder_person_id", "is", null);
   if (query.assigned === false) seatQuery = seatQuery.is("holder_person_id", null);
+  if (query.balanceIds) seatQuery = seatQuery.in("balance_id", query.balanceIds);
 
   const [seatRes, entityRes, refRes] = await Promise.all([
     seatQuery,

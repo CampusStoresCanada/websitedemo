@@ -15,8 +15,10 @@ import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import { personAdmittedDates } from "@/lib/conference/badges/checkin";
 import { conferenceToday } from "@/lib/conference/desk-staff";
 import { rankDeskOffers, type DeskOfferGroup } from "@/lib/conference/desk-offers";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 import { createKnownPerson } from "@/lib/identity/lifecycle";
 import { findUserByEmail } from "@/lib/supabase/user-lookup";
+import { stripe } from "@/lib/stripe/client";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -203,4 +205,129 @@ export async function createWalkUpPerson(params: {
   );
   if (!created.personId) return { success: false, error: created.error ?? "Could not add them." };
   return { success: true, data: { contactId: created.personId } };
+}
+
+export type DeskSaleState = "waiting" | "paid" | "invoiced" | "canceled";
+export type DeskSalePerson = { personId: string; name: string; registration: string };
+
+/**
+ * Where a sale the desk started has got to, and who it seated.
+ *
+ *   waiting  — the card link is open; nobody has paid yet
+ *   paid     — Stripe confirmed it (the webhook ran); seats are named
+ *   invoiced — the invoice went out; seats are named now, payment comes later
+ *   canceled — the operator switched method, or the hold expired
+ *
+ * People are traced order → lines → purchases → balances → seats → holder,
+ * the same chain the seats were minted along.
+ */
+export async function getDeskSaleStatus(params: {
+  conferenceId: string;
+  orderId: string;
+}): Promise<Result<{ state: DeskSaleState; people: DeskSalePerson[] }>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const { data: order } = await db
+    .from("conference_orders")
+    .select("id, status, invoice_id, conference_id")
+    .eq("id", params.orderId)
+    .maybeSingle();
+  if (!order || order.conference_id !== params.conferenceId) {
+    return { success: false, error: "That sale was not found." };
+  }
+
+  const state: DeskSaleState =
+    order.status === "paid" || order.status === "partially_refunded"
+      ? "paid"
+      : order.status === "canceled"
+        ? "canceled"
+        : order.invoice_id
+          ? "invoiced"
+          : "waiting";
+  if (state === "waiting" || state === "canceled") return { success: true, data: { state, people: [] } };
+
+  // ⛔ Every read checks its error: an ignored error reads as "nobody", and the
+  // desk would wait for a badge that is already there.
+  const { data: items, error: itemsError } = await db.from("conference_order_items").select("id").eq("order_id", order.id);
+  if (itemsError) return { success: false, error: itemsError.message };
+  const itemIds = (items ?? []).map((i) => i.id as string);
+  if (itemIds.length === 0) return { success: true, data: { state, people: [] } };
+  const { data: purchases, error: purchasesError } = await db.from("entity_purchases").select("id").in("order_item_id", itemIds);
+  if (purchasesError) return { success: false, error: purchasesError.message };
+  const purchaseIds = (purchases ?? []).map((p) => p.id as string);
+  if (purchaseIds.length === 0) return { success: true, data: { state, people: [] } };
+  const { data: balances, error: balancesError } = await db.from("entity_balances").select("id").in("purchase_id", purchaseIds);
+  if (balancesError) return { success: false, error: balancesError.message };
+  const balanceIds = (balances ?? []).map((b) => b.id as string);
+  if (balanceIds.length === 0) return { success: true, data: { state, people: [] } };
+
+  // ⛔ Through the one seat reader (loadSeatHoldings), never the table: it
+  // throws on a failed read rather than reporting nobody, and names holders.
+  const { seats } = await loadSeatHoldings(db, {
+    conferenceId: params.conferenceId,
+    balanceIds,
+    entityKinds: ["registration"],
+    assigned: true,
+  });
+  return {
+    success: true,
+    data: {
+      state,
+      people: seats.map((seat) => ({
+        personId: seat.holderPersonId as string,
+        name: seat.holderName ?? "",
+        registration: seat.entityName,
+      })),
+    },
+  };
+}
+
+/**
+ * Withdraw a card checkout the desk opened, so the company can be invoiced
+ * instead.
+ *
+ * ⛔ Expires the Stripe link FIRST: otherwise the attendee could still pay on
+ * their phone after their company was invoiced, and pay twice. Then the order
+ * is canceled, releasing what it held. Only a still-pending order of this
+ * conference; a paid one is left alone.
+ */
+export async function cancelDeskCheckout(params: {
+  conferenceId: string;
+  orderId: string;
+}): Promise<Result<null>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: order } = await db
+    .from("conference_orders")
+    .select("id, status, conference_id, stripe_checkout_session_id")
+    .eq("id", params.orderId)
+    .maybeSingle();
+  if (!order || order.conference_id !== params.conferenceId) {
+    return { success: false, error: "That sale was not found." };
+  }
+  if (order.status !== "pending") return { success: false, error: "That sale is no longer open." };
+
+  if (order.stripe_checkout_session_id) {
+    try {
+      await stripe.checkout.sessions.expire(order.stripe_checkout_session_id as string);
+    } catch (error) {
+      // An already-completed session cannot be expired: someone paid. Stop.
+      return {
+        success: false,
+        error: `The card link could not be closed, so it may already be paid: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+  }
+  const { error } = await db
+    .from("conference_orders")
+    .update({ status: "canceled" })
+    .eq("id", order.id)
+    .eq("status", "pending");
+  if (error) return { success: false, error: error.message };
+  return { success: true, data: null };
 }

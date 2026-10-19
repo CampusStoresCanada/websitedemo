@@ -28,8 +28,7 @@ import {
 } from "@/lib/conference/badges/print-stock";
 import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
 import { admittedDates, type AccessSummary } from "@/lib/conference/entity-commerce";
-import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
-import { indexById } from "@/lib/conference/entity-graph";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 
 export type CheckInFacts = {
   /** Who they are here with. The card used to show a bare name. */
@@ -296,26 +295,15 @@ async function loadDayDates(
  * entitlements, without paying for a whole run. Empty when they hold nothing.
  */
 export async function personAdmittedDates(conferenceId: string, personId: string): Promise<string[]> {
-  const db = createAdminClient();
-  const [entitiesRes, refsRes, seatsRes] = await Promise.all([
-    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
-    db
-      .from("conference_entity_refs")
-      .select("from_entity_id, to_entity_id, role, quantity")
-      .eq("conference_id", conferenceId),
-    db
-      .from("entity_balance_seats")
-      .select("entity_id")
-      .eq("conference_id", conferenceId)
-      .eq("holder_person_id", personId),
-  ]);
-  if (entitiesRes.error || refsRes.error || seatsRes.error) {
-    throw new Error("Could not read what this badge covers.");
-  }
-  const heldIds = [...new Set((seatsRes.data ?? []).map((s) => s.entity_id as string))];
+  // ⛔ Through the one seat reader: it throws on a failed read (never "holds
+  // nothing"), and it already builds the catalogue graph this walk needs.
+  const { seats, entitiesById } = await loadSeatHoldings(createAdminClient(), {
+    conferenceId,
+    holderPersonId: personId,
+  });
+  const heldIds = [...new Set(seats.map((seat) => seat.entityId))];
   if (heldIds.length === 0) return [];
-  const byId = indexById(buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []));
-  return admittedDates(heldIds, byId);
+  return admittedDates(heldIds, entitiesById);
 }
 
 /**
