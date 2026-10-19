@@ -12,6 +12,7 @@ import {
   readPresentationMode,
   type PresentationLevel,
 } from "@/lib/presentation/mode";
+import { inForceOrgLinkFilter } from "@/lib/auth/org-link";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -119,7 +120,9 @@ export const getIdentitySnapshot = cache(
         `
         )
         .eq("user_id", userId)
-        .eq("status", "active"),
+        .eq("status", "active")
+        // A link past its end date is off from that day, nightly run or not.
+        .or(inForceOrgLinkFilter()),
       // Capabilities come from governance_role_assignments via a SECURITY
       // DEFINER function, NOT from a flag on profiles. Roles are the single
       // place authority is recorded, so a capability follows the office and

@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   requireAuthenticatedMock,
-  requireConferenceOpsAccessMock,
+  requireConferenceDeskAccessMock,
   isGlobalAdminMock,
   createAdminClientMock,
   stripeInvoiceCreateMock,
@@ -40,7 +40,7 @@ const {
   resolveConferenceOrderTaxRatesMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
-  requireConferenceOpsAccessMock: vi.fn(),
+  requireConferenceDeskAccessMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
   createAdminClientMock: vi.fn(),
   stripeInvoiceCreateMock: vi.fn(),
@@ -63,7 +63,7 @@ const {
 
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
-  requireConferenceOpsAccess: requireConferenceOpsAccessMock,
+  requireConferenceDeskAccess: requireConferenceDeskAccessMock,
   isGlobalAdmin: isGlobalAdminMock,
   // Mirrors the real rule over this file's mocks: global admin, member of the
   // org, or conference ops.
@@ -71,7 +71,7 @@ vi.mock("@/lib/auth/guards", () => ({
     const auth = await requireAuthenticatedMock();
     if (!auth.ok) return auth;
     if (isGlobalAdminMock(auth.ctx.globalRole) || auth.ctx.activeOrgIds?.includes(organizationId)) return auth;
-    const ops = await requireConferenceOpsAccessMock();
+    const ops = await requireConferenceDeskAccessMock();
     return ops?.ok ? ops : { ok: false, status: 403, error: "You are not authorized to manage commerce for this organization." };
   },
 }));
@@ -168,7 +168,7 @@ beforeEach(() => {
     ok: true,
     ctx: { userId: "staff-1", userEmail: "desk@campusstores.ca", globalRole: "member", activeOrgIds: ["org-1"] },
   });
-  requireConferenceOpsAccessMock.mockResolvedValue({ ok: true });
+  requireConferenceDeskAccessMock.mockResolvedValue({ ok: true });
   isGlobalAdminMock.mockReturnValue(false);
   canBuyMock.mockReturnValue({ ok: true });
   priceForTierMock.mockReturnValue(29_900);
@@ -192,7 +192,7 @@ describe("invoicing at the desk — who may, and what it grants", () => {
     // An org admin buying for their OWN org passes assertUserCanManageOrg. The
     // deferral decision is a separate right, and this is a server action whose
     // arguments are attacker-controlled from the public cart page.
-    requireConferenceOpsAccessMock.mockResolvedValue({ ok: false, error: "nope" });
+    requireConferenceDeskAccessMock.mockResolvedValue({ ok: false, error: "nope" });
     const { db, rpc } = makeFakeDb(invoiceQueues(), ORDER_RPC);
     createAdminClientMock.mockReturnValue(db);
 

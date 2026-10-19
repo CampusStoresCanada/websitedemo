@@ -20,7 +20,7 @@ const gateCalls: string[] = [];
 let updatedRow: Record<string, unknown> | null = null;
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireConferenceOpsAccess: async () => ({ ok: true, ctx: { userId: "u1" } }),
+  requireConferenceDeskAccess: async () => ({ ok: true, ctx: { userId: "u1" } }),
   requireAuthenticated: async () => ({ ok: true, ctx: { userId: "u1" } }),
   requireAdmin: async () => ({ ok: true, ctx: { userId: "u1" } }),
   isGlobalAdmin: () => true,

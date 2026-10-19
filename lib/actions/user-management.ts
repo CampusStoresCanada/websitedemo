@@ -18,6 +18,7 @@ import {
   type ProvisionOrgLoginResult,
 } from "@/lib/identity/org-login";
 import { findUserByEmail } from "../supabase/user-lookup";
+import { deactivateOrgLink } from "@/lib/org/org-link-lifecycle";
 
 // ─────────────────────────────────────────────────────────────────
 // Invite a new user to an organization
@@ -115,37 +116,18 @@ export async function deactivateOrgUser(
       }
     }
 
-    const { error: updateErr } = await adminClient
-      .from("user_organizations")
-      .update({ status: "inactive", updated_at: new Date().toISOString() })
-      .eq("id", membership.id);
-
-    if (updateErr) {
-      console.error("[deactivateOrgUser] Update failed:", updateErr);
+    const off = await deactivateOrgLink({
+      db: adminClient,
+      linkId: membership.id,
+      userId,
+      orgId,
+      actorId: auth.ctx.userId,
+      reason: "deactivated",
+    });
+    if (!off.ok) {
+      console.error("[deactivateOrgUser] Update failed:", off.error);
       return { success: false, error: "Failed to deactivate user" };
     }
-
-    // Circle sync: remove user from Circle spaces
-    await enqueueCircleSync({
-      operation: "remove_from_space",
-      entityType: "contact",
-      entityId: userId,
-      payload: { orgId },
-      orgId,
-      idempotencyKey: `deactivate:${userId}:${orgId}:${Date.now()}`,
-    });
-
-    await logAuditEventSafe({
-      action: "organization_user_deactivated",
-      entityType: "organization",
-      entityId: orgId,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        orgId,
-        targetUserId: userId,
-      },
-    });
 
     // Fire-and-forget: look up user email + org name for notification
     Promise.all([

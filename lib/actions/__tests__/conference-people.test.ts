@@ -24,7 +24,8 @@ vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   requireAdmin: vi.fn(),
   requireConferenceOpsAccess: vi.fn(),
-  isConferenceOps: vi.fn(async () => false),
+  isConferenceDeskStaff: vi.fn(async () => false),
+  requireConferenceDeskAccess: vi.fn(),
   canManageOrganization: canManageOrganizationMock,
   isGlobalAdmin: isGlobalAdminMock,
   // Mirrors the real rule over this file's mocks: global admin, member of the
