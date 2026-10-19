@@ -48,7 +48,7 @@ export default async function ConferenceCheckInDeskPage({
   const [conferenceResult, peopleResult, facts] = await Promise.all([
     getConference(id),
     listConferencePeople(id),
-    loadCheckInFacts(id).catch(() => ({ facts: {}, conferenceDates: [] })),
+    loadCheckInFacts(id).catch(() => ({ facts: {}, conferenceDates: [], openSeats: [] })),
   ]);
 
   if (!conferenceResult.success || !conferenceResult.data) {
@@ -71,6 +71,7 @@ export default async function ConferenceCheckInDeskPage({
         conferenceId={id}
         initialRows={peopleResult.success ? peopleResult.data ?? [] : []}
         initialFacts={facts.facts}
+        initialOpenSeats={facts.openSeats}
         conferenceDates={facts.conferenceDates}
         testMode={testMode}
         asOf={asOf}

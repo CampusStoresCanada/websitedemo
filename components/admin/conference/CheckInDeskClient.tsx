@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { todayVerdict } from "@/lib/conference/badges/checkin";
+import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
+import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 
 type ConferencePerson = {
   id: string;
@@ -122,6 +123,13 @@ const SCAN_STATUS_COPY: Record<
     description: "Badge reprint was queued successfully.",
     className: "text-cyan-700",
   },
+  // A walk-up named to a seat their company already owns. Not a check-in and
+  // not a print: the operator reprints from this card onto the company blank.
+  seat_named: {
+    title: "Named to an Open Seat",
+    description: "Named to a seat their company already holds. Print their badge from here.",
+    className: "text-emerald-700",
+  },
 };
 
 /**
@@ -168,6 +176,8 @@ interface CheckInDeskClientProps {
   conferenceId: string;
   initialRows: ConferencePerson[];
   initialFacts: Record<string, CheckInFacts>;
+  /** Seats companies hold with nobody named — what Find shows for a company. */
+  initialOpenSeats: OpenSeat[];
   /** Every date the conference runs on — see the today verdict below. */
   conferenceDates: string[];
   /** A rehearsal. Writes are tagged and resettable — see the migration. */
@@ -182,6 +192,7 @@ export default function CheckInDeskClient({
   conferenceId,
   initialRows,
   initialFacts,
+  initialOpenSeats,
   conferenceDates,
   testMode,
   asOf,
@@ -189,6 +200,7 @@ export default function CheckInDeskClient({
 }: CheckInDeskClientProps) {
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [facts, setFacts] = useState<Record<string, CheckInFacts>>(initialFacts);
+  const [openSeats, setOpenSeats] = useState<OpenSeat[]>(initialOpenSeats);
   // Recovery from a scan that did not resolve — see FAILED_SCAN_STATES.
   const [nameLookup, setNameLookup] = useState("");
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -269,13 +281,16 @@ export default function CheckInDeskClient({
             const freshRows = rowsResponse.ok
               ? ((await rowsResponse.json()) as { rows?: ConferencePerson[] }).rows ?? null
               : null;
-            const freshFacts = factsResponse.ok
+            const freshPayload = factsResponse.ok
               ? ((await factsResponse.json()) as {
                   facts?: Record<string, CheckInFacts>;
-                }).facts ?? null
+                  openSeats?: OpenSeat[];
+                })
               : null;
+            const freshFacts = freshPayload?.facts ?? null;
             if (freshRows) setRows(freshRows);
             if (freshFacts) setFacts(freshFacts);
+            if (freshPayload?.openSeats) setOpenSeats(freshPayload.openSeats);
 
             const freshPerson = freshRows?.find((row) => row.id === personId) ?? null;
             const fresh = freshFacts?.[personId] ?? null;
@@ -570,6 +585,90 @@ export default function CheckInDeskClient({
       )
       .slice(0, 8);
   }, [nameLookup, rows]);
+
+  /**
+   * Companies matching the search, with the seats they hold that nobody is
+   * named to. ⛔ Only companies WITH open seats: a company with none has
+   * nothing to name a walk-up to, and that walk-up is a sale instead.
+   */
+  const companyMatches = useMemo(() => {
+    const q = nameLookup.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const byOrg = new Map<
+      string,
+      { organizationId: string; organizationName: string; types: Map<string, { name: string; seatIds: string[] }> }
+    >();
+    for (const seat of openSeats) {
+      if (!seat.organizationName.toLowerCase().includes(q)) continue;
+      const org =
+        byOrg.get(seat.organizationId) ??
+        { organizationId: seat.organizationId, organizationName: seat.organizationName, types: new Map() };
+      const type = org.types.get(seat.registrationTypeId) ?? { name: seat.registrationTypeName, seatIds: [] };
+      type.seatIds.push(seat.seatId);
+      org.types.set(seat.registrationTypeId, type);
+      byOrg.set(seat.organizationId, org);
+    }
+    return [...byOrg.values()]
+      .map((org) => ({
+        ...org,
+        types: [...org.types.entries()].map(([typeId, t]) => ({ typeId, ...t })),
+      }))
+      .slice(0, 5);
+  }, [nameLookup, openSeats]);
+
+  // The "name someone" form, open on one company at a time.
+  const [namingOrgId, setNamingOrgId] = useState<string | null>(null);
+  const [walkUpName, setWalkUpName] = useState("");
+  const [walkUpEmail, setWalkUpEmail] = useState("");
+  const [walkUpTypeId, setWalkUpTypeId] = useState<string>("");
+  const [namingBusy, setNamingBusy] = useState(false);
+  const [namingError, setNamingError] = useState<string | null>(null);
+
+  /**
+   * Name a walk-up to one of their company's open seats.
+   *
+   * ⛔ The SAME two calls the company's own seat matrix makes on their org page:
+   * addConferenceAttendee (reuses an existing person for that email) then
+   * allocateSeat. No desk-only write. The card that follows carries the reprint
+   * control, and its suggestion will be the company blank.
+   */
+  const nameWalkUp = useCallback(
+    async (org: { organizationId: string; types: Array<{ typeId: string; seatIds: string[] }> }) => {
+      const type = org.types.find((t) => t.typeId === walkUpTypeId) ?? org.types[0];
+      const seatId = type?.seatIds[0];
+      if (!seatId || !walkUpName.trim()) return;
+      setNamingBusy(true);
+      setNamingError(null);
+      try {
+        const added = await addConferenceAttendee(conferenceId, org.organizationId, {
+          displayName: walkUpName.trim(),
+          contactEmail: walkUpEmail.trim() || null,
+        });
+        if (!added.success) {
+          setNamingError(added.error);
+          return;
+        }
+        const seated = await allocateSeat(seatId, added.data.id);
+        if (!seated.success) {
+          setNamingError(seated.error);
+          return;
+        }
+        setNamingOrgId(null);
+        setWalkUpName("");
+        setWalkUpEmail("");
+        setNameLookup("");
+        setLookupOpen(false);
+        // An unknown person on a card makes the desk refetch roster, facts and
+        // open seats — see pushScanCard.
+        pushScanCard("seat_named", added.data.id);
+      } catch {
+        setNamingError("Could not name them to that seat. Try again.");
+      } finally {
+        setNamingBusy(false);
+      }
+    },
+    [conferenceId, pushScanCard, walkUpEmail, walkUpName, walkUpTypeId]
+  );
 
   /**
    * Reprint, in one tap, with the reason already chosen.
@@ -970,7 +1069,7 @@ export default function CheckInDeskClient({
             autoFocus
             value={nameLookup}
             onChange={(event) => setNameLookup(event.target.value)}
-            placeholder="Name or email"
+            placeholder="Name, email or company"
             className="mt-2 w-full rounded border border-white/40 bg-black px-2 py-1 text-sm text-white placeholder:text-gray-400"
           />
           {/* ⚠️ Say what this is. markConferencePersonCheckedInManual does not
@@ -985,11 +1084,96 @@ export default function CheckInDeskClient({
           <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
             {nameLookup.trim().length < 2 ? (
               <p className="text-[11px] text-gray-400">Type at least two characters.</p>
-            ) : lookupMatches.length === 0 ? (
+            ) : (
+              <>
+                {/* ⛔ Companies first: a walk-up whose company already holds an
+                    unnamed seat is NAMED to it, not sold another one. */}
+                {companyMatches.map((org) => (
+                  <div
+                    key={org.organizationId}
+                    className="rounded border border-emerald-400/40 px-2 py-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-white">{org.organizationName}</p>
+                        <p className="truncate text-[11px] text-emerald-200">
+                          Open seats:{" "}
+                          {org.types.map((t) => `${t.name} × ${t.seatIds.length}`).join(", ")}
+                        </p>
+                      </div>
+                      {namingOrgId !== org.organizationId ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNamingOrgId(org.organizationId);
+                            setWalkUpTypeId(org.types[0]?.typeId ?? "");
+                            setNamingError(null);
+                          }}
+                          className="shrink-0 rounded bg-white px-2 py-0.5 text-[11px] font-semibold text-black"
+                        >
+                          Name someone
+                        </button>
+                      ) : null}
+                    </div>
+                    {namingOrgId === org.organizationId ? (
+                      <div className="mt-1.5 space-y-1">
+                        <input
+                          value={walkUpName}
+                          onChange={(event) => setWalkUpName(event.target.value)}
+                          placeholder="Their name"
+                          className="w-full rounded border border-white/40 bg-black px-2 py-1 text-sm text-white placeholder:text-gray-400"
+                        />
+                        <input
+                          value={walkUpEmail}
+                          onChange={(event) => setWalkUpEmail(event.target.value)}
+                          placeholder="Email (optional)"
+                          className="w-full rounded border border-white/40 bg-black px-2 py-1 text-sm text-white placeholder:text-gray-400"
+                        />
+                        {org.types.length > 1 ? (
+                          <select
+                            value={walkUpTypeId}
+                            onChange={(event) => setWalkUpTypeId(event.target.value)}
+                            className="w-full rounded border border-white/40 bg-black px-2 py-1 text-sm text-white"
+                          >
+                            {org.types.map((t) => (
+                              <option key={t.typeId} value={t.typeId}>
+                                {t.name} ({t.seatIds.length} open)
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                        {namingError ? (
+                          <p className="text-[11px] text-red-300">{namingError}</p>
+                        ) : null}
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            disabled={namingBusy || !walkUpName.trim()}
+                            onClick={() => void nameWalkUp(org)}
+                            className="rounded bg-white px-2 py-0.5 text-[11px] font-semibold text-black disabled:opacity-50"
+                          >
+                            {namingBusy ? "…" : "Name to seat"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNamingOrgId(null)}
+                            className="rounded border border-white/40 px-2 py-0.5 text-[11px] text-white"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                {lookupMatches.length === 0 ? (
               <div className="space-y-1">
                 <p className="text-[11px] text-amber-200">
                   Nobody on the roster matches. ⚠️ Somebody registered in the last minute
                   may not be here yet — the desk refreshes every 30 seconds.
+                  {companyMatches.length > 0
+                    ? " If they are with a company above, name them to its open seat."
+                    : ""}
                 </p>
                 {/* ⛔ A walk-up is a sale, then a seat, then a badge. The desk
                     sells through the SAME offers page and cart as everybody
@@ -1049,6 +1233,8 @@ export default function CheckInDeskClient({
                   </div>
                 );
               })
+                )}
+              </>
             )}
           </div>
         </div>

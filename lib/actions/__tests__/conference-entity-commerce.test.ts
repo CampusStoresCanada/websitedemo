@@ -7,6 +7,7 @@ const {
   createAdminClientMock,
   resolveAssigneeForEmailMock,
   logAuditEventSafeMock,
+  requireConferenceOpsAccessMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
   canManageOrganizationMock: vi.fn(),
@@ -14,11 +15,14 @@ const {
   createAdminClientMock: vi.fn(),
   resolveAssigneeForEmailMock: vi.fn(),
   logAuditEventSafeMock: vi.fn(),
+  // Not conference ops unless a test says so.
+  requireConferenceOpsAccessMock: vi.fn(async () => ({ ok: false })),
 }));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   requireAdmin: vi.fn(),
+  requireConferenceOpsAccess: requireConferenceOpsAccessMock,
   canManageOrganization: canManageOrganizationMock,
   isGlobalAdmin: isGlobalAdminMock,
 }));
@@ -290,6 +294,24 @@ describe("conference-entity-commerce attendees", () => {
 
     expect(result.success).toBe(false);
     expect(fake.spy.insertSpy).not.toHaveBeenCalled();
+  });
+
+  // ⛔ The check-in desk names a walk-up to their company's open seat. Desk
+  // staff are conference ops, not that company's admin.
+  it("lets conference ops add an attendee for a company they do not manage", async () => {
+    canManageOrganizationMock.mockReturnValue(false);
+    isGlobalAdminMock.mockReturnValue(false);
+    requireConferenceOpsAccessMock.mockResolvedValueOnce({ ok: true });
+    const fake = fakeClientForAdd();
+    createAdminClientMock.mockReturnValue(fake.client);
+
+    const result = await addConferenceAttendee("conf-1", "org-1", {
+      displayName: "Walk Up",
+      contactEmail: null,
+    });
+
+    expect(result.success).toBe(true);
+    expect(fake.spy.insertSpy).toHaveBeenCalled();
   });
 
   it("removeConferenceAttendee frees seats and deletes a manual-source row", async () => {

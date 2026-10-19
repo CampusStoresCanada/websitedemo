@@ -1,7 +1,14 @@
 "use server";
 
 import crypto from "node:crypto";
-import { canManageOrganization, isGlobalAdmin, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import {
+  canManageOrganization,
+  isGlobalAdmin,
+  requireAdmin,
+  requireAuthenticated,
+  requireConferenceOpsAccess,
+  type AuthContext,
+} from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { EntityKind } from "@/lib/actions/conference-entities";
 import { resolveAssigneeForEmail } from "@/lib/actions/conference-people";
@@ -74,6 +81,17 @@ export type OrgEntitySeat = {
   holderName: string | null;
 };
 
+/**
+ * Who may manage an organisation's conference people and seats: its org admin,
+ * a global admin, or conference ops staff — who name walk-ups to a company's
+ * open seats at the check-in desk.
+ * ⛔ The one check for this file; do not inline it again.
+ */
+async function canManageOrgSeats(ctx: AuthContext, organizationId: string): Promise<boolean> {
+  if (canManageOrganization(ctx, organizationId) || isGlobalAdmin(ctx.globalRole)) return true;
+  return (await requireConferenceOpsAccess()).ok;
+}
+
 /** Every allocatable seat an org holds for a conference, with who (if anyone) sits in it. */
 export async function listEntitySeatsForOrg(
   conferenceId: string,
@@ -81,7 +99,7 @@ export async function listEntitySeatsForOrg(
 ): Promise<Result<OrgEntitySeat[]>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -138,7 +156,7 @@ export async function allocateSeat(
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || (!canManageOrganization(auth.ctx, seat.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -227,7 +245,7 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || (!canManageOrganization(auth.ctx, seat.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -260,7 +278,7 @@ export async function setEntityUsageIntent(
 ): Promise<Result<null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
   if (!Number.isInteger(intendedQuantity) || intendedQuantity < 0) {
@@ -340,7 +358,7 @@ export async function addConferenceAttendee(
 ): Promise<Result<{ id: string; assignmentStatus: "assigned" | "pending_user_activation"; invited: boolean }>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -439,7 +457,7 @@ export async function removeConferenceAttendee(personId: string): Promise<Result
     .eq("id", personId)
     .single();
   if (personErr || !person) return { success: false, error: personErr?.message ?? "Person not found." };
-  if (!person.organization_id || (!canManageOrganization(auth.ctx, person.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
+  if (!person.organization_id || !(await canManageOrgSeats(auth.ctx, person.organization_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
   if (person.source_type !== "manual") {

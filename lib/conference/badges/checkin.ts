@@ -172,8 +172,41 @@ export function checkInFactsFromRun(
   return facts;
 }
 
+/**
+ * A registration seat a company has bought and nobody is named to yet. A blank
+ * badge for it went into the print run, so a walk-up from that company is named
+ * to it and gets a label on that blank, not a sale.
+ */
+export type OpenSeat = {
+  seatId: string;
+  organizationId: string;
+  organizationName: string;
+  registrationTypeId: string;
+  registrationTypeName: string;
+};
+
+/** Every open registration seat in the run, from the same walk as the badges. */
+export function openSeatsFromRun(run: BadgeRun): OpenSeat[] {
+  const open: OpenSeat[] = [];
+  for (const type of run.types) {
+    for (const seat of type.seats) {
+      if (seat.person || !seat.organizationId) continue;
+      open.push({
+        seatId: seat.seatId,
+        organizationId: seat.organizationId,
+        organizationName: seat.organizationName,
+        registrationTypeId: type.entityId,
+        registrationTypeName: type.name,
+      });
+    }
+  }
+  return open;
+}
+
 export type CheckInFactsPayload = {
   facts: Record<string, CheckInFacts>;
+  /** Open seats per company — what "Find" shows when it matches a company. */
+  openSeats: OpenSeat[];
   /**
    * Every date this conference runs on.
    *
@@ -225,6 +258,7 @@ export async function loadCheckInFacts(
 
   return {
     facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
+    openSeats: openSeatsFromRun(run),
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
   };
 }

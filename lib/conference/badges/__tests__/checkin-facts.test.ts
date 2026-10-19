@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkInFactsFromRun, todayVerdict } from "../checkin";
+import { checkInFactsFromRun, openSeatsFromRun, todayVerdict } from "../checkin";
 import type { BadgeRun } from "../run";
 
 /**
@@ -220,5 +220,58 @@ describe("reprint mode on the desk facts", () => {
       } as never)
     );
     expect(facts.p1.reprintStock).toBe("none");
+  });
+});
+
+/**
+ * ⛔ What the desk's company search offers a walk-up: seats their company holds
+ * with nobody named. Read from the same run the badges print from, so a seat
+ * the desk offers is a seat a blank was printed for.
+ */
+describe("openSeatsFromRun", () => {
+  it("lists only unnamed seats, with their company and registration type", () => {
+    const open = openSeatsFromRun(
+      run({
+        types: [
+          {
+            entityId: "type-full",
+            name: "Full Conference",
+            accessSummary: access(),
+            agenda: [],
+            seats: [
+              seat("s1", "Sundry Goods", { personId: "p1", firstName: "Ada", lastName: "L" }),
+              seat("s2", "Sundry Goods", null),
+            ],
+          },
+          {
+            entityId: "type-day",
+            name: "Day Pass",
+            accessSummary: access(),
+            agenda: [],
+            seats: [seat("s3", "Other Co", null)],
+          },
+        ],
+      } as never)
+    );
+    expect(open).toEqual([
+      {
+        seatId: "s2",
+        organizationId: "org-Sundry Goods",
+        organizationName: "Sundry Goods",
+        registrationTypeId: "type-full",
+        registrationTypeName: "Full Conference",
+      },
+      {
+        seatId: "s3",
+        organizationId: "org-Other Co",
+        organizationName: "Other Co",
+        registrationTypeId: "type-day",
+        registrationTypeName: "Day Pass",
+      },
+    ]);
+  });
+
+  it("offers nothing when every seat is named", () => {
+    expect(openSeatsFromRun(run())).toEqual([]);
   });
 });
