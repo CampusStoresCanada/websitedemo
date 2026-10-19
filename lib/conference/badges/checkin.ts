@@ -291,20 +291,13 @@ async function loadDayDates(
 }
 
 /**
- * Is this person's badge good for `today`? For the scan, one person at a time.
- *
- * ⛔ The SAME walk as the badge run's per-person entitlements —
- * summarizeAccess over every seat they hold — without paying for a whole run
- * on every scan. Null when today is not a conference day or they hold nothing.
+ * The dates one person may be on site — the check-in rule (admittedDates) over
+ * every seat they hold. ⛔ The SAME walk as the badge run's per-person
+ * entitlements, without paying for a whole run. Empty when they hold nothing.
  */
-export async function personVerdictToday(
-  conferenceId: string,
-  personId: string,
-  today: string
-): Promise<{ admitted: boolean } | null> {
+export async function personAdmittedDates(conferenceId: string, personId: string): Promise<string[]> {
   const db = createAdminClient();
-  const [dateByDayName, entitiesRes, refsRes, seatsRes] = await Promise.all([
-    loadDayDates(db, conferenceId),
+  const [entitiesRes, refsRes, seatsRes] = await Promise.all([
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
     db
       .from("conference_entity_refs")
@@ -320,8 +313,23 @@ export async function personVerdictToday(
     throw new Error("Could not read what this badge covers.");
   }
   const heldIds = [...new Set((seatsRes.data ?? []).map((s) => s.entity_id as string))];
-  if (heldIds.length === 0) return null;
-
+  if (heldIds.length === 0) return [];
   const byId = indexById(buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []));
-  return verdictForDay(admittedDates(heldIds, byId), [...new Set(dateByDayName.values())], today);
+  return admittedDates(heldIds, byId);
+}
+
+/**
+ * Is this person's badge good for `today`? For the scan, one person at a time.
+ * Null when today is not a conference day or they hold nothing.
+ */
+export async function personVerdictToday(
+  conferenceId: string,
+  personId: string,
+  today: string
+): Promise<{ admitted: boolean } | null> {
+  const [dates, dateByDayName] = await Promise.all([
+    personAdmittedDates(conferenceId, personId),
+    loadDayDates(createAdminClient(), conferenceId),
+  ]);
+  return verdictForDay(dates, [...new Set(dateByDayName.values())], today);
 }

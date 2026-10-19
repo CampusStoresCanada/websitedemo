@@ -15,6 +15,7 @@ export default function OfferCard({
   compact = false,
   highlighted = false,
   goToAfterAdd,
+  touch = false,
 }: {
   offer: ConferenceOffer;
   conferenceId: string;
@@ -31,6 +32,8 @@ export default function OfferCard({
   highlighted?: boolean;
   /** Where to send the buyer once the add succeeds. Omit to stay put. */
   goToAfterAdd?: string;
+  /** Finger-sized button, for the check-in desk on an iPad. */
+  touch?: boolean;
 }) {
   const router = useRouter();
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
@@ -124,7 +127,9 @@ export default function OfferCard({
         <button
           onClick={add}
           disabled={disabled}
-          className="w-full rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50"
+          className={`w-full rounded-md bg-[#EE2A2E] px-4 font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50 ${
+            touch ? "min-h-12 text-base" : "py-2 text-sm"
+          }`}
         >
           {isPending ? "Adding…" : offer.soldOut ? "Sold out" : "Add to cart"}
         </button>

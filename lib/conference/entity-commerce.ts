@@ -393,5 +393,8 @@ export function nonMemberDayPassToOffer(pass: NonMemberDayPass): ConferenceOffer
      */
     standalone: true,
     accessSummary: pass.accessSummary,
+    // Only the desk orders by dates, and the desk never sells a non-member day
+    // pass (that is the public online purchase), so none are worked out here.
+    admittedDates: [],
   };
 }

@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
+import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 
 type ConferencePerson = {
   id: string;
+  organization_id: string | null;
   person_kind: string;
   display_name: string | null;
   contact_email: string | null;
@@ -284,6 +286,25 @@ export default function CheckInDeskClient({
     const t = window.setTimeout(() => setFlash(null), 700);
     return () => window.clearTimeout(t);
   }, [flash]);
+  // Selling, inside the desk — carrying in whatever the desk already knows.
+  const [sellContext, setSellContext] = useState<DeskSellContext | null>(null);
+  const openSell = useCallback((context: DeskSellContext) => {
+    setLookupOpen(false);
+    setCameraPanelOpen(false);
+    setDeskMenuOpen(false);
+    setSellContext(context);
+  }, []);
+  const sellForPerson = useCallback(
+    (personId: string) => {
+      const person = rows.find((r) => r.id === personId) ?? null;
+      openSell({
+        personId,
+        personName: person?.display_name ?? person?.contact_email ?? null,
+        organizationId: person?.organization_id ?? null,
+      });
+    },
+    [openSell, rows]
+  );
   // The + menu and the camera picker under it.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
@@ -1138,15 +1159,14 @@ export default function CheckInDeskClient({
                   <p>Hotel confirm: {card.hotelConfirmationCode ?? "n/a"}</p>
                 </div>
               ) : null}
-              {card.state === "not_valid_today" ? (
-                <a
-                  href={`${storefrontPath}/offers`}
-                  target="_blank"
-                  rel="noreferrer"
+              {card.state === "not_valid_today" && card.personId ? (
+                <button
+                  type="button"
+                  onClick={() => sellForPerson(card.personId as string)}
                   className="mt-3 inline-flex min-h-12 items-center rounded-lg bg-white px-4 text-base font-semibold text-black"
                 >
                   Sell them a day pass →
-                </a>
+                </button>
               ) : null}
               {toneOf(card.state) === "stop" ? (
                 <button
@@ -1244,6 +1264,13 @@ export default function CheckInDeskClient({
                           {org.types.map((t) => `${t.name} × ${t.seatIds.length}`).join(", ")}
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => openSell({ organizationId: org.organizationId })}
+                        className="min-h-12 shrink-0 rounded-lg border border-white/50 px-4 text-sm font-semibold text-white"
+                      >
+                        Sell
+                      </button>
                       {namingOrgId !== org.organizationId ? (
                         <button
                           type="button"
@@ -1322,14 +1349,18 @@ export default function CheckInDeskClient({
                     sells through the SAME offers page and cart as everybody
                     else: pick their company, add the registration, name them in
                     the cart, then card or invoice. No desk checkout. */}
-                <a
-                  href={`${storefrontPath}/offers`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-h-12 inline-block rounded-lg border border-white/40 px-4 text-sm text-white hover:border-white"
+                <button
+                  type="button"
+                  onClick={() =>
+                    openSell({
+                      organizationId: companyMatches.length === 1 ? companyMatches[0].organizationId : null,
+                      companyHint: companyMatches.length === 1 ? null : nameLookup.trim(),
+                    })
+                  }
+                  className="min-h-12 rounded-lg bg-white px-4 text-base font-semibold text-black"
                 >
                   Not registered? Sell them a registration →
-                </a>
+                </button>
               </div>
             ) : (
               lookupMatches.map((row) => {
@@ -1361,6 +1392,13 @@ export default function CheckInDeskClient({
                         </p>
                       ) : null}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => sellForPerson(row.id)}
+                      className="min-h-12 shrink-0 rounded-lg border border-white/50 px-4 text-sm font-semibold text-white"
+                    >
+                      Sell
+                    </button>
                     {row.checked_in_at ? (
                       <span className="shrink-0 text-sm text-gray-400">Checked in</span>
                     ) : (
@@ -1456,6 +1494,15 @@ export default function CheckInDeskClient({
         </div>
       ) : null}
 
+      {sellContext ? (
+        <DeskSellPanel
+          conferenceId={conferenceId}
+          storefrontPath={storefrontPath}
+          context={sellContext}
+          onClose={() => setSellContext(null)}
+        />
+      ) : null}
+
       {/* ⛔ The desk's tools, under a + exactly like the site's toolkit (the
           same components), bigger and labelled for fingers on an iPad. */}
       <div className="absolute bottom-6 right-6 z-30 flex flex-col-reverse items-end gap-3">
@@ -1477,6 +1524,13 @@ export default function CheckInDeskClient({
                 setLookupOpen(false);
                 setCameraPanelOpen(true);
               }}
+            />
+            <ToolButton
+              size="lg"
+              showLabel
+              icon={<SellIcon />}
+              label="Sell"
+              onClick={() => openSell({})}
             />
             <ToolButton
               size="lg"
@@ -1526,4 +1580,17 @@ function CameraIcon() {
 function looksLikeBadgeCode(value: string): boolean {
   const v = value.trim();
   return v.length >= 16 && !/\s/.test(v) && !v.includes("@");
+}
+
+function SellIcon() {
+  return (
+    <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9.6 3H5a2 2 0 0 0-2 2v4.6a2 2 0 0 0 .6 1.4l9.4 9.4a2 2 0 0 0 2.8 0l4.6-4.6a2 2 0 0 0 0-2.8L11 3.6A2 2 0 0 0 9.6 3Z"
+      />
+      <circle cx="7.5" cy="7.5" r="1.5" />
+    </svg>
+  );
 }
