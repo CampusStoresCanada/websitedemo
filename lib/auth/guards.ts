@@ -39,6 +39,8 @@ export interface AuthContext {
    * is not admin/super_admin.
    */
   presentationMode: PresentationLevel | null;
+  /** When they last actually signed in (seconds since epoch), or null. */
+  signedInAt: number | null;
 }
 
 export interface GuardFailure {
@@ -81,7 +83,20 @@ export type IdentitySnapshot =
        *  than null on failure — a capability is a grant, so the safe direction
        *  when we cannot resolve one is "not held". */
       capabilities: string[];
+      /** When this person last actually AUTHENTICATED (seconds since epoch),
+       *  from the token's `amr` — kept across token refreshes. Null if absent. */
+      signedInAt: number | null;
     };
+
+/** The latest authentication time in a token's `amr` claim, or null. */
+function latestAuthenticationAt(claims: Record<string, unknown> | undefined): number | null {
+  const amr = claims?.amr;
+  if (!Array.isArray(amr)) return null;
+  const times = amr
+    .map((entry) => (entry && typeof entry === "object" ? (entry as { timestamp?: unknown }).timestamp : null))
+    .filter((t): t is number => typeof t === "number");
+  return times.length ? Math.max(...times) : null;
+}
 
 export const getIdentitySnapshot = cache(
   async (): Promise<IdentitySnapshot> => {
@@ -155,6 +170,7 @@ export const getIdentitySnapshot = cache(
     capabilities,
     organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
     orgsError: orgsResult?.error ?? null,
+    signedInAt: latestAuthenticationAt(claimsData?.claims as Record<string, unknown> | undefined),
   };
 });
 
@@ -217,6 +233,7 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     isBenchmarkingReviewer,
     isBenchmarkingContentReviewer,
     capabilities: snapshot.capabilities,
+    signedInAt: snapshot.signedInAt,
     orgAdminOrgIds,
     activeOrgIds,
   };
@@ -228,6 +245,18 @@ export async function getOptionalAuthContext(): Promise<AuthContext | null> {
 
 export function isGlobalAdmin(role: GlobalRole): boolean {
   return role === "admin" || role === "super_admin";
+}
+
+/**
+ * Did this person sign in (password, link or recovery) within the last few
+ * minutes — not merely hold a long-lived session?
+ *
+ * ⛔ The proof the desk asks for before setting a new PIN without the old one
+ * ("forgot my PIN": sign in again, then choose a new one). A session refreshed
+ * all day does not count; only a real authentication does.
+ */
+export function signedInRecently(ctx: AuthContext, minutes = 15, now: number = Date.now()): boolean {
+  return ctx.signedInAt !== null && now / 1000 - ctx.signedInAt <= minutes * 60;
 }
 
 export function isSuperAdmin(role: GlobalRole): boolean {

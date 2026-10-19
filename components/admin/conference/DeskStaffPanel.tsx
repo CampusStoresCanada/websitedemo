@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addDeskStaff, type DeskStaffRow } from "@/lib/actions/conference-desk-staff";
 import { endAppointment, searchPeopleForAppointment } from "@/lib/actions/capability-appointments";
+import { clearDeskPin } from "@/lib/actions/desk-pin";
 
 /**
  * Who can run this conference's check-in desk.
@@ -87,6 +88,21 @@ export default function DeskStaffPanel({
     setBusy(null);
     if (!result.success) setMessage({ text: result.error ?? "Could not remove them.", ok: false });
     else router.refresh();
+  };
+
+  // Forgotten PIN, or someone else learned it: clear it, and they choose a new
+  // one (after a password sign-in) the next time they open the desk.
+  const resetPin = async (r: DeskStaffRow) => {
+    if (!r.profileId) return;
+    setBusy(`pin:${r.assignmentId}`);
+    setMessage(null);
+    const result = await clearDeskPin({ conferenceId, profileId: r.profileId });
+    setBusy(null);
+    if (!result.success) setMessage({ text: result.error, ok: false });
+    else {
+      setMessage({ text: `${r.name}'s PIN is cleared. They choose a new one next time they open the desk.`, ok: true });
+      router.refresh();
+    }
   };
 
   const when = (r: DeskStaffRow) =>
@@ -267,6 +283,19 @@ export default function DeskStaffPanel({
                     {r.reason ? ` · ${r.reason}` : ""}
                   </p>
                 </div>
+                <div className="flex shrink-0 items-center gap-4">
+                {r.hasPin ? (
+                  <button
+                    type="button"
+                    onClick={() => void resetPin(r)}
+                    disabled={busy === `pin:${r.assignmentId}`}
+                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50"
+                  >
+                    {busy === `pin:${r.assignmentId}` ? "…" : "Reset PIN"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-400">No PIN yet</span>
+                )}
                 <button
                   type="button"
                   onClick={() => void remove(r.assignmentId)}
@@ -275,6 +304,7 @@ export default function DeskStaffPanel({
                 >
                   {busy === r.assignmentId ? "…" : "Remove"}
                 </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -38,6 +38,9 @@ export type DeskStaffRow = {
   firstDay: string | null;
   lastDay: string | null;
   reason: string;
+  profileId: string | null;
+  /** Has chosen a desk PIN. An admin can clear it; they choose again on next use. */
+  hasPin: boolean;
 };
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
@@ -58,11 +61,18 @@ export async function listDeskStaff(conferenceId: string): Promise<Result<DeskSt
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await db
     .from("capability_contributions")
-    .select("assignment_id, display_name, conference_id, term_start, term_end, reason")
+    .select("assignment_id, subject_id, display_name, conference_id, term_start, term_end, reason")
     .eq("capability", DESK_STAFF_CAPABILITY)
     .or(`conference_id.eq.${conferenceId},conference_id.is.null`)
     .order("term_start");
   if (error) return { success: false, error: error.message };
+
+  const profileIds = [...new Set((data ?? []).map((r) => r.subject_id as string | null).filter((id): id is string => Boolean(id)))];
+  const { data: pins, error: pinError } = profileIds.length
+    ? await db.from("desk_pins").select("profile_id").in("profile_id", profileIds)
+    : { data: [], error: null };
+  if (pinError) return { success: false, error: pinError.message };
+  const withPin = new Set((pins ?? []).map((p) => p.profile_id as string));
 
   return {
     success: true,
@@ -79,6 +89,8 @@ export async function listDeskStaff(conferenceId: string): Promise<Result<DeskSt
         // Stored exclusive; shown as the last day worked.
         lastDay: termEnd ? isoDayBefore(termEnd) : null,
         reason: (r.reason as string | null) ?? "",
+        profileId: (r.subject_id as string | null) ?? null,
+        hasPin: withPin.has(r.subject_id as string),
       };
     }),
   };

@@ -6443,6 +6443,27 @@ export type Database = {
           },
         ]
       }
+      desk_pins: {
+        Row: {
+          failed_attempts: number
+          pin_hash: string
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          failed_attempts?: number
+          pin_hash: string
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          failed_attempts?: number
+          pin_hash?: string
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       directory_scan_events: {
         Row: {
           device: string

@@ -5,6 +5,9 @@ import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
+import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
+import { getDeskPinState } from "@/lib/actions/desk-pin";
+import { cancelDeskCheckout, getDeskSaleStatus } from "@/lib/actions/desk-sale";
 
 type ConferencePerson = {
   id: string;
@@ -129,8 +132,6 @@ const SCAN_STATUS_COPY: Record<
     description: "Their badge reprint is queued.",
     className: "text-cyan-700",
   },
-  // A walk-up named to a seat their company already owns. Not a check-in and
-  // not a print: the operator reprints from this card onto the company blank.
   // A desk sale landed: they hold a registration now. The card prints it.
   sale_paid: {
     title: "Paid: ready to print",
@@ -142,6 +143,14 @@ const SCAN_STATUS_COPY: Record<
     description: "Their company has been invoiced. Print their badge.",
     className: "text-emerald-700",
   },
+  // A hand-over came back without a payment. The card link is closed.
+  sale_not_paid: {
+    title: "Not paid",
+    description: "The card payment did not go through, so nothing was sold. Sell again or invoice the company.",
+    className: "text-red-700",
+  },
+  // A walk-up named to a seat their company already owns. Not a check-in and
+  // not a print: the operator reprints from this card onto the company blank.
   seat_named: {
     title: "Named to an open seat",
     description: "Named to a seat their company already holds. Print their badge from here.",
@@ -167,6 +176,7 @@ const SCAN_TONE: Record<string, ScanTone> = {
   not_valid_today: "stop",
   legal_not_accepted: "stop",
   scan_failed: "stop",
+  sale_not_paid: "stop",
   queued_offline: "info",
   badge_reprinted: "info",
 };
@@ -460,6 +470,62 @@ export default function CheckInDeskClient({
       }
     },
     [rows, facts, conferenceId]
+  );
+
+  // ⛔ The desk PIN (lib/conference/desk-pin.ts). Until it is known whether this
+  // person has one, and whether the iPad is coming back from a hand-over, the
+  // desk stays covered — a returning iPad must never flash open.
+  const [pinState, setPinState] = useState<{ hasPin: boolean; mayChoose: boolean } | null>(null);
+  const [handOverOrderId, setHandOverOrderId] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void getDeskPinState(conferenceId).then((res) => {
+      if (!live) return;
+      setHandOverOrderId(readHandOver(conferenceId));
+      // A refused read leaves the desk usable but every PIN prompt will fail
+      // closed on the server, which is where the decision lives anyway.
+      setPinState(res.success ? { hasPin: res.data.hasPin, mayChoose: res.data.mayResetWithoutPin } : { hasPin: true, mayChoose: false });
+    });
+    return () => {
+      live = false;
+    };
+  }, [conferenceId]);
+
+  // Back from a hand-over and unlocked: what happened to the sale? Paid shows
+  // the print cards; not paid closes the card link so it cannot be paid later.
+  const settleHandOver = useCallback(
+    async (orderId: string) => {
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const settled = async (rounds: number) => {
+        for (let i = 0; i < rounds; i += 1) {
+          const res = await getDeskSaleStatus({ conferenceId, orderId });
+          if (res.success) {
+            const { state, people } = res.data;
+            if ((state === "paid" || state === "invoiced") && people.length > 0) {
+              for (const person of people) pushScanCard(state === "paid" ? "sale_paid" : "sale_invoiced", person.personId);
+              return true;
+            }
+            if (state === "canceled") {
+              pushScanCard("sale_not_paid", null);
+              return true;
+            }
+          }
+          await sleep(2000);
+        }
+        return false;
+      };
+      if (await settled(4)) return;
+      // ⛔ Closing fails when the card session already completed — someone paid
+      // and the webhook is behind. Then keep waiting rather than call it unpaid.
+      const closed = await cancelDeskCheckout({ conferenceId, orderId });
+      if (closed.success) {
+        pushScanCard("sale_not_paid", null);
+        return;
+      }
+      if (await settled(10)) return;
+      pushScanCard("scan_failed", null, "The card payment is not confirmed yet. Check the order before selling again.");
+    },
+    [conferenceId, pushScanCard]
   );
 
   const loadTestCounts = useCallback(async () => {
@@ -910,6 +976,29 @@ export default function CheckInDeskClient({
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black text-white" onPointerDown={unlockAudio}>
+      {pinState === null ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-gray-950 text-lg text-gray-300">
+          Opening the desk…
+        </div>
+      ) : !pinState.hasPin ? (
+        <DeskPinSetup
+          conferenceId={conferenceId}
+          mayChoose={pinState.mayChoose}
+          onDone={() => setPinState({ hasPin: true, mayChoose: pinState.mayChoose })}
+        />
+      ) : handOverOrderId ? (
+        <DeskPinCheck
+          conferenceId={conferenceId}
+          title="Please hand the iPad back"
+          subtitle="Staff: enter your PIN to unlock the desk."
+          onPassed={() => {
+            const orderId = handOverOrderId;
+            endHandOver(conferenceId);
+            setHandOverOrderId(null);
+            void settleHandOver(orderId);
+          }}
+        />
+      ) : null}
       {flash && flash.tone !== "info" ? (
         <div
           key={flash.key}

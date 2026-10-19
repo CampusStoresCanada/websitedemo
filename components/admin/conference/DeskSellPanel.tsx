@@ -19,6 +19,7 @@ import type { AttendeeRef } from "@/lib/actions/conference-commerce";
 import { CONFERENCE_CART_UPDATED_EVENT } from "@/lib/conference/cart-events";
 import type { DeskOfferGroup } from "@/lib/conference/desk-offers";
 import { formatCents } from "@/lib/utils";
+import { DeskPinCheck, startHandOver } from "@/components/admin/conference/DeskPinPad";
 
 /**
  * Selling at the desk, without leaving it.
@@ -73,6 +74,9 @@ export default function DeskSellPanel({
     method: "card" | "invoice";
   } | null>(null);
   const [paymentNote, setPaymentNote] = useState<string | null>(null);
+  // ⛔ An invoice bills a company without anyone paying: staff approve it with
+  // their PIN, so a customer holding the iPad cannot.
+  const [approvingInvoice, setApprovingInvoice] = useState(false);
 
   // Who a registration is for. Known when the desk sent a person; otherwise the
   // walk-up form below fills it — never by guessing from an email.
@@ -274,6 +278,21 @@ export default function DeskSellPanel({
     };
   }, [conferenceId, payment, onSold]);
 
+  if (payment && approvingInvoice) {
+    return (
+      <DeskPinCheck
+        conferenceId={conferenceId}
+        title="Approve the invoice"
+        subtitle={`Staff PIN to invoice ${org?.name ?? "the company"}${cart ? ` for ${formatCents(cart.totalCents)}` : ""}.`}
+        onCancel={() => setApprovingInvoice(false)}
+        onPassed={() => {
+          setApprovingInvoice(false);
+          void switchToInvoice();
+        }}
+      />
+    );
+  }
+
   if (payment) {
     return (
       <div className="fixed inset-0 z-[80] flex flex-col bg-white text-gray-900">
@@ -319,14 +338,18 @@ export default function DeskSellPanel({
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void switchToInvoice()}
+                  onClick={() => setApprovingInvoice(true)}
                   className="min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium disabled:opacity-50"
                 >
                   {busy ? "…" : "Invoice the company instead"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => window.location.assign(payment.url)}
+                  onClick={() => {
+                    // The desk locks when the iPad comes back — see startHandOver.
+                    startHandOver(conferenceId, payment.orderId);
+                    window.location.assign(payment.url);
+                  }}
                   className="min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium"
                 >
                   Pay on this iPad

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isConferenceDeskStaff } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import { loginWithNext } from "@/lib/auth/login-redirect";
@@ -12,12 +12,27 @@ export default async function ConferenceCheckoutCancelPage({
   searchParams,
 }: {
   params: Promise<{ year: string; edition: string }>;
-  searchParams: Promise<{ org?: string }>;
+  /** `desk`: a sale started at this conference's check-in desk (its id). */
+  searchParams: Promise<{ org?: string; desk?: string }>;
 }) {
   const { year, edition } = await params;
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
+  // ⛔ Same split as the success page: the desk's own staff (a hand-over that
+  // came back unpaid) return to the desk, which stays locked until their PIN;
+  // an attendee who backed out on their own phone is told to go back.
+  if (query.desk && /^[0-9a-f-]{36}$/i.test(query.desk)) {
+    if (auth.ok && (await isConferenceDeskStaff(auth.ctx, query.desk))) {
+      redirect(`/admin/conference/${query.desk}/check-in`);
+    }
+    return (
+      <main className="max-w-xl mx-auto py-16 px-4 text-center">
+        <h1 className="text-2xl font-semibold text-gray-900">Payment not completed</h1>
+        <p className="mt-3 text-base text-gray-700">Nothing was charged. Head back to the desk and they will help you.</p>
+      </main>
+    );
+  }
   if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/checkout/cancel`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);

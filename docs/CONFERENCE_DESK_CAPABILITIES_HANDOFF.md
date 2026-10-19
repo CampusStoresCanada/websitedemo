@@ -25,9 +25,12 @@ are already live, because prod and local share one database (§4).
 6. **Volunteers and temps are added as staff of the staff organisation** (CSC,
    type `Staff`), with a login (password set on invite) and a Circle account,
    like any other invite. Their staff link ends after their last day.
-7. **Kiosk / hand-over is wanted** — one tablet, operator and handed-over
-   states, a PIN set on first use of the desk. Not designed yet: resetting the
-   PIN and recovering when every PIN holder is unavailable. Nothing is built.
+7. **Kiosk / hand-over, with a desk PIN** — each staff member has their own
+   4–6 digit PIN, set on first use of the desk after a password sign-in. It
+   guards two things only: unlocking the desk after a hand-over, and approving
+   an invoice. Forgot it: sign in with the password again and choose a new
+   one; an admin can also clear it from the Desk staff list. Five wrong tries
+   clear it and sign the desk out. Built — see §2.
 
 ## 2. What is built
 
@@ -97,6 +100,29 @@ consult is deleted from code.
   ⛔ It never adds or shortens an end date on an active link that has none —
   that is a permanent staffer (`staffLinkEndDecision`, tested).
 
+### The desk PIN and hand-over
+
+- Rules: `lib/conference/desk-pin.ts` (scrypt hash, 5 tries,
+  `deskPinChangeAllowed`). Server: `lib/actions/desk-pin.ts`. Screens:
+  `components/admin/conference/DeskPinPad.tsx`. Table `desk_pins` — RLS on,
+  no policies, service role only; never the digits.
+- ⛔ Choosing ANY PIN (even a first one) needs a password sign-in in the last
+  15 minutes, or the current PIN. Otherwise five wrong guesses (which delete
+  the PIN) would become a reset anyone holding the iPad could use. "Recent" is
+  read from the session's own sign-in time (`amr` in the token,
+  `signedInRecently` in guards).
+- Invoice: "Invoice the company instead" asks for the PIN first.
+- Hand-over: "Pay on this iPad" notes the sale in this browser
+  (`desk-handover:<conference>`), then goes to Stripe. Success and cancel both
+  bring staff back to the desk, which is locked behind the PIN — a reload
+  stays locked. Unlocked, it checks the sale: paid shows the print cards; not
+  paid closes the card link and shows a red "Not paid" card.
+- ⚠️ What the PIN cannot stop: while the customer holds the iPad on Stripe's
+  page, the browser is signed in as staff. Typing an admin address into the
+  URL bar would open it. Use **iPad Guided Access** (Settings → Accessibility)
+  during hand-over to pin the iPad to the browser and hide the address bar.
+  Desk staff who are not admins can only reach the desk anyway.
+
 ### Fixed: Deactivate never worked
 
 The org user table's Deactivate button sets status `inactive`, which the
@@ -111,7 +137,6 @@ stale end date.
   refuses without one. Badge Ops' "Attempt Auto Link" creates one from the
   name; the desk does not call it. Identity decision for Stephen.
 
-- **Kiosk / PIN** — design first (§1.7).
 - **Second label (John's back QR code)** — `renderReprintLabel` is reachable only
   from the job PDF route, and `badge_print_stock` is `NULL` for CSC 2027, so no
   spares print yet.
@@ -210,12 +235,25 @@ project_shared_email_walkup_rules):
 - [ ] Someone new on a shared address → their own record; no login, no Circle
 - [ ] After paying, their badge prints THEIR name, not the address-holder's
 
+**Desk PIN and hand-over** (sign in with your password first — a session
+older than 15 minutes is asked to sign in again before choosing a PIN):
+- [ ] First open of the desk asks for a PIN, twice; a mismatch starts again
+- [ ] Invoice the company instead → PIN screen; Cancel goes back to the QR
+- [ ] Pay on this iPad → Stripe; back (paid or cancelled) lands on a locked desk
+- [ ] Reload while locked: still locked
+- [ ] Right PIN unlocks: paid → green print cards; cancelled → red "Not paid"
+- [ ] Five wrong PINs → signed out; signing back in asks for a new PIN
+- [ ] Days & Setup → Desk staff shows "No PIN yet" / Reset PIN; Reset works
+- [ ] Customer's own phone, cancelled → "Payment not completed", no sign-in
+
 ## 4. Database changes (live on the shared database)
 
 - `20261019180000_conference_desk_staff.sql` — `governance_role_assignments.conference_id`,
   `user_organizations.expires_at`, the desk staff body + role, `capability_contributions`
   view with `conference_id` appended (options and grants restated).
 - `20261019200000_user_organizations_inactive_status.sql` — status may be `inactive`.
+- `20261019220000_check_in_not_valid_today.sql` — the wrong-day scan result.
+- `20261020000000_desk_pins.sql` — the hashed desk PIN, server only.
 
 ## 5. Why the first plan was cut
 
