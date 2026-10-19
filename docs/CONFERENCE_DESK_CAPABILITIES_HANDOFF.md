@@ -185,8 +185,23 @@ on any deploy). Rehearse with `…/check-in?test=1`; pretend a day with
 **Test data to remove afterwards:** the two "Desk Test …" people, their seats
 and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)); the
 contact "Alex Sharedinbox" in Test Org (Member), made to test a shared address
-(desmond.boateng@example.test); and the expired scratch desk appointments
-(reason "Scratch test by Claude, remove after").
+(desmond.boateng@example.test); two cart lines in Stephen's own carts (a
+Tuesday Day Pass for Alex in Test Org (Member), a Meet & Greet Reception in
+Test Org (BI Member Registered)); and the expired scratch desk appointments
+(reason "Scratch test by Claude, remove after"). One card checkout was opened
+and closed on 2026-10-19 (order 2c871dab…, canceled; Stripe session expired,
+unpaid).
+
+⚠️ "Test Org (Member)" has no province, so it cannot be taxed or check out —
+the desk now says so instead of showing an empty cart. Use a test org with a
+province (the "Test Org (BI …)" ones are Ontario) to test selling.
+
+**Payment screen** (card checkout, not invoice — an invoice emails a real
+Stripe invoice):
+- [ ] Review and pay shows the lines, total and a big QR
+- [ ] Scanning the QR on a phone opens Stripe; paying shows "Payment received"
+- [ ] The desk moves on by itself: a green "Paid: ready to print" card, Print badge
+- [ ] Back closes the card link (Stripe shows it expired)
 
 **Walk-up sale on a shared address** (Stephen's rules,
 project_shared_email_walkup_rules):

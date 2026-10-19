@@ -149,6 +149,10 @@ export default function DeskSellPanel({
       const count = res.data.offerItems.reduce((n, item) => n + item.quantity, 0);
       setCart({ count, totalCents: res.data.totalCents });
       setLines(cartLines(res.data.offerItems));
+    } else {
+      // ⛔ Shown, never swallowed: an unreadable cart is not an empty one (a
+      // company with no province cannot be taxed, and could not check out).
+      setError(res.error);
     }
   }, [conferenceId, orgId]);
 
@@ -166,7 +170,11 @@ export default function DeskSellPanel({
       }
     );
     void getConferenceCart(conferenceId, orgId).then((res) => {
-      if (cancelled || !res.success) return;
+      if (cancelled) return;
+      if (!res.success) {
+        setError(res.error);
+        return;
+      }
       setCart({
         count: res.data.offerItems.reduce((n, item) => n + item.quantity, 0),
         totalCents: res.data.totalCents,
@@ -505,7 +513,10 @@ export default function DeskSellPanel({
                         conferenceId={conferenceId}
                         organizationId={org.id}
                         touch
-                        attendee={attendee}
+                        // ⛔ Not for "For a colleague": that badge is someone
+                        // else's, so it goes in unnamed rather than in the name
+                        // of the person standing at the desk.
+                        attendee={group.key === "for_colleague" ? null : attendee}
                       />
                     </div>
                   ))}
