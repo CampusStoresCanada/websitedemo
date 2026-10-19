@@ -1,8 +1,12 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { membershipCoversConference } from "@/lib/conference/membership-gate";
+import { logAuditEventSafe } from "@/lib/ops/audit";
+import { loadBursaryApplications } from "@/lib/conference/bursary-widget";
+import { isBursaryStatus, type BursaryStatus } from "@/lib/conference/bursary-status";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -118,24 +122,77 @@ export async function listBursaryApplications(conferenceId: string): Promise<
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
 
+  try {
+    const rows = await loadBursaryApplications(conferenceId);
+    return {
+      success: true,
+      data: rows.map((r) => ({
+        id: r.id,
+        organizationName: r.organizationName,
+        contactName: r.contactName,
+        contactEmail: r.contactEmail,
+        notes: r.notes,
+        status: r.status,
+        createdAt: r.submittedOn ?? "",
+      })),
+    };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Failed to load applications." };
+  }
+}
+
+/**
+ * Admin: record the decision a human made on one application.
+ *
+ * Only the status moves. Nothing here evaluates eligibility, and no other
+ * field of the application is editable from the review queue — what the
+ * institution submitted is their statement, not ours to revise.
+ */
+export async function setBursaryApplicationStatus(params: {
+  applicationId: string;
+  status: BursaryStatus;
+}): Promise<Result<null>> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  if (!isBursaryStatus(params.status)) {
+    return { success: false, error: `"${params.status}" isn't a bursary status.` };
+  }
+
   const db = createAdminClient();
-  const { data, error } = await db
+
+  // Read the prior status first so the audit row records the transition, not
+  // just the destination.
+  const { data: before } = await db
     .from("conference_bursary_applications")
-    .select("id, contact_name, contact_email, notes, status, created_at, organizations(name)")
-    .eq("conference_id", conferenceId)
-    .order("created_at", { ascending: false });
+    .select("status, conference_id, organization_id")
+    .eq("id", params.applicationId)
+    .maybeSingle();
+
+  if (!before) return { success: false, error: "That application no longer exists." };
+  if (before.status === params.status) return { success: true, data: null };
+
+  const { error } = await db
+    .from("conference_bursary_applications")
+    .update({ status: params.status, updated_at: new Date().toISOString() })
+    .eq("id", params.applicationId);
+
   if (error) return { success: false, error: error.message };
 
-  return {
-    success: true,
-    data: (data ?? []).map((r) => ({
-      id: r.id,
-      organizationName: r.organizations?.name ?? "",
-      contactName: r.contact_name,
-      contactEmail: r.contact_email,
-      notes: r.notes,
-      status: r.status,
-      createdAt: r.created_at,
-    })),
-  };
+  await logAuditEventSafe({
+    action: "bursary_application_status_changed",
+    entityType: "conference_bursary_application",
+    entityId: params.applicationId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      from: before.status,
+      to: params.status,
+      conferenceId: before.conference_id,
+      organizationId: before.organization_id,
+    },
+  });
+
+  revalidatePath("/admin");
+  return { success: true, data: null };
 }

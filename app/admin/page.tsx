@@ -7,6 +7,7 @@ import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
 import { getBoardChecklist } from "@/lib/board/checklist";
 import { getElectionsWidgetData } from "@/lib/elections/dashboard-widget";
+import { getBursaryQueueData } from "@/lib/conference/bursary-widget";
 import { getDashboardWidgetLayout, widgetSpan } from "@/lib/admin/dashboard-widgets";
 import { visibleNavGroups } from "@/lib/admin/nav";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
@@ -19,6 +20,7 @@ import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsW
 import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
 import { BoardChecklist } from "@/components/admin/board/BoardChecklist";
 import { ElectionsWidget } from "@/components/admin/ElectionsWidget";
+import { BursaryQueueWidget } from "@/components/admin/BursaryQueueWidget";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -227,6 +229,13 @@ export default async function AdminConsolePage() {
     (r) => r.key === "onedrive_drive_id" && r.value
   );
 
+  // Travel-bursary queue. Sequential rather than in the batch above because it
+  // is scoped to the conference that batch resolves: passing `conf.id` keeps
+  // the widget and the conference section below it talking about the same
+  // conference, which a second "which conference is current" query would not
+  // guarantee.
+  const bursaryQueue = conf ? await getBursaryQueueData(conf.id, conf.name) : null;
+
   function fmtCurrency(n: number | null): string {
     if (n === null) return "—";
     return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
@@ -419,6 +428,15 @@ export default async function AdminConsolePage() {
             return electionsWidget ? (
               <div key={key} className={cell}>
                 <ElectionsWidget data={electionsWidget} />
+              </div>
+            ) : null;
+          }
+          // Only once an institution has actually applied — before that the
+          // card would be an empty slot sitting there all year.
+          if (key === "bursary") {
+            return bursaryQueue && bursaryQueue.rows.length > 0 ? (
+              <div key={key} className={cell}>
+                <BursaryQueueWidget data={bursaryQueue} />
               </div>
             ) : null;
           }

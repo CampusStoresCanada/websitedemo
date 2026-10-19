@@ -28,6 +28,10 @@ export const DASHBOARD_WIDGETS = [
   { key: "board_checklist", label: "Board Action Items", span: 2 },
   { key: "conference", label: "The Conference", span: 1 },
   { key: "elections", label: "Board Election", span: 1 },
+  // Two slots for the same reason the board list takes two: each row carries an
+  // institution, a contact, and a decision control, and at one slot the
+  // institution names — the thing being decided about — are what truncates.
+  { key: "bursary", label: "Travel Bursary", span: 2 },
 ] as const;
 
 /** How many of the four slots a widget occupies. */
