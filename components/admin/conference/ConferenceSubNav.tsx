@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CONFERENCE_OPS_SEGMENTS } from "@/lib/admin/nav";
 
 interface ConferenceSubNavProps {
   conferenceId: string;
   conferenceName: string;
   year: number;
   editionCode: string;
+  /** Conference ops staff who are not global admins: show only their pages. */
+  opsOnly?: boolean;
 }
 
 type Tab = { segment: string; label: string };
@@ -58,7 +61,14 @@ export default function ConferenceSubNav({
   conferenceName,
   year,
   editionCode,
+  opsOnly = false,
 }: ConferenceSubNavProps) {
+  const opsSegments = new Set<string>(CONFERENCE_OPS_SEGMENTS);
+  const stages = opsOnly
+    ? STAGES.map((stage) => ({ ...stage, tabs: stage.tabs.filter((t) => opsSegments.has(t.segment)) })).filter(
+        (stage) => stage.tabs.length > 0
+      )
+    : STAGES;
   const pathname = usePathname();
   const basePath = `/admin/conference/${conferenceId}`;
 
@@ -112,7 +122,7 @@ export default function ConferenceSubNav({
       </div>
 
       {/* Overview / launch checklist — the home */}
-      <div className="mb-3">
+      <div className={opsOnly ? "hidden" : "mb-3"}>
         <Link
           href={`${basePath}/overview`}
           className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium ${
@@ -131,7 +141,7 @@ export default function ConferenceSubNav({
           className="-mb-px flex items-end gap-5 overflow-x-auto pb-px"
           aria-label="Conference stages"
         >
-          {STAGES.map((stage, index) => (
+          {stages.map((stage, index) => (
             <div key={stage.label} className="flex items-end gap-4">
               <div className="flex flex-col">
                 <span className="mb-1 flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-gray-400">
@@ -148,7 +158,7 @@ export default function ConferenceSubNav({
                   ))}
                 </div>
               </div>
-              {index < STAGES.length - 1 && (
+              {index < stages.length - 1 && (
                 <span className="mb-2 h-6 w-px shrink-0 bg-gray-200" aria-hidden="true" />
               )}
             </div>

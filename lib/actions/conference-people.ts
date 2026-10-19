@@ -335,7 +335,9 @@ export async function listConferencePeople(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = conferencePeopleClient();
-  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  // Conference ops see the whole roster: the desk and war room are theirs.
+  const isAdmin =
+    isGlobalAdmin(auth.ctx.globalRole) || (await requireConferenceOpsAccess()).ok;
   const orgScope = auth.ctx.orgAdminOrgIds;
 
   const { data, error } = await db

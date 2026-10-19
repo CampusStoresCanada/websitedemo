@@ -282,3 +282,18 @@ export function visibleNavGroups(
 
   return groups;
 }
+
+/**
+ * The conference pages conference ops staff reach without being global admins.
+ *
+ * ⛔ The ONE list. The /admin gate admits on it and the conference sub-nav shows
+ * only these tabs to ops staff. Each page still runs requireConferenceOpsAccess
+ * itself — this list opens the door, it is not the lock.
+ */
+export const CONFERENCE_OPS_SEGMENTS = ["check-in", "war-room", "badges", "schedule-ops"] as const;
+
+/** True for /admin/conference/<id>/<one of the ops pages>[/...]. */
+export function isConferenceOpsPath(pathname: string): boolean {
+  const match = /^\/admin\/conference\/[^/]+\/([^/?#]+)/.exec(pathname);
+  return match !== null && (CONFERENCE_OPS_SEGMENTS as readonly string[]).includes(match[1]);
+}

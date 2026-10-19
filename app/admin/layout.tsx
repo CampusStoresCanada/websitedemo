@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
-import { requireAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { isConferenceOpsPath } from "@/lib/admin/nav";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import PresentationBlock from "@/components/presentation/PresentationBlock";
 import { headers } from "next/headers";
-import { loginPathFromHeaders } from "@/lib/auth/request-path";
+import { loginPathFromHeaders, REQUEST_PATHNAME_HEADER } from "@/lib/auth/request-path";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -17,6 +18,24 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const auth = await requireAdmin();
+  if (!auth.ok && auth.status === 403) {
+    // ⛔ Conference ops staff who are not global admins reach the desk, war
+    // room and badge pages, and nothing else under /admin. No admin sidebar:
+    // its links would all bounce them. The pathname is stamped by proxy.ts and
+    // overwritten on every /admin request, and each page checks ops access
+    // again itself.
+    const requestHeaders = await headers();
+    const pathname = requestHeaders.get(REQUEST_PATHNAME_HEADER) ?? "";
+    if (isConferenceOpsPath(pathname)) {
+      const ops = await requireConferenceOpsAccess();
+      if (ops.ok) {
+        if (ops.ctx.presentationMode) {
+          return <PresentationBlock level={ops.ctx.presentationMode} area="The admin area" />;
+        }
+        return <div className="min-h-[calc(100vh-4rem)] px-4 py-8">{children}</div>;
+      }
+    }
+  }
   if (!auth.ok) {
     /*
       401 is "not signed in" and 302s to the login screen; 403 is "signed in,

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getConference } from "@/lib/actions/conference";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import ConferenceSubNav from "@/components/admin/conference/ConferenceSubNav";
 
 export default async function ConferenceDetailLayout({
@@ -10,7 +11,7 @@ export default async function ConferenceDetailLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const result = await getConference(id);
+  const [result, auth] = await Promise.all([getConference(id), requireAuthenticated()]);
 
   if (!result.success || !result.data) {
     notFound();
@@ -25,6 +26,7 @@ export default async function ConferenceDetailLayout({
         conferenceName={conference.name}
         year={conference.year}
         editionCode={conference.edition_code}
+        opsOnly={!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)}
       />
       {children}
     </div>
