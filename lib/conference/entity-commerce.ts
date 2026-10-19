@@ -107,6 +107,29 @@ function whenDate(entityId: string, byId: Map<string, BuildEntity>): string {
   return typeof date === "string" ? date : "";
 }
 
+/**
+ * The calendar dates a holder may be on site for — the CHECK-IN rule.
+ *
+ * Every day they are granted, plus the `when` day of every session and event
+ * they are granted, including things they hold outright (an event-only ticket).
+ * ⛔ Wider than AccessSummary.days on purpose: a Big Ideas Day pass grants the
+ * Big Ideas Day SESSION, not the Thursday day entity, and Exhibitor Staff reach
+ * Tuesday only through Tuesday's sessions. Counting days alone refused
+ * exhibitors on Tuesday and let a Thursday-only pass in any day (Stephen,
+ * 2026-10-19). Offer cards and badge backs keep using `days`.
+ */
+export function admittedDates(entityIds: string | string[], byId: Map<string, BuildEntity>): string[] {
+  const held = Array.isArray(entityIds) ? entityIds : [entityIds];
+  const dates = new Set<string>();
+  for (const id of resolveAccess(held, byId)) {
+    const kind = byId.get(id)?.kind;
+    if (kind !== "day" && kind !== "session" && kind !== "event") continue;
+    const date = whenDate(id, byId);
+    if (date) dates.add(date);
+  }
+  return [...dates].sort();
+}
+
 /** A Day carries meeting cadence (`meeting_start_time`) exactly when it's configured as a scheduler meeting day — same signal schedule-service.ts uses to find meeting days. */
 function isMeetingDay(entityId: string, byId: Map<string, BuildEntity>): boolean {
   const day = resolvedDay(entityId, byId);

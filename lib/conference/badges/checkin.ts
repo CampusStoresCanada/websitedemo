@@ -27,7 +27,7 @@ import {
   spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
 import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
-import { summarizeAccess, type AccessSummary } from "@/lib/conference/entity-commerce";
+import { admittedDates, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { indexById } from "@/lib/conference/entity-graph";
 
@@ -167,9 +167,12 @@ export function checkInFactsFromRun(
         organizationName: seat.organizationName || null,
         registrationType: resolved.name,
         days,
-        dayDates: days
-          .map((name) => dateByDayName.get(name))
-          .filter((date): date is string => Boolean(date)),
+        // ⛔ The check-in rule's dates (admittedDates): days AND the days of
+        // sessions/events granted. Falls back to named days for a type-level
+        // summary, which has no person behind it.
+        dayDates:
+          entitlement?.admittedDates ??
+          days.map((name) => dateByDayName.get(name)).filter((date): date is string => Boolean(date)),
         admittedTo: deskAccessLines(access),
         ...(() => {
           const { stock, reason } = suggestStock({
@@ -320,8 +323,5 @@ export async function personVerdictToday(
   if (heldIds.length === 0) return null;
 
   const byId = indexById(buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []));
-  const dayDates = summarizeAccess(heldIds, byId)
-    .days.map((name) => dateByDayName.get(name))
-    .filter((date): date is string => Boolean(date));
-  return verdictForDay(dayDates, [...new Set(dateByDayName.values())], today);
+  return verdictForDay(admittedDates(heldIds, byId), [...new Set(dateByDayName.values())], today);
 }
