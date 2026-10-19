@@ -23,7 +23,7 @@ import {
   requestBadgeReprint,
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
-import { ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
+import { createKnownPerson, ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
 import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -1667,4 +1667,101 @@ export async function scanConferenceCheckInToken(params: {
     success: true,
     data: { state: "valid", personId: personRow.id, checkedInAt },
   };
+}
+
+
+/**
+ * A walk-up named at the desk with NO email: give them a person record so
+ * their badge can print, and tell their company's admins.
+ *
+ * ⛔ Stephen, 2026-10-19: the desk may skip the email. Without one the person
+ * gets no login (so no Circle and none of the signed-in conference tools), and
+ * their company's admins get a heads-up so they can add the address and invite
+ * them. A NEW person every time (createKnownPerson) — with no email there is
+ * nothing to tell two people apart, so never match by name.
+ *
+ * The heads-up is best-effort: the person and the badge are the record; a
+ * failed email never undoes them.
+ */
+export async function recordNameOnlyWalkUp(params: {
+  conferenceId: string;
+  conferencePersonId: string;
+}): Promise<{ success: true; data: { canonicalPersonId: string; adminsTold: number } } | { success: false; error: string }> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select("id, conference_id, organization_id, canonical_person_id, display_name, contact_email, role_title")
+    .eq("id", params.conferencePersonId)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person || person.conference_id !== params.conferenceId) {
+    return { success: false, error: "That person was not found at this conference." };
+  }
+  if (person.canonical_person_id) {
+    return { success: true, data: { canonicalPersonId: person.canonical_person_id as string, adminsTold: 0 } };
+  }
+  if ((person.contact_email as string | null)?.trim()) {
+    return { success: false, error: "They have an email address, so they are not a name-only walk-up." };
+  }
+  const name = (person.display_name as string | null)?.trim();
+  if (!name) return { success: false, error: "A name is needed." };
+  const organizationId = person.organization_id as string;
+
+  const created = await createKnownPerson(
+    { organizationId, name, title: (person.role_title as string | null) ?? null },
+    { provisionCircle: false }
+  );
+  if (!created.personId) return { success: false, error: created.error ?? "Could not add them." };
+
+  const { error: linkError } = await db
+    .from("conference_people")
+    .update({ canonical_person_id: created.personId, updated_at: new Date().toISOString() })
+    .eq("id", person.id);
+  if (linkError) return { success: false, error: linkError.message };
+
+  await logAuditEventSafe({
+    action: "conference_walkup_without_email",
+    entityType: "conference_person",
+    entityId: person.id as string,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId: params.conferenceId, organizationId, contactId: created.personId },
+  });
+
+  let adminsTold = 0;
+  try {
+    // Loaded here, not at the top: the email client starts with the module, and
+    // every other desk action in this file has no reason to load it.
+    const [{ resolveAudience }, { sendTransactionalBatch }] = await Promise.all([
+      import("@/lib/comms/audience"),
+      import("@/lib/comms/send"),
+    ]);
+    const [{ data: conference }, { data: org }, admins] = await Promise.all([
+      db.from("conference_instances").select("name").eq("id", params.conferenceId).maybeSingle(),
+      db.from("organizations").select("name, slug").eq("id", organizationId).maybeSingle(),
+      resolveAudience({ type: "org_admins", filters: { org_ids: [organizationId] } }),
+    ]);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const results = await sendTransactionalBatch({
+      templateKey: "conference_walkup_without_email",
+      recipients: admins.map((admin) => ({
+        to: admin.email,
+        variables: {
+          ...admin.variableOverrides,
+          person_name: name,
+          organization_name: (org?.name as string | null) ?? "your company",
+          conference_name: (conference?.name as string | null) ?? "the conference",
+          org_url: org?.slug ? `${appUrl}/org/${org.slug}` : appUrl,
+        },
+      })),
+    });
+    adminsTold = results.filter((r) => r.success).length;
+  } catch (err) {
+    console.warn("[recordNameOnlyWalkUp] heads-up email failed", err);
+  }
+
+  return { success: true, data: { canonicalPersonId: created.personId, adminsTold } };
 }

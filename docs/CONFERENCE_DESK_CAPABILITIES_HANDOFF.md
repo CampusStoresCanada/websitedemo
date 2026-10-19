@@ -132,10 +132,11 @@ stale end date.
 
 ## 3. Still open
 
-- **Name-only walk-ups cannot print.** A walk-up named at the desk without an
-  email has no person record (`canonical_person_id`), and badge printing
-  refuses without one. Badge Ops' "Attempt Auto Link" creates one from the
-  name; the desk does not call it. Identity decision for Stephen.
+- **Name-only walk-ups: built 2026-10-19.** The desk may skip the email. The
+  person gets a NEW record (never matched by name), so their badge prints, but
+  no login and no Circle; their company's org admins get the
+  `conference_walkup_without_email` heads-up (`recordNameOnlyWalkUp`). Test
+  organisations get no email (the org-admin audience skips them).
 
 - **Second label (John's back QR code)** — `renderReprintLabel` is reachable only
   from the job PDF route, and `badge_print_stock` is `NULL` for CSC 2027, so no
@@ -246,6 +247,11 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - [ ] Days & Setup → Desk staff shows "No PIN yet" / Reset PIN; Reset works
 - [ ] Customer's own phone, cancelled → "Payment not completed", no sign-in
 
+**Name someone without an email**:
+- [ ] The form says "No email: they get a badge but no login…"
+- [ ] Their badge prints from the green card
+- [ ] A real company's admin gets "Heads up: … has no login" (test orgs get none)
+
 ## 4. Database changes (live on the shared database)
 
 - `20261019180000_conference_desk_staff.sql` — `governance_role_assignments.conference_id`,
@@ -254,6 +260,7 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - `20261019200000_user_organizations_inactive_status.sql` — status may be `inactive`.
 - `20261019220000_check_in_not_valid_today.sql` — the wrong-day scan result.
 - `20261020000000_desk_pins.sql` — the hashed desk PIN, server only.
+- `20261020010000_conference_walkup_without_email_template.sql` — the heads-up email.
 
 ## 5. Why the first plan was cut
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
+import { recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
@@ -847,6 +848,15 @@ export default function CheckInDeskClient({
           setNamingError(seated.error);
           return;
         }
+        // ⛔ No email: they still get a person record (or the badge cannot
+        // print) but no login, and their company's admins are told.
+        // The seat is already theirs, so a failure here must not send the
+        // operator round again (a name-only retry would add a second person).
+        let recordProblem: string | null = null;
+        if (!walkUpEmail.trim()) {
+          const recorded = await recordNameOnlyWalkUp({ conferenceId, conferencePersonId: added.data.id });
+          if (!recorded.success) recordProblem = `Their badge may not print yet: ${recorded.error}`;
+        }
         setNamingOrgId(null);
         setWalkUpName("");
         setWalkUpEmail("");
@@ -854,7 +864,7 @@ export default function CheckInDeskClient({
         setLookupOpen(false);
         // An unknown person on a card makes the desk refetch roster, facts and
         // open seats — see pushScanCard.
-        pushScanCard("seat_named", added.data.id);
+        pushScanCard("seat_named", added.data.id, recordProblem);
       } catch {
         setNamingError("Could not name them to that seat. Try again.");
       } finally {
@@ -1414,6 +1424,11 @@ export default function CheckInDeskClient({
                           placeholder="Email (optional)"
                           className="min-h-12 w-full rounded-lg border border-white/40 bg-black px-4 text-sm text-white placeholder:text-gray-400"
                         />
+                        {walkUpEmail.trim() ? null : (
+                          <p className="text-xs text-gray-300">
+                            No email: they get a badge but no login, and their company&apos;s admin is told.
+                          </p>
+                        )}
                         {org.types.length > 1 ? (
                           <select
                             value={walkUpTypeId}
