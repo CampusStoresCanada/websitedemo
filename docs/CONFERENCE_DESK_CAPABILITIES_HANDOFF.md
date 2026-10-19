@@ -227,15 +227,12 @@ on any deploy). Rehearse with `…/check-in?test=1`; pretend a day with
   account already on CSC staff. **Never Add Staff with a test email** — it
   creates a real Circle account.
 
-**Test data to remove afterwards:** the two "Desk Test …" people, their seats
-and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)); the
-contact "Alex Sharedinbox" in Test Org (Member), made to test a shared address
-(desmond.boateng@example.test); two cart lines in Stephen's own carts (a
-Tuesday Day Pass for Alex in Test Org (Member), a Meet & Greet Reception in
-Test Org (BI Member Registered)); and the expired scratch desk appointments
-(reason "Scratch test by Claude, remove after"). One card checkout was opened
-and closed on 2026-10-19 (order 2c871dab…, canceled; Stripe session expired,
-unpaid).
+**Test data:** kept on purpose for device testing: the two "Desk Test …"
+people, their seats and print jobs (Test Org (BI Member Registered), Test Org
+(BI Presenter)). Cleaned up 2026-10-19 with Stephen's OK: "Alex Sharedinbox"
+archived, the scratch desk appointments ended, the two test cart lines removed.
+The canceled card checkout (order 2c871dab…, Stripe session expired, unpaid)
+stays as a record.
 
 ⚠️ "Test Org (Member)" has no province, so it cannot be taxed or check out —
 the desk now says so instead of showing an empty cart. Use a test org with a
