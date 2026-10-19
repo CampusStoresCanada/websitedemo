@@ -54,6 +54,8 @@ type ScanPulseCard = {
   hotelName: string | null;
   hotelConfirmationCode: string | null;
   travelMode: string | null;
+  /** What the server actually said, under a "Something went wrong". */
+  detail?: string | null;
 };
 
 const POLL_MS = 30_000;
@@ -65,73 +67,138 @@ const SCAN_STATUS_COPY: Record<
   string,
   { title: string; description: string; className: string }
 > = {
+  // ⛔ Plain words, for a volunteer with a queue: what happened and what to do.
+  // Never "token": nobody at a desk knows what one is.
   valid: {
-    title: "Checked In",
-    description: "Badge token resolved and check-in applied.",
+    title: "Checked in",
+    description: "Good to go. Hand them their badge.",
     className: "text-emerald-700",
   },
   already_checked_in: {
-    // ⛔ Was "No action needed". It is precisely when action IS usually needed:
-    // the person is back at the desk, and the badge is the reason.
-    title: "Already Checked In",
-    description: "They have been through the desk already.",
+    title: "Already checked in",
+    description: "This badge was picked up earlier. Make sure it is really them.",
     className: "text-accent",
   },
   invalid_token: {
-    title: "Invalid Token",
-    description: "Badge token was not recognized.",
+    title: "Not one of our badges",
+    description: "This code is not a badge for this conference. Find them by name instead.",
     className: "text-amber-700",
   },
   revoked_token: {
-    title: "Revoked Token",
-    description: "Badge token has been revoked or rotated.",
+    title: "This badge was replaced",
+    description: "They may have a newer badge. Find them by name.",
     className: "text-amber-700",
   },
   not_found: {
-    title: "Not Found",
-    description: "No active conference person found for this token.",
+    title: "We can't find who this belongs to",
+    description: "Nothing was checked in. Find them by name instead.",
     className: "text-amber-700",
   },
-  // ⛔ Nothing produces this any more — checking in is administrative and is
-  // never gated on paperwork. Kept only so historical events still render with
-  // words rather than a raw state string.
+  // ⛔ Refused, not warned: a badge for another day does not get them in.
+  not_valid_today: {
+    title: "Not valid today",
+    description: "Their badge does not cover today, so nothing was checked in.",
+    className: "text-red-700",
+  },
   legal_not_accepted: {
-    title: "Documents Not Accepted",
-    description: "Historical result. Check-in is no longer gated on documents.",
+    title: "Documents not accepted",
+    description: "An old result. Check-in no longer waits on documents.",
     className: "text-amber-700",
   },
   queued_offline: {
-    title: "Queued Offline",
-    description: "Scan queued locally and will retry when network returns.",
+    title: "Saved, no connection",
+    description: "It will send when the connection is back.",
     className: "text-purple-700",
   },
   scan_failed: {
-    title: "Scan Failed",
-    description: "Could not process scan. Try again.",
+    title: "Something went wrong",
+    description: "Nothing was checked in. Try again.",
     className: "text-red-700",
   },
-  // ⛔ Its own state, not "valid". A manual check-in reported "Badge token
-  // resolved and check-in applied" — no badge was scanned and no token was
-  // resolved, and the desk's own record of what happened should not say
-  // otherwise.
+  // ⛔ Its own state, not "valid": no badge was scanned, and the desk's own
+  // record of what happened should not say otherwise.
   manual_checked_in: {
-    title: "Checked In by Name",
-    description: "No badge scanned — checked in manually and recorded against you.",
+    title: "Checked in by name",
+    description: "No badge scanned. Checked in by hand and recorded against you.",
     className: "text-emerald-700",
   },
   badge_reprinted: {
-    title: "Badge Reprinted",
-    description: "Badge reprint was queued successfully.",
+    title: "Reprint sent",
+    description: "Their badge reprint is queued.",
     className: "text-cyan-700",
   },
   // A walk-up named to a seat their company already owns. Not a check-in and
   // not a print: the operator reprints from this card onto the company blank.
   seat_named: {
-    title: "Named to an Open Seat",
+    title: "Named to an open seat",
     description: "Named to a seat their company already holds. Print their badge from here.",
     className: "text-emerald-700",
   },
 };
+
+/**
+ * How loud a result is. ⛔ One map drives the flash, the sound and the card's
+ * colour, so they cannot disagree about whether to stop somebody.
+ */
+type ScanTone = "go" | "check" | "stop" | "info";
+const SCAN_TONE: Record<string, ScanTone> = {
+  valid: "go",
+  manual_checked_in: "go",
+  seat_named: "go",
+  already_checked_in: "check",
+  invalid_token: "stop",
+  revoked_token: "stop",
+  not_found: "stop",
+  not_valid_today: "stop",
+  legal_not_accepted: "stop",
+  scan_failed: "stop",
+  queued_offline: "info",
+  badge_reprinted: "info",
+};
+const toneOf = (state: string): ScanTone => SCAN_TONE[state] ?? "info";
+
+const TONE_STYLE: Record<ScanTone, { header: string; flash: string }> = {
+  go: { header: "bg-emerald-600 text-white", flash: "bg-emerald-500" },
+  check: { header: "bg-amber-400 text-black", flash: "bg-amber-400" },
+  stop: { header: "bg-red-600 text-white", flash: "bg-red-600" },
+  info: { header: "bg-gray-700 text-white", flash: "bg-transparent" },
+};
+
+/**
+ * A short tone and a buzz for each result, so the operator hears a stop while
+ * looking at the person, not the screen. iPads cannot vibrate; the sound does.
+ */
+function signalResult(tone: ScanTone, audio: { current: AudioContext | null }) {
+  const pattern: Record<ScanTone, number[]> = {
+    go: [60],
+    check: [60, 80, 60],
+    stop: [220, 120, 220],
+    info: [],
+  };
+  if (pattern[tone].length && typeof navigator !== "undefined" && "vibrate" in navigator) {
+    navigator.vibrate(pattern[tone]);
+  }
+  const ctx = audio.current;
+  if (!ctx || tone === "info") return;
+  const beeps: Array<[number, number, number]> =
+    tone === "go"
+      ? [[880, 0, 0.12]]
+      : tone === "check"
+        ? [[660, 0, 0.1], [660, 0.16, 0.1]]
+        : [[220, 0, 0.18], [196, 0.26, 0.28]];
+  for (const [freq, at, dur] of beeps) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = tone === "stop" ? "square" : "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + at);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(ctx.currentTime + at);
+    osc.stop(ctx.currentTime + at + dur + 0.02);
+  }
+}
 
 /**
  * The scans that leave the desk with nobody in front of it resolved.
@@ -201,6 +268,22 @@ export default function CheckInDeskClient({
   // Recovery from a scan that did not resolve — see FAILED_SCAN_STATES.
   const [nameLookup, setNameLookup] = useState("");
   const [lookupOpen, setLookupOpen] = useState(false);
+  // The full-screen colour for the latest result, and the sound for it.
+  const [flash, setFlash] = useState<{ tone: ScanTone; key: number } | null>(null);
+  const audioRef = useRef<AudioContext | null>(null);
+  // ⛔ Browsers (iPad Safari above all) only allow sound after a tap, so the
+  // first touch anywhere on the desk switches it on.
+  const unlockAudio = useCallback(() => {
+    if (!audioRef.current && typeof window !== "undefined" && "AudioContext" in window) {
+      audioRef.current = new AudioContext();
+    }
+    void audioRef.current?.resume();
+  }, []);
+  useEffect(() => {
+    if (!flash) return;
+    const t = window.setTimeout(() => setFlash(null), 700);
+    return () => window.clearTimeout(t);
+  }, [flash]);
   // The + menu and the camera picker under it.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
@@ -227,8 +310,6 @@ export default function CheckInDeskClient({
     () => (asOf ? new Date(`${asOf}T12:00:00`) : new Date()),
     [asOf]
   );
-  const [scanToken, setScanToken] = useState("");
-  const [scanResult, setScanResult] = useState<string | null>(null);
   const [scanCards, setScanCards] = useState<ScanPulseCard[]>([]);
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -246,14 +327,16 @@ export default function CheckInDeskClient({
   const pendingScanStorageKey = `${PENDING_SCAN_STORAGE_PREFIX}:${conferenceId}`;
 
   const pushScanCard = useCallback(
-    (state: string, personId: string | null) => {
+    (state: string, personId: string | null, detail: string | null = null) => {
       const person = personId ? rows.find((row) => row.id === personId) ?? null : null;
       const createdAt = Date.now();
       const card: ScanPulseCard = {
         id: `${createdAt}:${personId ?? "none"}:${Math.random().toString(36).slice(2, 8)}`,
         state,
         personId,
-        expiresAt: createdAt + SCAN_PULSE_TTL_MS,
+        // ⛔ A stop stays until someone taps it: a refusal that disappears on a
+        // timer is a refusal nobody saw.
+        expiresAt: toneOf(state) === "stop" ? Number.POSITIVE_INFINITY : createdAt + SCAN_PULSE_TTL_MS,
         displayName: person?.display_name ?? person?.contact_email ?? null,
         facts: personId ? facts[personId] ?? null : null,
         checkedInAt: person?.checked_in_at ?? null,
@@ -261,8 +344,17 @@ export default function CheckInDeskClient({
         hotelName: person?.hotel_name ?? null,
         hotelConfirmationCode: person?.hotel_confirmation_code ?? null,
         travelMode: person?.travel_mode ?? null,
+        detail,
       };
-      setScanCards((prev) => [card, ...prev].slice(0, SCAN_PULSE_LIMIT));
+      setScanCards((prev) => {
+        const next = [card, ...prev];
+        const stops = next.filter((c) => toneOf(c.state) === "stop");
+        const rest = next.filter((c) => toneOf(c.state) !== "stop").slice(0, SCAN_PULSE_LIMIT);
+        return next.filter((c) => stops.includes(c) || rest.includes(c));
+      });
+      // The whole screen says it, and so does the speaker.
+      setFlash({ tone: toneOf(state), key: createdAt });
+      signalResult(toneOf(state), audioRef);
 
       // ⛔ Somebody the desk has never heard of — a walk-up registered after
       // this page loaded. Both halves of the card come from snapshots taken at
@@ -379,17 +471,17 @@ export default function CheckInDeskClient({
         { method: "DELETE" }
       );
       if (!response.ok) {
-        setScanResult("scan_failed");
+        pushScanCard("scan_failed", null, "The rehearsal could not be reset.");
         return;
       }
       setScanCards([]);
       await Promise.all([loadTestCounts(), loadRows()]);
     } catch {
-      setScanResult("scan_failed");
+      pushScanCard("scan_failed", null, "The rehearsal could not be reset.");
     } finally {
       setResetBusy(false);
     }
-  }, [conferenceId, loadTestCounts, loadRows]);
+  }, [conferenceId, loadTestCounts, loadRows, pushScanCard]);
 
 
   const submitScan = useCallback(
@@ -401,7 +493,7 @@ export default function CheckInDeskClient({
         const response = await fetch(`/api/admin/conference/${conferenceId}/check-in/scan`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...scan, test_mode: testMode }),
+          body: JSON.stringify({ ...scan, test_mode: testMode, as_of: testMode ? asOf : null }),
         });
         const payload = (await response.json()) as {
           state?: string;
@@ -425,8 +517,8 @@ export default function CheckInDeskClient({
     },
     // testMode is read in the body — it is a prop and constant for a given page
     // load today, but leaving it out of the deps is the kind of stale closure
-    // that only bites once it stops being constant.
-    [conferenceId, testMode]
+    // that only bites once it stops being constant. Same for asOf.
+    [conferenceId, testMode, asOf]
   );
 
   const submitToken = useCallback(
@@ -439,7 +531,6 @@ export default function CheckInDeskClient({
         },
         true
       );
-      setScanResult(result.state);
       pushScanCard(result.state, result.personId);
       await loadRows();
     },
@@ -500,7 +591,6 @@ export default function CheckInDeskClient({
           const last = lastDecodedRef.current;
           if (last && last.value === raw && now - last.at < 3000) return;
           lastDecodedRef.current = { value: raw, at: now };
-          setScanToken(raw);
           await submitToken(raw);
         }
       );
@@ -529,7 +619,6 @@ export default function CheckInDeskClient({
     if (!code) return;
     setNameLookup("");
     setLookupOpen(false);
-    setScanToken(code);
     await submitToken(code);
   };
 
@@ -555,7 +644,7 @@ export default function CheckInDeskClient({
         );
         const payload = (await response.json()) as { error?: string };
         if (!response.ok) {
-          setScanResult(payload.error ?? "scan_failed");
+          pushScanCard("scan_failed", personId, payload.error ?? "They could not be checked in by name.");
           return;
         }
         // Announce it the same way a scan does, so the desk has one place to
@@ -566,7 +655,7 @@ export default function CheckInDeskClient({
         setNameLookup("");
         await loadRows();
       } catch {
-        setScanResult("scan_failed");
+        pushScanCard("scan_failed", personId, "They could not be checked in by name.");
       } finally {
         setLookupBusy(null);
       }
@@ -700,14 +789,13 @@ export default function CheckInDeskClient({
         });
         const payload = (await response.json()) as { error?: string };
         if (!response.ok) {
-          setScanResult(payload.error ?? "scan_failed");
+          pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
           return;
         }
-        setScanResult("badge_reprinted");
         pushScanCard("badge_reprinted", personId);
         await loadRows();
       } catch {
-        setScanResult("scan_failed");
+        pushScanCard("scan_failed", personId, "The reprint could not be sent.");
       } finally {
         setReprintBusy(null);
       }
@@ -763,7 +851,6 @@ export default function CheckInDeskClient({
         if (result.state === "scan_failed") {
           remaining.push(scan);
         } else {
-          setScanResult(result.state);
           pushScanCard(result.state, result.personId);
         }
       }
@@ -785,7 +872,14 @@ export default function CheckInDeskClient({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[70] overflow-hidden bg-black text-white">
+    <div className="fixed inset-0 z-[70] overflow-hidden bg-black text-white" onPointerDown={unlockAudio}>
+      {flash && flash.tone !== "info" ? (
+        <div
+          key={flash.key}
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 z-50 animate-[desk-flash_700ms_ease-out_forwards] ${TONE_STYLE[flash.tone].flash}`}
+        />
+      ) : null}
       <video
         ref={videoRef}
         className={`h-full w-full object-cover transition-[filter] duration-200 ${
@@ -850,16 +944,14 @@ export default function CheckInDeskClient({
       ) : null}
 
       {activeCards.length > 0 ? (
-        <div className="absolute right-4 top-4 w-[min(420px,92vw)] space-y-2">
+        <div className="absolute inset-x-0 top-14 z-30 mx-auto max-h-[calc(100dvh-9rem)] w-[min(560px,94vw)] space-y-3 overflow-y-auto">
           {activeCards.map((card) => (
-            <div key={card.id} className="rounded-md bg-black/75 p-3 text-sm">
-              <p className={SCAN_STATUS_COPY[card.state]?.className ?? "text-gray-200"}>
-                <span className="font-semibold">
-                  {SCAN_STATUS_COPY[card.state]?.title ?? "Scan Result"}
-                </span>
-                {" - "}
-                {SCAN_STATUS_COPY[card.state]?.description ?? card.state}
-              </p>
+            <div key={card.id} className="overflow-hidden rounded-xl bg-black/85 text-base shadow-2xl">
+              <div className={`px-4 py-3 ${TONE_STYLE[toneOf(card.state)].header}`}>
+                <p className="text-xl font-bold">{SCAN_STATUS_COPY[card.state]?.title ?? "Scan result"}</p>
+                <p className="mt-0.5 text-base">{SCAN_STATUS_COPY[card.state]?.description ?? card.state}</p>
+              </div>
+              <div className="p-4">
               {card.displayName ? (
                 <p className="mt-1 text-white">{card.displayName}</p>
               ) : null}
@@ -906,16 +998,13 @@ export default function CheckInDeskClient({
               {/* ⛔ A failed scan needs a NEXT ACTION, not a diagnosis. The
                   person whose badge would not read is standing right there. */}
               {FAILED_SCAN_STATES.has(card.state) ? (
-                <div className="mt-2 rounded border border-amber-400/50 bg-amber-500/10 p-2">
-                  <p className="text-sm text-amber-100">
-                    Nothing was checked in. Try the code again, or find them by name.
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div>
+                  {/* The red header already says what happened; these are what to do. */}
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setScanCards((prev) => prev.filter((entry) => entry.id !== card.id));
-                        setScanToken("");
                         scanInputRef.current?.focus();
                       }}
                       className="min-h-12 rounded-lg bg-white px-4 text-sm font-semibold text-black"
@@ -930,7 +1019,7 @@ export default function CheckInDeskClient({
                       }}
                       className="min-h-12 rounded-lg border border-white/60 px-4 text-sm font-semibold text-white"
                     >
-                      Find by name
+                      Find
                     </button>
                   </div>
                 </div>
@@ -1049,9 +1138,30 @@ export default function CheckInDeskClient({
                   <p>Hotel confirm: {card.hotelConfirmationCode ?? "n/a"}</p>
                 </div>
               ) : null}
-              <p className="mt-1 text-sm text-gray-300">
-                {Math.max(0, Math.ceil((card.expiresAt - nowMs) / 1000))}s
-              </p>
+              {card.state === "not_valid_today" ? (
+                <a
+                  href={`${storefrontPath}/offers`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 inline-flex min-h-12 items-center rounded-lg bg-white px-4 text-base font-semibold text-black"
+                >
+                  Sell them a day pass →
+                </a>
+              ) : null}
+              {toneOf(card.state) === "stop" ? (
+                <button
+                  type="button"
+                  onClick={() => setScanCards((prev) => prev.filter((entry) => entry.id !== card.id))}
+                  className="mt-3 min-h-12 w-full rounded-lg border border-white/50 px-4 text-base font-semibold text-white"
+                >
+                  Dismiss
+                </button>
+              ) : (
+                <p className="mt-2 text-sm text-gray-400">
+                  {Math.max(0, Math.ceil((card.expiresAt - nowMs) / 1000))}s
+                </p>
+              )}
+              </div>
             </div>
           ))}
         </div>
@@ -1288,17 +1398,8 @@ export default function CheckInDeskClient({
       ) : null}
 
       {/* What just happened, bottom left — the + menu owns bottom right. */}
-      {scanResult || pendingScans.length > 0 ? (
+      {pendingScans.length > 0 ? (
         <div className="absolute bottom-6 left-6 flex flex-col gap-2">
-          {scanResult ? (
-            <p
-              className={`rounded-full bg-white px-4 py-2 text-base font-semibold ${
-                SCAN_STATUS_COPY[scanResult]?.className ?? "text-gray-800"
-              }`}
-            >
-              {SCAN_STATUS_COPY[scanResult]?.title ?? "Scan"}
-            </p>
-          ) : null}
           {pendingScans.length > 0 ? (
             <p className="rounded-full bg-purple-600 px-4 py-2 text-base font-semibold text-white">
               {pendingScans.length} queued

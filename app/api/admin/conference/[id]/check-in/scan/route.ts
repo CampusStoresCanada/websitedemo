@@ -21,6 +21,7 @@ export async function POST(
     scan_timestamp?: string;
     device_id?: string;
     test_mode?: boolean;
+    as_of?: string | null;
   };
 
   try {
@@ -29,6 +30,7 @@ export async function POST(
       scan_timestamp?: string;
       device_id?: string;
       test_mode?: boolean;
+      as_of?: string | null;
     };
   } catch {
     return NextResponse.json(
@@ -53,6 +55,8 @@ export async function POST(
     // per-conference test flag to leave switched on by accident: a rehearsal is
     // something you are doing right now, in this tab.
     testMode: payload.test_mode === true,
+    // Rehearsal only; the action ignores it outside test mode.
+    asOf: payload.as_of ?? null,
   });
 
   if (!result.success) {

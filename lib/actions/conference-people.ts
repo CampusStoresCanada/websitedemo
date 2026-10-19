@@ -29,6 +29,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
 import { planReprint, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
+import { personVerdictToday } from "@/lib/conference/badges/checkin";
+import { conferenceToday } from "@/lib/conference/desk-staff";
 
 type ConferencePersonRow = {
   id: string;
@@ -1318,7 +1320,9 @@ export type CheckInScanResultState =
   | "invalid_token"
   | "revoked_token"
   | "not_found"
-  | "legal_not_accepted";
+  | "legal_not_accepted"
+  /** Their badge does not cover today. Refused at pickup — see verdictForDay. */
+  | "not_valid_today";
 
 /**
  * How much of a rehearsal is still sitting in the real numbers.
@@ -1432,6 +1436,8 @@ export async function scanConferenceCheckInToken(params: {
    * remembers they were testing.
    */
   testMode?: boolean;
+  /** Rehearsal only: pretend it is this date (YYYY-MM-DD). Ignored otherwise. */
+  asOf?: string | null;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -1588,6 +1594,24 @@ export async function scanConferenceCheckInToken(params: {
         personId: personRow.id,
         checkedInAt: personRow.checked_in_at,
       },
+    };
+  }
+
+  // ⛔ A DAY GATE, deliberately — unlike documents below. A Thursday day pass
+  // picked up on Tuesday is refused, red, and nothing is checked in (Stephen,
+  // 2026-10-19). Same rule the desk card shows (verdictForDay), judged on the
+  // conference's own date. ⚠️ If what the badge covers cannot be read, the scan
+  // goes through: a database hiccup must not stop the queue.
+  const today =
+    isTest && params.asOf && /^\d{4}-\d{2}-\d{2}$/.test(params.asOf)
+      ? params.asOf
+      : await conferenceToday(conferenceId);
+  const verdict = await personVerdictToday(conferenceId, personRow.id, today).catch(() => null);
+  if (verdict && !verdict.admitted) {
+    await insertEvent("not_valid_today", personRow.id, resolvedTokenRow.id);
+    return {
+      success: true,
+      data: { state: "not_valid_today", personId: personRow.id, checkedInAt: null },
     };
   }
 

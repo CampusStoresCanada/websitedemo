@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkInFactsFromRun, openSeatsFromRun, todayVerdict } from "../checkin";
+import { checkInFactsFromRun, openSeatsFromRun, todayVerdict, verdictForDay } from "../checkin";
 import type { BadgeRun } from "../run";
 
 /**
@@ -273,5 +273,31 @@ describe("openSeatsFromRun", () => {
 
   it("offers nothing when every seat is named", () => {
     expect(openSeatsFromRun(run())).toEqual([]);
+  });
+});
+
+/**
+ * ⛔ The day rule, which the desk card shows AND the scan enforces: on a
+ * conference day, a badge that does not cover it is refused (Stephen,
+ * 2026-10-19). Off conference days it says nothing.
+ */
+describe("verdictForDay", () => {
+  const conferenceDates = ["2027-02-02", "2027-02-03", "2027-02-04"];
+  const thursdayPass = ["2027-02-04"];
+
+  it("admits on a day the badge covers", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2027-02-04")).toEqual({ admitted: true });
+  });
+
+  it("refuses on a conference day the badge does not cover", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2027-02-02")).toEqual({ admitted: false });
+  });
+
+  it("says nothing on a day that is not a conference day", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2026-10-19")).toBeNull();
+  });
+
+  it("says nothing when it does not know the badge's days", () => {
+    expect(verdictForDay([], conferenceDates, "2027-02-02")).toBeNull();
   });
 });

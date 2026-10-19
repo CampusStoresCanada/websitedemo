@@ -27,7 +27,9 @@ import {
   spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
 import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
-import type { AccessSummary } from "@/lib/conference/entity-commerce";
+import { summarizeAccess, type AccessSummary } from "@/lib/conference/entity-commerce";
+import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
+import { indexById } from "@/lib/conference/entity-graph";
 
 export type CheckInFacts = {
   /** Who they are here with. The card used to show a bare name. */
@@ -106,10 +108,23 @@ export function todayVerdict(
   conferenceDates: string[],
   now: Date = new Date()
 ): { admitted: boolean } | null {
-  if (!facts || facts.dayDates.length === 0) return null;
-  const today = localIsoDate(now);
+  if (!facts) return null;
+  return verdictForDay(facts.dayDates, conferenceDates, localIsoDate(now));
+}
+
+/**
+ * The rule itself, for a known "today". ⛔ ONE rule: the desk card shows it and
+ * the scan enforces it (personVerdictToday) — a badge for another day is
+ * REFUSED at pickup, not checked in with a warning (Stephen, 2026-10-19).
+ */
+export function verdictForDay(
+  dayDates: string[],
+  conferenceDates: string[],
+  today: string
+): { admitted: boolean } | null {
+  if (dayDates.length === 0) return null;
   if (!conferenceDates.includes(today)) return null;
-  return { admitted: facts.dayDates.includes(today) };
+  return { admitted: dayDates.includes(today) };
 }
 
 /** Build the desk's facts from an already-resolved run. */
@@ -230,13 +245,9 @@ export async function loadCheckInFacts(
   conferenceId: string
 ): Promise<CheckInFactsPayload> {
   const db = createAdminClient();
-  const [run, { data: dayRows }, printStock] = await Promise.all([
+  const [run, dateByDayName, printStock] = await Promise.all([
     resolveBadgeRun(conferenceId),
-    db
-      .from("conference_entities")
-      .select("name, attributes")
-      .eq("conference_id", conferenceId)
-      .eq("kind", "day"),
+    loadDayDates(db, conferenceId),
     getBadgePrintStock(conferenceId),
   ]);
 
@@ -248,6 +259,24 @@ export async function loadCheckInFacts(
         .catch(() => [])
     : [];
 
+
+  return {
+    facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
+    openSeats: openSeatsFromRun(run),
+    conferenceDates: [...new Set(dateByDayName.values())].sort(),
+  };
+}
+
+/** Day entity name → ISO date, for this conference. */
+async function loadDayDates(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<Map<string, string>> {
+  const { data: dayRows } = await db
+    .from("conference_entities")
+    .select("name, attributes")
+    .eq("conference_id", conferenceId)
+    .eq("kind", "day");
   const dateByDayName = new Map<string, string>();
   for (const row of (dayRows ?? []) as Array<Record<string, unknown>>) {
     const name = typeof row.name === "string" ? row.name : null;
@@ -255,10 +284,44 @@ export async function loadCheckInFacts(
     const date = typeof attributes.date === "string" ? attributes.date.trim() : "";
     if (name && date) dateByDayName.set(name, date);
   }
+  return dateByDayName;
+}
 
-  return {
-    facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
-    openSeats: openSeatsFromRun(run),
-    conferenceDates: [...new Set(dateByDayName.values())].sort(),
-  };
+/**
+ * Is this person's badge good for `today`? For the scan, one person at a time.
+ *
+ * ⛔ The SAME walk as the badge run's per-person entitlements —
+ * summarizeAccess over every seat they hold — without paying for a whole run
+ * on every scan. Null when today is not a conference day or they hold nothing.
+ */
+export async function personVerdictToday(
+  conferenceId: string,
+  personId: string,
+  today: string
+): Promise<{ admitted: boolean } | null> {
+  const db = createAdminClient();
+  const [dateByDayName, entitiesRes, refsRes, seatsRes] = await Promise.all([
+    loadDayDates(db, conferenceId),
+    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
+    db
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, role, quantity")
+      .eq("conference_id", conferenceId),
+    db
+      .from("entity_balance_seats")
+      .select("entity_id")
+      .eq("conference_id", conferenceId)
+      .eq("holder_person_id", personId),
+  ]);
+  if (entitiesRes.error || refsRes.error || seatsRes.error) {
+    throw new Error("Could not read what this badge covers.");
+  }
+  const heldIds = [...new Set((seatsRes.data ?? []).map((s) => s.entity_id as string))];
+  if (heldIds.length === 0) return null;
+
+  const byId = indexById(buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []));
+  const dayDates = summarizeAccess(heldIds, byId)
+    .days.map((name) => dateByDayName.get(name))
+    .filter((date): date is string => Boolean(date));
+  return verdictForDay(dayDates, [...new Set(dateByDayName.values())], today);
 }

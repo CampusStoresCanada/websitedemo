@@ -197,6 +197,12 @@ body.check-in-kiosk {
   overflow: hidden !important;
 }
 
+/* The desk's full-screen result flash: on, then gone in under a second. */
+@keyframes desk-flash {
+  0% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+
 body.check-in-kiosk header,
 body.check-in-kiosk footer {
   display: none !important;
