@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { decideScanDirection } from "@/lib/conference/badges/scan";
 import type { ScanClassificationPolicy } from "@/lib/conference/badges/scan";
-import { DEFAULT_SCAN_DESTINATIONS } from "@/lib/conference/badges/rules";
+import {
+  DEFAULT_SCAN_DESTINATIONS,
+  SCAN_DESTINATIONS,
+  normalizeBadgeScanRules,
+} from "@/lib/conference/badges/rules";
 
 /** What CSC ships with, and what the policy defaults to. */
 const CSC: ScanClassificationPolicy = {
@@ -143,5 +147,37 @@ describe("decideScanDirection", () => {
         policy: { disclosingOrgTypes: [], attendeeOrgTypes: [], unlistedOrgTypeDiscloses: true },
       })
     ).toBe("companyToAttendee");
+  });
+});
+
+/**
+ * Where scanning your OWN badge lands.
+ *
+ * Stephen: "self scan mode should send you to /me and we should send the self
+ * purchase stuff there". The account page is the only destination that can
+ * ACT — it carries what this person still owes and the extras their
+ * organisation can buy — and it links out to the map, so nothing is lost.
+ */
+describe("the self-scan destination", () => {
+  it("defaults to the account page, not the map", () => {
+    expect(DEFAULT_SCAN_DESTINATIONS.self).toBe("me");
+  });
+
+  it("is an option any direction can be pointed at", () => {
+    // `me` is a destination in the shared vocabulary, not a hardcoded
+    // special case for self-scans — which is why the admin editor picks it up
+    // with no change, and why DESTINATION_LABELS is typed to require a label.
+    expect(SCAN_DESTINATIONS).toContain("me");
+  });
+
+  it("⛔ does NOT move a conference that already stored an answer", () => {
+    // The trap: flipping a default and expecting live behaviour to follow.
+    // normalizeBadgeScanRules falls back PER DIRECTION, so CSC 2027's stored
+    // `self: "map"` keeps winning until somebody saves a new one. Changing
+    // this needed a data edit in the editor as well as the code.
+    const stored = normalizeBadgeScanRules({ destinations: { self: "map" } });
+    expect(stored.destinations.self).toBe("map");
+    // ...while a direction it says nothing about takes the new default.
+    expect(stored.destinations.attendeeToAttendee).toBe("circle");
   });
 });
