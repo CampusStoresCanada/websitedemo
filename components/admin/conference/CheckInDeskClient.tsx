@@ -204,6 +204,14 @@ export default function CheckInDeskClient({
   // The + menu and the camera picker under it.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
   const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
+  // A panel is over the camera: drop the guide, soften the feed, stop reading.
+  const panelOpen = lookupOpen || cameraPanelOpen;
+  // ⛔ Read by the scanner's callback, which is created once when the camera
+  // starts and would otherwise see a stale lookupOpen forever.
+  const lookupOpenRef = useRef(false);
+  useEffect(() => {
+    lookupOpenRef.current = lookupOpen;
+  }, [lookupOpen]);
   const [lookupBusy, setLookupBusy] = useState<string | null>(null);
   // Leftover rehearsal rows. ⛔ Tracked whether or not this desk is in test
   // mode: the whole risk of a writing test mode is a rehearsal nobody reset,
@@ -483,6 +491,9 @@ export default function CheckInDeskClient({
         video,
         async (result, err) => {
           if (err || !result) return;
+          // ⛔ Typing a name in Find with a badge somewhere in view must not
+          // check that badge in behind the operator's back.
+          if (lookupOpenRef.current) return;
           const raw = result.getText?.().trim();
           if (!raw) return;
           const now = Date.now();
@@ -775,7 +786,15 @@ export default function CheckInDeskClient({
 
   return (
     <div className="fixed inset-0 z-[70] overflow-hidden bg-black text-white">
-      <video ref={videoRef} className="h-full w-full object-cover" muted autoPlay playsInline />
+      <video
+        ref={videoRef}
+        className={`h-full w-full object-cover transition-[filter] duration-200 ${
+          panelOpen ? "blur-md brightness-50" : ""
+        }`}
+        muted
+        autoPlay
+        playsInline
+      />
       {/* ⛔ Unmissable, and it covers the camera feed rather than sitting beside
           it. A test mode you can forget you are in is worse than no test mode:
           every check-in you take while it is on lands in the roster tagged, and
@@ -1042,9 +1061,11 @@ export default function CheckInDeskClient({
           ⛔ Lives ON the desk. Manual check-in already existed in the War Room,
           which meant leaving this screen mid-queue to use it. */}
       {lookupOpen ? (
-        <div className="absolute inset-x-0 bottom-28 mx-auto w-[min(560px,94vw)] rounded-lg border border-white/20 bg-black/90 p-3">
+        // ⛔ Pinned to the TOP: on a phone or iPad the keyboard comes up from
+        // the bottom, and a panel there is a panel under the keyboard.
+        <div className="absolute inset-x-0 top-14 z-40 mx-auto flex max-h-[calc(100dvh-5rem)] w-[min(560px,94vw)] flex-col rounded-lg border border-white/20 bg-black/90 p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-white">Find by name</p>
+            <p className="text-base font-semibold text-white">Find</p>
             <button
               type="button"
               onClick={() => {
@@ -1082,7 +1103,7 @@ export default function CheckInDeskClient({
             Checking in here is a manual override recorded against you. It does not
             check documents.
           </p>
-          <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+          <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {nameLookup.trim().length < 2 ? (
               <p className="text-sm text-gray-400">Type at least two characters.</p>
             ) : (
@@ -1254,7 +1275,7 @@ export default function CheckInDeskClient({
 
       {/* Line the badge up here. A square to aim at makes the camera read
           faster and more reliably than a code held anywhere in frame. */}
-      {cameraState === "active" ? (
+      {cameraState === "active" && !panelOpen ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <div
             className="aspect-square w-[min(60vw,60vh)] rounded-2xl border-4 border-white/90"
