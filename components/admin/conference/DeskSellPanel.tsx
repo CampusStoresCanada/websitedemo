@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import OfferCard from "@/components/conference/OfferCard";
 import { getConferenceCart } from "@/lib/actions/conference-commerce";
-import { listDeskSaleOrganizations, loadDeskSaleOffers } from "@/lib/actions/desk-sale";
+import {
+  createWalkUpPerson,
+  listDeskSaleOrganizations,
+  loadDeskSaleOffers,
+  lookupWalkUpEmail,
+  type WalkUpMatch,
+} from "@/lib/actions/desk-sale";
+import type { AttendeeRef } from "@/lib/actions/conference-commerce";
 import { CONFERENCE_CART_UPDATED_EVENT } from "@/lib/conference/cart-events";
 import type { DeskOfferGroup } from "@/lib/conference/desk-offers";
 import { formatCents } from "@/lib/utils";
@@ -48,6 +55,59 @@ export default function DeskSellPanel({
   const [error, setError] = useState<string | null>(null);
   const [cart, setCart] = useState<{ count: number; totalCents: number } | null>(null);
 
+  // Who a registration is for. Known when the desk sent a person; otherwise the
+  // walk-up form below fills it — never by guessing from an email.
+  const [attendee, setAttendee] = useState<AttendeeRef | null>(null);
+  const [form, setForm] = useState({ name: context.personName ?? "", email: "", title: "", phone: "" });
+  const [check, setCheck] = useState<{ sameName: WalkUpMatch | null; others: WalkUpMatch[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const knownPerson = Boolean(context.personId);
+  const formReady = form.name.trim() && form.email.trim() && form.title.trim();
+
+  const chooseMatch = (match: WalkUpMatch) => {
+    setAttendee({ name: match.name, email: form.email.trim().toLowerCase(), contactId: match.contactId });
+    setCheck(null);
+  };
+  const createNew = async () => {
+    if (!orgId) return;
+    setBusy(true);
+    setError(null);
+    const res = await createWalkUpPerson({
+      conferenceId,
+      organizationId: orgId,
+      name: form.name,
+      email: form.email,
+      title: form.title,
+      phone: form.phone || null,
+    });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error);
+      return;
+    }
+    setAttendee({ name: form.name.trim(), email: form.email.trim().toLowerCase(), contactId: res.data.contactId });
+    setCheck(null);
+  };
+  // ⛔ Stephen's rules (project_shared_email_walkup_rules): same name on that
+  // email is the same person; a different name is the OPERATOR's call; nobody
+  // on it is someone new. An existing person is confirmed, never edited.
+  const continueWalkUp = async () => {
+    if (!orgId) return;
+    setBusy(true);
+    setError(null);
+    const res = await lookupWalkUpEmail({ conferenceId, organizationId: orgId, email: form.email, name: form.name });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error);
+      return;
+    }
+    if (!res.data.sameName && res.data.others.length === 0) {
+      await createNew();
+      return;
+    }
+    setCheck(res.data);
+  };
+
   useEffect(() => {
     void listDeskSaleOrganizations(conferenceId).then((res) => {
       if (res.success) setOrgs(res.data);
@@ -80,6 +140,7 @@ export default function DeskSellPanel({
         if (cancelled) return;
         if (res.success) {
           setGroups(res.data.groups);
+          if (res.data.attendee?.name) setAttendee(res.data.attendee);
           setError(null);
         } else setError(res.error);
       }
@@ -109,7 +170,7 @@ export default function DeskSellPanel({
         <div className="min-w-0">
           <p className="text-xl font-bold">Sell</p>
           <p className="truncate text-base text-gray-600">
-            {context.personName ? `For ${context.personName}` : "A walk-up"}
+            {attendee?.name ? `For ${attendee.name}` : context.personName ? `For ${context.personName}` : "A walk-up"}
             {org ? ` · ${org.name}` : ""}
           </p>
         </div>
@@ -165,24 +226,115 @@ export default function DeskSellPanel({
                   setOrgId(null);
                   setGroups(null);
                   setCart(null);
+                  setAttendee(null);
+                  setCheck(null);
                 }}
                 className="mb-4 min-h-12 rounded-lg border border-gray-300 px-4 text-base"
               >
                 Change company
               </button>
             ) : null}
-            {!groups && !error ? <p className="text-base text-gray-500">Loading what they can buy…</p> : null}
-            {groups && groups.length === 0 ? (
+            {!knownPerson && !attendee ? (
+              <div className="mb-6 max-w-xl rounded-xl border border-gray-200 p-5">
+                {!check ? (
+                  <>
+                    <p className="mb-3 text-lg font-bold">Who is this for?</p>
+                    <div className="space-y-3">
+                      {(
+                        [
+                          ["name", "Name", "text"],
+                          ["email", "Email", "email"],
+                          ["title", "Job title", "text"],
+                          ["phone", "Phone (optional)", "tel"],
+                        ] as const
+                      ).map(([key, label, type]) => (
+                        <label key={key} className="block">
+                          <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
+                          <input
+                            type={type}
+                            value={form[key]}
+                            onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                            className="min-h-12 w-full rounded-lg border border-gray-300 px-3 text-base"
+                          />
+                        </label>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={!formReady || busy}
+                        onClick={() => void continueWalkUp()}
+                        className="min-h-12 w-full rounded-lg bg-gray-900 px-4 text-base font-semibold text-white disabled:opacity-50"
+                      >
+                        {busy ? "Checking…" : "Continue"}
+                      </button>
+                    </div>
+                  </>
+                ) : check.sameName ? (
+                  <>
+                    <p className="text-lg font-bold">{check.sameName.name} is already on file</p>
+                    <p className="mt-1 text-base text-gray-700">
+                      {[check.sameName.title, check.sameName.phone].filter(Boolean).join(" · ") || "No other details on file."}
+                    </p>
+                    <p className="mt-2 text-sm text-gray-500">
+                      Their details stay as they are. If anything is out of date, their organisation&apos;s admin
+                      changes it.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => chooseMatch(check.sameName as WalkUpMatch)}
+                      className="mt-4 min-h-12 w-full rounded-lg bg-gray-900 px-4 text-base font-semibold text-white"
+                    >
+                      Continue with {check.sameName.name}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-lg font-bold">{form.email.trim()} is already used at this company</p>
+                    <p className="mt-1 text-base text-gray-700">Is this one of these people?</p>
+                    <div className="mt-3 space-y-2">
+                      {check.others.map((m) => (
+                        <button
+                          key={m.contactId}
+                          type="button"
+                          onClick={() => chooseMatch(m)}
+                          className="min-h-12 w-full rounded-lg border border-gray-300 px-4 text-left text-base"
+                        >
+                          Yes, it&apos;s {m.name}
+                          {m.title ? <span className="ml-2 text-sm text-gray-500">{m.title}</span> : null}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void createNew()}
+                        className="min-h-12 w-full rounded-lg bg-gray-900 px-4 text-base font-semibold text-white disabled:opacity-50"
+                      >
+                        {busy ? "Adding…" : `No, ${form.name.trim()} is someone new who shares this address`}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+            {!knownPerson && !attendee ? null : !groups && !error ? (
+              <p className="text-base text-gray-500">Loading what they can buy…</p>
+            ) : null}
+            {(knownPerson || attendee) && groups && groups.length === 0 ? (
               <p className="text-base text-gray-600">There is nothing this company can buy right now.</p>
             ) : null}
-            {(groups ?? []).map((group) => (
+            {(knownPerson || attendee ? groups ?? [] : []).map((group) => (
               <section key={group.key} className="mb-6">
                 <h2 className="mb-3 text-lg font-bold">{group.title}</h2>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {group.offers.map(({ offer, reason }) => (
                     <div key={offer.id} className="flex flex-col">
                       {reason ? <p className="mb-1 text-sm font-medium text-gray-600">{reason}</p> : null}
-                      <OfferCard offer={offer} conferenceId={conferenceId} organizationId={org.id} touch />
+                      <OfferCard
+                        offer={offer}
+                        conferenceId={conferenceId}
+                        organizationId={org.id}
+                        touch
+                        attendee={attendee}
+                      />
                     </div>
                   ))}
                 </div>

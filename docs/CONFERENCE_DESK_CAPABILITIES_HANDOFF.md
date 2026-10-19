@@ -183,9 +183,17 @@ on any deploy). Rehearse with `…/check-in?test=1`; pretend a day with
   canonical person linkage"). Decision pending (§3).
 
 **Test data to remove afterwards:** the two "Desk Test …" people, their seats
-and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)), and
-the expired scratch desk appointments (reason "Scratch test by Claude, remove
-after").
+and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)); the
+contact "Alex Sharedinbox" in Test Org (Member), made to test a shared address
+(desmond.boateng@example.test); and the expired scratch desk appointments
+(reason "Scratch test by Claude, remove after").
+
+**Walk-up sale on a shared address** (Stephen's rules,
+project_shared_email_walkup_rules):
+- [ ] Same name + same email → "already on file", details shown, never edited
+- [ ] Different name on a known email → operator chooses: that person, or someone new
+- [ ] Someone new on a shared address → their own record; no login, no Circle
+- [ ] After paying, their badge prints THEIR name, not the address-holder's
 
 ## 4. Database changes (live on the shared database)
 

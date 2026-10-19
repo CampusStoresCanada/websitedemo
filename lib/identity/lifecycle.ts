@@ -185,6 +185,43 @@ export async function ensureKnownPerson(params: {
     return { personId: existingByName.id };
   }
 
+  return createKnownPerson({ ...params, name: cleanedName, email: normalizedEmail });
+}
+
+/**
+ * Create a NEW contact for a human at an organisation — no matching at all.
+ *
+ * ⛔ The create half of ensureKnownPerson, on its own, for the one case where
+ * matching is wrong: a second person who shares an email address with someone
+ * already at that company (info@store.ca). ensureKnownPerson matches on email
+ * first and would hand back — and update — the first person's record, merging
+ * two people. Who is who is the operator's call, made before this is called
+ * (see project_shared_email_walkup_rules in memory).
+ *
+ * `provisionCircle: false` skips the Circle hook: an address that already has a
+ * Circle account belongs to whoever holds it, and is never touched.
+ */
+export async function createKnownPerson(
+  params: {
+    organizationId: string;
+    tenantId?: string | null;
+    name: string;
+    email?: string | null;
+    title?: string | null;
+    workPhone?: string | null;
+    mobilePhone?: string | null;
+    contactType?: string[];
+  },
+  options: { provisionCircle?: boolean } = {}
+): Promise<{ personId: string | null; error?: string }> {
+  const adminClient = createAdminClient();
+  const normalizedEmail = params.email?.trim().toLowerCase() ?? null;
+  const cleanedName = params.name.trim();
+  const { firstName, lastName } = splitDisplayName(cleanedName);
+  if (!cleanedName) {
+    return { personId: null, error: "Name is required to create a known person." };
+  }
+
   let tenantId = params.tenantId ?? null;
   if (!tenantId) {
     const { data: org, error: orgError } = await adminClient
@@ -223,7 +260,7 @@ export async function ensureKnownPerson(params: {
   // an account in Circle and never the access group that comes with it.
   // Fire-and-forget: never throws, re-checks the org's own status, and keys
   // its queue rows by contact id so a repeat is a no-op.
-  if (created?.id) {
+  if (created?.id && options.provisionCircle !== false) {
     void enqueueNewContactCircleProvisioning(created.id, params.organizationId);
   }
 

@@ -13,7 +13,7 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
-type OrderAttendeeRef = { name: string; email: string | null } | null;
+type OrderAttendeeRef = { name: string; email: string | null; contactId?: string | null } | null;
 
 /**
  * Resolve identity + insert conference_people + allocate one seat, for one
@@ -26,7 +26,7 @@ async function mintOneRegistrationAttendee(
   organizationId: string,
   orgName: string,
   tier: { personKind: "delegate" | "exhibitor"; tierLabel: string },
-  attendee: { name: string; email: string | null },
+  attendee: { name: string; email: string | null; contactId?: string | null },
   seatId: string,
   itemId: string
 ): Promise<void> {
@@ -35,7 +35,18 @@ async function mintOneRegistrationAttendee(
   let assignmentStatus: "assigned" | "pending_user_activation" = "assigned";
   let assignedEmailSnapshot: string | null = null;
 
-  if (attendee.email) {
+  // ⛔ A person someone already CONFIRMED (the desk) — never re-matched by
+  // email, which would hand Bob's seat to Alice when they share info@store.ca.
+  const chosen = attendee.contactId
+    ? await resolveChosenPerson(db, organizationId, attendee.contactId, attendee.email)
+    : null;
+
+  if (chosen) {
+    canonicalPersonId = chosen.contactId;
+    userId = chosen.userId;
+    assignmentStatus = chosen.assignmentStatus;
+    assignedEmailSnapshot = chosen.assignedEmailSnapshot;
+  } else if (attendee.email) {
     const existingUserId = await findExistingUserByEmail(attendee.email);
     const resolved = await resolveAssigneeForEmail({
       organizationId,
@@ -65,7 +76,18 @@ async function mintOneRegistrationAttendee(
   // nothing on screen showed it as checked, because the roster's lookup
   // had already resolved that contact to the *other* row.
   let personId: string | null = null;
-  if (attendee.email) {
+  if (chosen) {
+    // Their own attendee row at this conference and company, by WHO they are.
+    const { data: existingPerson } = await db
+      .from("conference_people")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId)
+      .eq("canonical_person_id", chosen.contactId)
+      .limit(1)
+      .maybeSingle();
+    personId = existingPerson?.id ?? null;
+  } else if (attendee.email) {
     const normalizedEmail = attendee.email.trim().toLowerCase();
     const { data: existingPerson } = await db
       .from("conference_people")
@@ -171,7 +193,11 @@ export async function mintRegistrationAttendeesFromOrder(
     const attendees: OrderAttendeeRef[] = Array.isArray(rawAttendees)
       ? rawAttendees.map((entry) =>
           entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
-            ? { name: (entry as { name: string }).name, email: (entry as { email?: string | null }).email ?? null }
+            ? {
+                name: (entry as { name: string }).name,
+                email: (entry as { email?: string | null }).email ?? null,
+                contactId: (entry as { contactId?: string | null }).contactId ?? null,
+              }
             : null
         )
       : [];
@@ -237,4 +263,68 @@ export async function mintRegistrationAttendeesFromOrder(
       await mintOneRegistrationAttendee(db, conferenceId, organizationId, orgName, tier, attendee, seats[i].id, item.id);
     }
   }
+}
+
+/**
+ * A person someone already confirmed, made ready for a seat.
+ *
+ * ⛔ Logins and Circle accounts are ONE per email address, and whoever holds one
+ * keeps it (Stephen, 2026-10-19). So:
+ *   - the address already has a login → link it only if it is THIS person's;
+ *   - nobody has a login, and nobody else at the company shares the address →
+ *     invite them, the ordinary way;
+ *   - somebody else at the company shares the address → no login, no invite:
+ *     their seat and badge are their own, the account is not.
+ * Returns null when the contact is not at this company, so the caller falls
+ * back to the ordinary path rather than seating a stranger.
+ */
+export async function resolveChosenPerson(
+  db: AdminClient,
+  organizationId: string,
+  contactId: string,
+  email: string | null
+): Promise<{
+  contactId: string;
+  userId: string | null;
+  assignmentStatus: "assigned" | "pending_user_activation";
+  assignedEmailSnapshot: string | null;
+} | null> {
+  const { data: contact } = await db
+    .from("contacts")
+    .select("id, profile_id, organization_id")
+    .eq("id", contactId)
+    .maybeSingle();
+  if (!contact || contact.organization_id !== organizationId) return null;
+
+  const normalizedEmail = email?.trim().toLowerCase() || null;
+  const none = { contactId, userId: null, assignmentStatus: "assigned" as const, assignedEmailSnapshot: null };
+  if (!normalizedEmail) return none;
+
+  const existingUserId = await findExistingUserByEmail(normalizedEmail);
+  if (existingUserId) {
+    return { ...none, userId: contact.profile_id === existingUserId ? existingUserId : null };
+  }
+
+  const { count: sharers } = await db
+    .from("contacts")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .is("archived_at", null)
+    .neq("id", contactId)
+    .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`);
+  if ((sharers ?? 0) > 0) return none;
+
+  const resolved = await resolveAssigneeForEmail({
+    organizationId,
+    targetUserId: null,
+    targetEmail: normalizedEmail,
+  });
+  if (!resolved.success) return none;
+  return {
+    contactId,
+    userId: resolved.data.targetUserId,
+    assignmentStatus: resolved.data.assignmentStatus,
+    assignedEmailSnapshot:
+      resolved.data.assignmentStatus === "pending_user_activation" ? resolved.data.normalizedEmail : null,
+  };
 }

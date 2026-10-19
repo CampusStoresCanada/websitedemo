@@ -344,7 +344,17 @@ function linkedToIds(metadata: unknown): string[] {
   return [];
 }
 
-export type AttendeeRef = { name: string; email: string | null };
+export type AttendeeRef = {
+  name: string;
+  email: string | null;
+  /**
+   * The exact person (contacts.id) this seat is for, when someone already
+   * decided — the check-in desk, after its operator confirmed who they are.
+   * ⛔ An email is not a person: two people can share info@store.ca. With this
+   * set, the seat goes to THIS person instead of being re-matched by email.
+   */
+  contactId?: string | null;
+};
 
 /**
  * A registration cart line holds one attendee slot per unit of quantity —
@@ -362,7 +372,11 @@ function parseAttendees(metadata: unknown, quantity: number): (AttendeeRef | nul
     const entry = list[i];
     slots.push(
       entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
-        ? { name: (entry as { name: string }).name, email: (entry as { email?: string | null }).email ?? null }
+        ? {
+            name: (entry as { name: string }).name,
+            email: (entry as { email?: string | null }).email ?? null,
+            contactId: (entry as { contactId?: string | null }).contactId ?? null,
+          }
         : null
     );
   }
@@ -1136,7 +1150,13 @@ export async function updateCartItemQuantity(params: {
  */
 /** email if present, else the trimmed lowercased name — the identity key used to spot the same person picked twice. */
 function attendeeKey(attendee: AttendeeRef): string {
-  return (attendee.email?.trim().toLowerCase() || attendee.name.trim().toLowerCase());
+  // A confirmed person first: two people on one shared inbox are not "the same
+  // person picked twice".
+  return (
+    attendee.contactId ||
+    attendee.email?.trim().toLowerCase() ||
+    attendee.name.trim().toLowerCase()
+  );
 }
 
 export async function setCartItemAttendee(params: {
