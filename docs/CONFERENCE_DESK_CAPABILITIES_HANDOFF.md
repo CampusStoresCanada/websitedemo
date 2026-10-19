@@ -5,9 +5,30 @@ proposed four per-conference switches, a new `desk_capabilities` column, a
 settings editor and a desk sell control. None of that was built, on purpose —
 see §5 for why each one was a second copy of something that already existed.
 
-Everything below is on branch `ship/desk-at-the-cart`, **not pushed** — Stephen
-wants the desk fully developed before it ships. Two database changes from it
-are already live, because prod and local share one database (§4).
+Everything below is on branch `ship/desk-at-the-cart`, **pushed for a preview
+only, not merged to `main`**. Stephen wants the desk fully developed before it
+ships. Every database change from it is already live, because prod and local
+share one database (§4). Since 2026-10-19 the branch also carries the merged
+`ship/cart-shared-email` (online cart and Add contact on the same shared-address
+rules).
+
+**Preview:** https://websitedemo-f9ao3k4gj-steve-thomas-projects-70bd4294.vercel.app
+(commit `d60222e`; each push to the branch builds a new one).
+
+**Status 2026-10-19:** ✅ scanning proven on a real device — three test-mode
+scans at 3:58–4:00 pm MT (Full Conference and Thursday Only checked in; a
+repeat came back "already checked in"). ✅ PIN set, five-wrong-try lockout,
+sign back in and choose a new PIN — all ran on the laptop.
+
+**Before merging to `main`:** the rest of §3a on a device (PIN and hand-over,
+a real sale, naming a walk-up without an email). About half this branch is not
+the desk and touches every member: the sign-in step that claims conference
+registrations, the contact editor on every company page, the online cart, and
+the nightly grace-check job (which now ends expired org links).
+
+**Next:** the alternate versions of the desk. This is the most full-featured
+one; before building any other, sort each into "this desk with fewer tools"
+or "genuinely different" with Stephen (repo rule: ask before building new).
 
 ## 1. Decisions (Stephen, 2026-10-19)
 
@@ -153,10 +174,12 @@ stale end date.
 
 ## 3a. Device test checklist (before pushing)
 
-Not testable on a laptop: the webcam never read a code (no scan reached the
-server), the browser pane has no camera or sound, and there is no on-screen
-keyboard. Needs a **preview deploy of this branch** (not `main`) for an
-`https://` link — phones only allow the camera on secure pages.
+The laptop webcam never read a code; a real device on the preview does
+(proven 2026-10-19). Use the **preview deploy of this branch** (link at the
+top), not `main`: phones only allow the camera on `https://` pages.
+
+⚠️ Today's date is outside the conference, so the day rule does not apply and
+a Thursday-only badge is let in. Test wrong-day refusal with `&as_of=`.
 
 **Devices:** iPad (Safari), iPhone (Safari), one Android phone (Chrome).
 
@@ -203,10 +226,6 @@ on any deploy). Rehearse with `…/check-in?test=1`; pretend a day with
 - ⚠️ Appoint a test staffer by inserting a scratch appointment, or use an
   account already on CSC staff. **Never Add Staff with a test email** — it
   creates a real Circle account.
-
-**Not ready — do not test yet**
-- Naming a walk-up WITHOUT an email, then printing their badge: fails ("missing
-  canonical person linkage"). Decision pending (§3).
 
 **Test data to remove afterwards:** the two "Desk Test …" people, their seats
 and print jobs (Test Org (BI Member Registered), Test Org (BI Presenter)); the
