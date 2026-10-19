@@ -61,13 +61,7 @@ export default async function ConferenceCheckInDeskPage({
   }
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-black">
-      <style>{`
-        body header, body footer { display: none !important; }
-        nav[aria-label="Admin breadcrumbs"] { display: none !important; }
-        body main { margin: 0 !important; padding: 0 !important; min-height: 100vh !important; }
-        .max-w-7xl.mx-auto.px-4.py-8 { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
-      `}</style>
+    <>
       <CheckInDeskClient
         conferenceId={id}
         initialRows={peopleResult.success ? peopleResult.data ?? [] : []}
@@ -78,6 +72,6 @@ export default async function ConferenceCheckInDeskPage({
         asOf={asOf}
         storefrontPath={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}`}
       />
-    </main>
+    </>
   );
 }

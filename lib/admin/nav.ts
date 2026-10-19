@@ -304,3 +304,12 @@ export function conferenceDeskPathId(pathname: string): string | null {
   if (!match) return null;
   return (CONFERENCE_DESK_SEGMENTS as readonly string[]).includes(match[2]) ? match[1] : null;
 }
+
+/**
+ * The check-in desk itself: a full-screen kiosk with no site header, footer,
+ * admin sidebar, conference tabs or toolkit. Everything that frames a page
+ * steps aside for it.
+ */
+export function isCheckInDeskPath(pathname: string): boolean {
+  return /^\/admin\/conference\/[^/]+\/check-in\/?$/.test(pathname);
+}

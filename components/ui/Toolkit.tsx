@@ -25,6 +25,8 @@ import { addBrandColor } from "@/lib/actions/add-brand-color";
 import { deleteBrandColor } from "@/lib/actions/delete-brand-color";
 import { uploadOrganizationImage } from "@/lib/actions/upload-organization-image";
 import ImageUploadModal, { type OrgImageType } from "@/components/ui/ImageUploadModal";
+import { isCheckInDeskPath } from "@/lib/admin/nav";
+import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 
 // Context to expose edit mode to child components
 interface ToolkitContextValue {
@@ -247,6 +249,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
     if (!user) return;
     checkIsBookmarked(pathname).then(setIsCurrentPageBookmarked);
   }, [pathname, user]);
+
+  // ⛔ The check-in desk is a full-screen kiosk with its own + button
+  // (components/ui/ToolkitFab.tsx, shared with this file).
+  if (isCheckInDeskPath(pathname)) return null;
 
   // Non-logged-in users: no account to power Flag/Edit/Bookmark/Send-to-member,
   // so business-case pages get a standalone Print FAB instead of the full
@@ -583,20 +589,11 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
             <CloseIcon />
           </button>
         ) : (
-          <button
-            data-toolkit-fab
+          <ToolkitFabButton
+            expanded={isExpanded}
             onClick={() => setIsExpanded(!isExpanded)}
-            className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 ${
-              isExpanded
-                ? "bg-gray-600 hover:bg-gray-700 text-white"
-                : "bg-gray-700 hover:bg-gray-800 text-white"
-            }`}
             title={isExpanded ? "Close toolkit" : "Open toolkit"}
-          >
-            <div className={`transition-transform duration-200 ${isExpanded ? "rotate-45" : ""}`}>
-              <PlusIcon />
-            </div>
-          </button>
+          />
         )}
       </div>
 
@@ -642,38 +639,6 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
 /**
  * Individual tool button in the expanded toolkit
  */
-function ToolButton({
-  icon,
-  label,
-  onClick,
-  disabled = false,
-  highlighted = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  highlighted?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all group relative ${
-        disabled
-          ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-          : "bg-white hover:bg-gray-50 text-gray-600 hover:scale-105"
-      } ${highlighted ? "ring-2 ring-[#EE2A2E] ring-offset-2 animate-pulse" : ""}`}
-      title={label}
-    >
-      {icon}
-      <span className="absolute right-full mr-3 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        {label}
-        {disabled && " (Coming soon)"}
-      </span>
-    </button>
-  );
-}
 
 /**
  * Flag Selection Overlay - Click or drag to flag a data-flaggable element.
@@ -4117,13 +4082,6 @@ function BookmarkSelectionOverlay({
 }
 
 // Icons
-function PlusIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
-  );
-}
 
 function FlagIcon({ className = "" }: { className?: string }) {
   return (

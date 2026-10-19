@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
-import { conferenceDeskPathId } from "@/lib/admin/nav";
+import { conferenceDeskPathId, isCheckInDeskPath } from "@/lib/admin/nav";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
@@ -33,6 +33,7 @@ export default async function AdminLayout({
         if (ops.ctx.presentationMode) {
           return <PresentationBlock level={ops.ctx.presentationMode} area="The admin area" />;
         }
+        if (isCheckInDeskPath(pathname)) return <>{children}</>;
         return <div className="min-h-[calc(100vh-4rem)] px-4 py-8">{children}</div>;
       }
     }
@@ -65,6 +66,10 @@ export default async function AdminLayout({
       <PresentationBlock level={auth.ctx.presentationMode} area="The admin area" />
     );
   }
+
+  // ⛔ The check-in desk is a full-screen kiosk: no sidebar, no breadcrumbs.
+  const requestPathname = (await headers()).get(REQUEST_PATHNAME_HEADER) ?? "";
+  if (isCheckInDeskPath(requestPathname)) return <>{children}</>;
 
   // Conditions the sidebar cannot resolve itself — it is a client component,
   // and the window comes from the same policy config the reminder and grace
