@@ -18,6 +18,7 @@ import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
 import { findUserByEmail } from "../supabase/user-lookup";
+import { resolveChosenPerson } from "../conference/registration-mint";
 
 /**
  * v3 fulfill — the read/allocate side. The buy-side (cart → checkout → mint)
@@ -354,11 +355,16 @@ export async function findExistingUserByEmail(email: string): Promise<string | n
  * matching an existing platform user is linked immediately. A new email is
  * invited via resolveAssigneeForEmail(), parked as pending_user_activation
  * until that person logs in.
+ *
+ * ⛔ A `contactId` is a person someone already picked. It is never re-matched
+ * by email: Alice and Bob on info@store.ca are two people, and assigning Bob
+ * must seat Bob (resolveChosenPerson decides whether the address's login is
+ * his to have).
  */
 export async function addConferenceAttendee(
   conferenceId: string,
   organizationId: string,
-  attendee: { displayName: string; contactEmail: string | null }
+  attendee: { displayName: string; contactEmail: string | null; contactId?: string | null }
 ): Promise<Result<{ id: string; assignmentStatus: "assigned" | "pending_user_activation"; invited: boolean }>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -375,7 +381,16 @@ export async function addConferenceAttendee(
   let canonicalPersonId: string | null = null;
   let assignedEmailSnapshot: string | null = null;
 
-  if (trimmedEmail) {
+  const db = createAdminClient();
+
+  if (attendee.contactId) {
+    const chosen = await resolveChosenPerson(db, organizationId, attendee.contactId, trimmedEmail);
+    if (!chosen) return { success: false, error: "That person isn't at this organization." };
+    userId = chosen.userId;
+    assignmentStatus = chosen.assignmentStatus;
+    canonicalPersonId = chosen.contactId;
+    assignedEmailSnapshot = chosen.assignedEmailSnapshot;
+  } else if (trimmedEmail) {
     const existingUserId = await findExistingUserByEmail(trimmedEmail);
     const resolved = await resolveAssigneeForEmail({
       organizationId,
@@ -389,8 +404,6 @@ export async function addConferenceAttendee(
     assignedEmailSnapshot = assignmentStatus === "pending_user_activation" ? resolved.data.normalizedEmail : null;
   }
 
-  const db = createAdminClient();
-
   // Reuse an existing conference_people row for this same person at this
   // conference/org, if one already exists — e.g. they're already seated in
   // a different registration line. Inserting unconditionally every call was
@@ -401,13 +414,17 @@ export async function addConferenceAttendee(
   // checkbox matrix even though it was really allocated. Only possible when
   // there's an email to match on — a name-only walk-in still always inserts
   // fresh, matching the shipped fix's same limitation.
-  if (trimmedEmail) {
-    const { data: existing } = await db
+  if (attendee.contactId || trimmedEmail) {
+    const lookup = db
       .from("conference_people")
       .select("id, assignment_status")
       .eq("conference_id", conferenceId)
-      .eq("organization_id", organizationId)
-      .ilike("contact_email", trimmedEmail)
+      .eq("organization_id", organizationId);
+    // A picked person's own row is found by WHO they are, never the address's.
+    const { data: existing } = await (attendee.contactId
+      ? lookup.eq("canonical_person_id", attendee.contactId)
+      : lookup.ilike("contact_email", trimmedEmail!)
+    )
       .limit(1)
       .maybeSingle();
     if (existing) {
