@@ -1107,6 +1107,12 @@ export async function reprintConferenceBadge(
     badgePrintedAt: string;
     badgePrintJobId: string;
     qrPayload: string;
+    /**
+     * The result is a QL sticker (front + back) the desk can print now or send
+     * to the print station. False = no blank or spare in hand: the full colour
+     * badge, which the QL cannot print.
+     */
+    labelPrintable: boolean;
   };
 }> {
   const signedIn = await requireAuthenticated();
@@ -1189,6 +1195,7 @@ export async function reprintConferenceBadge(
       badgePrintedAt,
       badgePrintJobId: reprintJob.data.jobId,
       qrPayload: reprintJob.data.qrPayload,
+      labelPrintable: plan.transport === "ql_label",
     },
   };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildBadgeJobDocument,
@@ -18,9 +18,51 @@ import {
  * bytes without going through a browser session.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string; jobId: string }> }
 ) {
+  // ── The QL sticker for an on-site reprint (?side=front|back) ──────────────
+  // ⛔ The label renderer was written and never served: this route imported it
+  // and only ever returned the full colour badge, which a QL cannot print.
+  // Desk staff may open their own conference's reprint labels (the builder
+  // refuses any other job); the full badge below stays admin-only.
+  const url = new URL(request.url);
+  const side = url.searchParams.get("side");
+  if (side === "front" || side === "back") {
+    const { id: labelConferenceId, jobId: labelJobId } = await context.params;
+    const deskAuth = await requireConferenceDeskAccess(labelConferenceId);
+    if (!deskAuth.ok) return NextResponse.json({ error: deskAuth.error }, { status: 403 });
+    try {
+      const { html } = await buildReprintLabelDocument({
+        db: createAdminClient(),
+        conferenceId: labelConferenceId,
+        jobId: labelJobId,
+        side,
+      });
+      // `print=1`: "Print now" on the device in hand. Open the print dialog as
+      // soon as the sticker has drawn (AirPrint on an iPad or iPhone, the
+      // Brother driver on a laptop).
+      const autoPrint =
+        url.searchParams.get("print") === "1"
+          ? `<script>addEventListener("load",function(){setTimeout(function(){print()},400)})</script>`
+          : "";
+      const body = html.includes("</body>") ? html.replace("</body>", `${autoPrint}</body>`) : html + autoPrint;
+      return new NextResponse(body, {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "content-disposition": `inline; filename="label-${labelJobId}-${side}.html"`,
+        },
+      });
+    } catch (error) {
+      if (error instanceof LabelDocumentError) {
+        return NextResponse.json({ error: error.message }, { status: 422 });
+      }
+      throw error;
+    }
+  }
+
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 403 });
 

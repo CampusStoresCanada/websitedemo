@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
+import { sendReprintToQueue } from "@/lib/actions/conference-badges";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
@@ -76,6 +77,11 @@ type ScanPulseCard = {
   travelMode: string | null;
   /** What the server actually said, under a "Something went wrong". */
   detail?: string | null;
+  /**
+   * A reprint's job: the card offers "Print now" (the stickers on this device)
+   * and "Send to print queue" (the print station beside the QL).
+   */
+  printJob?: { jobId: string; labelPrintable: boolean; queued: boolean } | null;
 };
 
 const POLL_MS = 30_000;
@@ -143,8 +149,8 @@ const SCAN_STATUS_COPY: Record<
     className: "text-emerald-700",
   },
   badge_reprinted: {
-    title: "Reprint sent",
-    description: "Their badge reprint is queued.",
+    title: "Ready to print",
+    description: "Print the stickers on this device, or send them to the print station.",
     className: "text-cyan-700",
   },
   // A desk sale landed: they hold a registration now. The card prints it.
@@ -209,7 +215,8 @@ const toneOf = (state: string): ScanTone => SCAN_TONE[state] ?? "info";
  * amber (they are let in) but somebody has to make the sale, so it must not
  * fade before the operator gets to it.
  */
-const staysUntilTapped = (state: string): boolean => toneOf(state) === "stop" || state === "not_on_ticket";
+const staysUntilTapped = (state: string, card?: Pick<ScanPulseCard, "printJob">): boolean =>
+  toneOf(state) === "stop" || state === "not_on_ticket" || Boolean(card?.printJob);
 
 const TONE_STYLE: Record<ScanTone, { header: string; flash: string }> = {
   go: { header: "bg-emerald-600 text-white", flash: "bg-emerald-500" },
@@ -444,7 +451,12 @@ export default function CheckInDeskClient({
   const pendingScanStorageKey = `${PENDING_SCAN_STORAGE_PREFIX}:${conferenceId}`;
 
   const pushScanCard = useCallback(
-    (state: string, personId: string | null, detail: string | null = null) => {
+    (
+      state: string,
+      personId: string | null,
+      detail: string | null = null,
+      printJob: ScanPulseCard["printJob"] = null
+    ) => {
       const person = personId ? rows.find((row) => row.id === personId) ?? null : null;
       const createdAt = Date.now();
       const card: ScanPulseCard = {
@@ -453,7 +465,7 @@ export default function CheckInDeskClient({
         personId,
         // ⛔ A stop stays until someone taps it: a refusal that disappears on a
         // timer is a refusal nobody saw.
-        expiresAt: staysUntilTapped(state) ? Number.POSITIVE_INFINITY : createdAt + SCAN_PULSE_TTL_MS,
+        expiresAt: staysUntilTapped(state, { printJob }) ? Number.POSITIVE_INFINITY : createdAt + SCAN_PULSE_TTL_MS,
         displayName: person?.display_name ?? person?.contact_email ?? null,
         facts: personId ? facts[personId] ?? null : null,
         checkedInAt: person?.checked_in_at ?? null,
@@ -462,10 +474,11 @@ export default function CheckInDeskClient({
         hotelConfirmationCode: person?.hotel_confirmation_code ?? null,
         travelMode: person?.travel_mode ?? null,
         detail,
+        printJob,
       };
       setScanCards((prev) => {
         const next = [card, ...prev];
-        const stops = next.filter((c) => staysUntilTapped(c.state));
+        const stops = next.filter((c) => staysUntilTapped(c.state, c));
         const rest = next.filter((c) => toneOf(c.state) !== "stop").slice(0, SCAN_PULSE_LIMIT);
         return next.filter((c) => stops.includes(c) || rest.includes(c));
       });
@@ -993,12 +1006,24 @@ export default function CheckInDeskClient({
             stockInHand: facts[personId]?.reprintStock,
           }),
         });
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as {
+          error?: string;
+          badgePrintJobId?: string;
+          labelPrintable?: boolean;
+        };
         if (!response.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
           return;
         }
-        pushScanCard("badge_reprinted", personId);
+        const labelPrintable = payload.labelPrintable === true;
+        pushScanCard(
+          "badge_reprinted",
+          personId,
+          labelPrintable
+            ? null
+            : "No blank or spare card for them, so this is the full colour badge. The label printer can't print it.",
+          payload.badgePrintJobId ? { jobId: payload.badgePrintJobId, labelPrintable, queued: false } : null
+        );
         await loadRows();
       } catch {
         pushScanCard("scan_failed", personId, "The reprint could not be sent.");
@@ -1007,6 +1032,23 @@ export default function CheckInDeskClient({
       }
     },
     [conferenceId, facts, loadRows, pushScanCard]
+  );
+
+  // "Send to print queue": the laptop beside the QL prints it (print station).
+  const sendToPrintQueue = useCallback(
+    async (cardId: string, jobId: string) => {
+      const res = await sendReprintToQueue({ conferenceId, jobId });
+      if (!res.success) {
+        pushScanCard("scan_failed", null, res.error);
+        return;
+      }
+      setScanCards((prev) =>
+        prev.map((card) =>
+          card.id === cardId && card.printJob ? { ...card, printJob: { ...card.printJob, queued: true } } : card
+        )
+      );
+    },
+    [conferenceId, pushScanCard]
   );
 
   const activeCards = useMemo(
@@ -1399,6 +1441,31 @@ export default function CheckInDeskClient({
                   {reprintBusy === card.personId ? "…" : "Print badge"}
                 </button>
               ) : null}
+              {card.printJob?.labelPrintable ? (
+                <div className="mt-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["front", "back"] as const).map((side) => (
+                      <a
+                        key={side}
+                        href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob?.jobId}/pdf?side=${side}&print=1`}
+                        target="_blank"
+                        rel="noopener"
+                        className="flex min-h-12 items-center justify-center rounded-lg bg-white px-3 text-base font-semibold text-black"
+                      >
+                        Print now: {side}
+                      </a>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={card.printJob.queued}
+                    onClick={() => void sendToPrintQueue(card.id, card.printJob?.jobId as string)}
+                    className="min-h-12 w-full rounded-lg border border-white/50 px-4 text-base font-semibold text-white disabled:opacity-60"
+                  >
+                    {card.printJob.queued ? "Sent to the print station ✓" : "Send to print queue"}
+                  </button>
+                </div>
+              ) : null}
               {card.state === "not_on_ticket" && card.personId ? (
                 <button
                   type="button"
@@ -1417,7 +1484,7 @@ export default function CheckInDeskClient({
                   Sell them a day pass →
                 </button>
               ) : null}
-              {staysUntilTapped(card.state) ? (
+              {staysUntilTapped(card.state, card) ? (
                 <button
                   type="button"
                   onClick={() => setScanCards((prev) => prev.filter((entry) => entry.id !== card.id))}
@@ -1805,6 +1872,16 @@ export default function CheckInDeskClient({
                 }}
               />
             ) : null}
+            <ToolButton
+              size="lg"
+              showLabel
+              icon={<PrintIcon />}
+              label="Open the print station (laptop by the printer)"
+              onClick={() => {
+                setDeskMenuOpen(false);
+                window.open(`/admin/conference/${conferenceId}/check-in/print-station`, "_blank", "noopener");
+              }}
+            />
             {activeDoorEvent ? (
               <ToolButton
                 size="lg"

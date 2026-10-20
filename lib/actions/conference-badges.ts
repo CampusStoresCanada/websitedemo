@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ReprintPlan } from "@/lib/conference/badges/reprint-plan";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
@@ -428,7 +428,9 @@ export async function ensureBadgeTokenForPerson(params: {
   conferenceId: string;
   personId: string;
 }): Promise<{ success: boolean; error?: string; data?: { tokenId: string; qrPayload: string } }> {
-  const auth = await requireConferenceOpsAccess();
+  // ⛔ Desk staff, not only admins: a reprint at the desk needs the person's
+  // token, and staff OPERATE the conference (Stephen, 2026-10-19).
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -864,7 +866,9 @@ export async function requestBadgeReprint(params: {
     warningSample?: string[];
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
+  // ⛔ Reprinting is OPERATING the desk, so desk staff may — it was admin-only,
+  // which refused every temp's Reprint before anything happened.
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   if (!isBadgeReprintReason(params.reason)) {
@@ -1073,4 +1077,115 @@ export async function deleteBadgePrintJob(params: {
   });
 
   return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// The print queue: a laptop beside the QL prints what the desk sends it.
+//
+// ⛔ Not a new system. `transport_method = printer_bridge` and the
+// `sent_to_printer` status have existed since the badge pipeline was built and
+// had no consumer. The print station page (check-in/print-station) is that
+// consumer: any device can scan, and the one beside the printer prints.
+// ─────────────────────────────────────────────────────────────────
+
+type QueueResult<T> = { success: true; data: T } | { success: false; error: string };
+
+/** One of THIS conference's on-site reprints — the only jobs the desk may touch. */
+async function deskReprintJob(conferenceId: string, jobId: string) {
+  const { data: job, error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .select("id, person_id, status, pipeline_type, metadata")
+    .eq("id", jobId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!job || job.pipeline_type !== "onsite_reprint") return { error: "That print job was not found." };
+  return { job };
+}
+
+/** "Send to print queue": the station beside the printer picks it up. */
+export async function sendReprintToQueue(params: {
+  conferenceId: string;
+  jobId: string;
+}): Promise<QueueResult<null>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const found = await deskReprintJob(params.conferenceId, params.jobId);
+  if ("error" in found) return { success: false, error: found.error ?? "That print job was not found." };
+  const now = new Date().toISOString();
+  const { error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .update({ transport_method: "printer_bridge", status: "sent_to_printer", completed_at: null, updated_at: now })
+    .eq("id", params.jobId);
+  if (error) return { success: false, error: error.message };
+  await insertBadgeEvent({
+    jobId: params.jobId,
+    conferenceId: params.conferenceId,
+    personId: found.job.person_id as string | null,
+    eventType: "sent_to_printer",
+    eventStatus: "success",
+    message: "Sent to the print station.",
+    actorId: auth.ctx.userId,
+  });
+  return { success: true, data: null };
+}
+
+export type QueuedLabel = { jobId: string; personName: string; queuedAt: string };
+
+/** What the print station has to print, oldest first. */
+export async function listQueuedLabels(conferenceId: string): Promise<QueueResult<QueuedLabel[]>> {
+  const auth = await requireConferenceDeskAccess(conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: jobs, error } = await db
+    .from("badge_print_jobs")
+    .select("id, person_id, updated_at")
+    .eq("conference_id", conferenceId)
+    .eq("pipeline_type", "onsite_reprint")
+    .eq("status", "sent_to_printer")
+    .order("updated_at", { ascending: true })
+    .limit(20);
+  if (error) return { success: false, error: error.message };
+  const personIds = [...new Set((jobs ?? []).map((j) => j.person_id as string).filter(Boolean))];
+  const { data: people, error: peopleError } = personIds.length
+    ? await db.from("conference_people").select("id, display_name").in("id", personIds)
+    : { data: [], error: null };
+  if (peopleError) return { success: false, error: peopleError.message };
+  const nameById = new Map((people ?? []).map((p) => [p.id as string, (p.display_name as string | null) ?? ""]));
+  return {
+    success: true,
+    data: (jobs ?? []).map((j) => ({
+      jobId: j.id as string,
+      personName: nameById.get(j.person_id as string) ?? "",
+      queuedAt: j.updated_at as string,
+    })),
+  };
+}
+
+/** The station printed it (front and back). */
+export async function markLabelPrinted(params: {
+  conferenceId: string;
+  jobId: string;
+}): Promise<QueueResult<null>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const found = await deskReprintJob(params.conferenceId, params.jobId);
+  if ("error" in found) return { success: false, error: found.error ?? "That print job was not found." };
+  const now = new Date().toISOString();
+  const { error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .update({ status: "printed", completed_at: now, updated_at: now })
+    .eq("id", params.jobId)
+    .eq("status", "sent_to_printer");
+  if (error) return { success: false, error: error.message };
+  await insertBadgeEvent({
+    jobId: params.jobId,
+    conferenceId: params.conferenceId,
+    personId: found.job.person_id as string | null,
+    eventType: "printed",
+    eventStatus: "success",
+    message: "Printed at the print station.",
+    actorId: auth.ctx.userId,
+  });
+  return { success: true, data: null };
 }

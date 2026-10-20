@@ -172,6 +172,41 @@ stale end date.
 - **`requireConferenceOpsAccess` is a misleading name** now that it means global
   admin; renaming touches ~30 files.
 
+## 3c. Printing: the last mile (built 2026-10-20)
+
+Until now the desk queued reprint jobs that nothing at the desk could print:
+the job's page served only the full colour badge (the QL cannot print it), it
+was admin-only, and `requestBadgeReprint` refused every non-admin. The label
+renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
+
+- **Printer:** Brother QL-1110NWBc, AirPrint over Wi-Fi (same network as the
+  device), DK-2113 frosted clear continuous 62 mm. Stickers go on a company
+  blank or a spare card: front (name, title; company too on a spare) and back
+  (the QR).
+- **Print now** (any device): the reprint card has "Print now: front / back" →
+  `…/badges/jobs/[jobId]/pdf?side=front|back&print=1`, the sticker at its own
+  `@page` size, print dialog opens itself. iPad/iPhone: AirPrint → the QL.
+- **Send to print queue**: the job becomes `printer_bridge` / `sent_to_printer`
+  (columns that existed with no consumer). The **print station**
+  (`/admin/conference/[id]/check-in/print-station`, toolkit → "Open the print
+  station") runs on the laptop beside the QL and prints each sticker, front then
+  back, then marks it printed. QL = the laptop's default printer; Chrome started
+  with `--kiosk-printing` prints with no dialog.
+- Desk staff may now reprint, queue, and open their conference's reprint
+  stickers. The full badge document stays admin-only.
+- ⚠️ **Print stock for CSC 2027 is unset** (Badges page → print stock). Until it
+  is, a person whose company has no unnamed seat gets "no blank or spare: full
+  colour badge", which the QL cannot print.
+- ⚠️ **Hotel Wi-Fi usually isolates devices**, which breaks AirPrint. Bring a
+  travel router or hotspot that the printer and every desk device join. The
+  printer's own direct Wi-Fi takes the device off the internet.
+
+**Test 2026-10-21 (Stephen's mom's iPad):**
+- [ ] Reprint someone whose company has an unnamed seat (company blank) → card shows "Print now: front/back"
+- [ ] Print now: front → the dialog opens itself → AirPrint finds the QL → prints 62 mm at full size, not scaled
+- [ ] Print now: back → the QR sticker scans at the desk
+- [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
+
 ## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)
 
 Nothing below is built. Both were sorted before building, per the repo rule.
