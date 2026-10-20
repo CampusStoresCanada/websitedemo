@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conferenceDeskPathId } from "../nav";
+import { conferenceDeskPathId, isCheckInDeskPath } from "../nav";
 
 /**
  * ⛔ The /admin gate admits desk staff on this answer, then checks their
@@ -33,5 +33,17 @@ describe("conferenceDeskPathId", () => {
     expect(conferenceDeskPathId("/admin/members")).toBeNull();
     expect(conferenceDeskPathId("/admin/check-in")).toBeNull();
     expect(conferenceDeskPathId("")).toBeNull();
+  });
+});
+
+describe("isCheckInDeskPath", () => {
+  it("frames nothing around the desk or the door's printed list", () => {
+    expect(isCheckInDeskPath("/admin/conference/abc-123/check-in")).toBe(true);
+    expect(isCheckInDeskPath("/admin/conference/abc-123/check-in/door-list")).toBe(true);
+  });
+
+  it("leaves every other page framed", () => {
+    expect(isCheckInDeskPath("/admin/conference/abc-123/war-room")).toBe(false);
+    expect(isCheckInDeskPath("/admin/conference/abc-123/check-in/anything-else")).toBe(false);
   });
 });

@@ -44,6 +44,8 @@ export async function PATCH(
   let payload: {
     op?: "update" | "manual_check_in" | "reprint_badge";
     testMode?: boolean;
+    /** The event a door device is checking in to (lib/conference/door.ts). */
+    entityId?: string | null;
     patch?: Record<string, unknown>;
     reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
     reprintNote?: string | null;
@@ -59,6 +61,7 @@ export async function PATCH(
     payload = (await request.json()) as {
       op?: "update" | "manual_check_in" | "reprint_badge";
       testMode?: boolean;
+      entityId?: string | null;
       patch?: Record<string, unknown>;
       reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
       reprintNote?: string | null;
@@ -77,6 +80,7 @@ export async function PATCH(
   if (payload.op === "manual_check_in") {
     const result = await markConferencePersonCheckedInManual(personId, {
       testMode: payload.testMode === true,
+      entityId: typeof payload.entityId === "string" ? payload.entityId : null,
     });
     if (!result.success) {
       const lowerError = result.error?.toLowerCase() ?? "";

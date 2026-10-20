@@ -176,7 +176,18 @@ stale end date.
 
 Nothing below is built. Both were sorted before building, per the repo rule.
 
-### Event door = this desk with an event picked (NOT a new screen)
+### Event door = this desk with an event picked (NOT a new screen) — BUILT 2026-10-20
+
+Rules: `lib/conference/door.ts`. Scan/by-name: `scanConferenceCheckInToken` and
+`markConferencePersonCheckedInManual` take an `entityId`. New result
+`not_on_ticket` (migration `20261020020000`, live). Printed list:
+`/admin/conference/[id]/check-in/door-list?entity=` (reader `loadDoorRoster`, the
+same walk as the attendance count — 24/24 and 25/25 on live data). Door scans
+feed the overview's attendance `scanned` column.
+
+⚠️ Doors offered automatically = **capped** events only (`capacityOf`, check-in
+model §3). The toolkit's calendar lists every event, so an uncapped one (the
+CANCOLL AGM) is picked by hand.
 
 Supersedes "distinct from the desk" in `planning/conference-check-in-model.md`
 Phase 2 — that was written before the desk became full-screen and phone-first.
@@ -335,6 +346,18 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - [ ] They accept the invite and sign in: their conference registration is theirs (claimed by person, not email)
 - [ ] An address someone else already logs in with: "No login of their own… belongs to X", no invite button
 
+**Event door** (rehearse with `…/check-in?test=1&as_of=2027-02-01T18:00` —
+`as_of` now takes a venue time):
+- [ ] After the PIN, "Is this check-in for an event?" lists the Meet & Greet
+- [ ] "No, badge pickup" stops it asking; reload keeps the choice
+- [ ] Bottom-left shows "At: Meet & Greet Reception"; tap it to change
+- [ ] Toolkit → calendar lists every event; toolkit → Print list opens the sheet
+- [ ] Scan a Full Conference badge: green, and checked in to the conference too
+- [ ] Scan the Thursday-only badge: amber "Not on their ticket", Sell offers the Meet & Greet first
+- [ ] Scan the same badge again: "Already checked in", not counted twice
+- [ ] Find → check in by name: counts for the event only (the desk later still treats them as not picked up)
+- [ ] Overview → attendance shows the door scans in "scanned"
+
 ## 4. Database changes (live on the shared database)
 
 - `20261019180000_conference_desk_staff.sql` — `governance_role_assignments.conference_id`,
@@ -344,6 +367,7 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - `20261019220000_check_in_not_valid_today.sql` — the wrong-day scan result.
 - `20261020000000_desk_pins.sql` — the hashed desk PIN, server only.
 - `20261020010000_conference_walkup_without_email_template.sql` — the heads-up email.
+- `20261020020000_check_in_not_on_ticket.sql` — the door's "not on their ticket" result.
 
 ## 5. Why the first plan was cut
 

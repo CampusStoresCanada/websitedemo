@@ -8,6 +8,18 @@ import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
 import { getDeskPinState } from "@/lib/actions/desk-pin";
+import { shortDay } from "@/lib/conference/desk-offers";
+import {
+  doorChoiceStillValid,
+  doorChoiceUntil,
+  doorCookieName,
+  doorEventsOpenNow,
+  doorWindow,
+  parseDoorChoice,
+  serializeDoorChoice,
+  type DoorChoice,
+  type DoorEvent,
+} from "@/lib/conference/door";
 import { cancelDeskCheckout, getDeskSaleStatus } from "@/lib/actions/desk-sale";
 
 type ConferencePerson = {
@@ -44,6 +56,8 @@ type PendingScan = {
   qr_token: string;
   scan_timestamp: string;
   device_id?: string;
+  /** The event this device was at when the badge was scanned (door mode). */
+  entity_id?: string;
 };
 
 type CameraState = "idle" | "requesting" | "active" | "denied" | "unsupported" | "error";
@@ -144,6 +158,13 @@ const SCAN_STATUS_COPY: Record<
     description: "Their company has been invoiced. Print their badge.",
     className: "text-emerald-700",
   },
+  // At an event's door: in the room, but the event is not on their ticket.
+  // Let in and invoiced (enforcement off) — the card offers the sale.
+  not_on_ticket: {
+    title: "Not on their ticket",
+    description: "Let them in. This event isn't on their registration, so sell it to them.",
+    className: "text-amber-700",
+  },
   // A hand-over came back without a payment. The card link is closed.
   sale_not_paid: {
     title: "Not paid",
@@ -171,6 +192,7 @@ const SCAN_TONE: Record<string, ScanTone> = {
   sale_paid: "go",
   sale_invoiced: "go",
   already_checked_in: "check",
+  not_on_ticket: "check",
   invalid_token: "stop",
   revoked_token: "stop",
   not_found: "stop",
@@ -182,6 +204,12 @@ const SCAN_TONE: Record<string, ScanTone> = {
   badge_reprinted: "info",
 };
 const toneOf = (state: string): ScanTone => SCAN_TONE[state] ?? "info";
+/**
+ * A card that waits for a tap. Every stop, plus "not on their ticket": it is
+ * amber (they are let in) but somebody has to make the sale, so it must not
+ * fade before the operator gets to it.
+ */
+const staysUntilTapped = (state: string): boolean => toneOf(state) === "stop" || state === "not_on_ticket";
 
 const TONE_STYLE: Record<ScanTone, { header: string; flash: string }> = {
   go: { header: "bg-emerald-600 text-white", flash: "bg-emerald-500" },
@@ -276,6 +304,12 @@ interface CheckInDeskClientProps {
   asOf: string | null;
   /** The conference's public storefront, e.g. /conference/2027/main. */
   storefrontPath: string;
+  /** Timed events, for the door picker (lib/conference/door.ts). */
+  doorEvents: DoorEvent[];
+  /** The venue's timezone: an event's window is on its clock. */
+  timeZone: string;
+  /** Rehearsal only: pretend it is this instant for the door picker. */
+  doorNow: string | null;
 }
 
 export default function CheckInDeskClient({
@@ -287,6 +321,9 @@ export default function CheckInDeskClient({
   testMode,
   asOf,
   storefrontPath,
+  doorEvents,
+  timeZone,
+  doorNow,
 }: CheckInDeskClientProps) {
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [facts, setFacts] = useState<Record<string, CheckInFacts>>(initialFacts);
@@ -318,6 +355,40 @@ export default function CheckInDeskClient({
     setDeskMenuOpen(false);
     setSellContext(context);
   }, []);
+  // ── The event door (lib/conference/door.ts) ─────────────────────────────
+  // ⛔ This desk with an event picked, not a second desk. The pick lives in a
+  // cookie on THIS device until the event's window closes. "" = badge pickup,
+  // chosen on purpose (so the desk stops asking until the window passes).
+  const doorClock = useCallback(() => (doorNow ? new Date(doorNow) : new Date()), [doorNow]);
+  const [doorChoice, setDoorChoice] = useState<DoorChoice | null>(null);
+  const [doorPicker, setDoorPicker] = useState<"auto" | "manual" | null>(null);
+  const activeDoorEvent = doorChoice?.entityId
+    ? doorEvents.find((event) => event.id === doorChoice.entityId) ?? null
+    : null;
+  // Read by the camera's callback, which is created once — see lookupOpenRef.
+  const doorEntityRef = useRef<string | null>(null);
+  useEffect(() => {
+    doorEntityRef.current = activeDoorEvent?.id ?? null;
+  }, [activeDoorEvent]);
+  const rememberDoor = useCallback(
+    (event: DoorEvent | null) => {
+      const now = doorClock();
+      const until = event
+        ? doorChoiceUntil(event, now, timeZone)
+        : new Date(
+            Math.max(
+              now.getTime() + 2 * 60 * 60 * 1000,
+              ...doorEventsOpenNow(doorEvents, now, timeZone).map((e) => doorWindow(e, timeZone).closes)
+            )
+          ).toISOString();
+      const choice: DoorChoice = { entityId: event?.id ?? "", until };
+      const maxAge = Math.max(60, Math.round((Date.parse(until) - now.getTime()) / 1000));
+      document.cookie = `${doorCookieName(conferenceId)}=${serializeDoorChoice(choice)}; path=/admin/conference/${conferenceId}; max-age=${maxAge}; samesite=lax`;
+      setDoorChoice(choice);
+      setDoorPicker(null);
+    },
+    [conferenceId, doorClock, doorEvents, timeZone]
+  );
   const sellForPerson = useCallback(
     (personId: string) => {
       const person = rows.find((r) => r.id === personId) ?? null;
@@ -325,6 +396,7 @@ export default function CheckInDeskClient({
         personId,
         personName: person?.display_name ?? person?.contact_email ?? null,
         organizationId: person?.organization_id ?? null,
+        doorEventId: doorEntityRef.current,
       });
     },
     [openSell, rows]
@@ -381,7 +453,7 @@ export default function CheckInDeskClient({
         personId,
         // ⛔ A stop stays until someone taps it: a refusal that disappears on a
         // timer is a refusal nobody saw.
-        expiresAt: toneOf(state) === "stop" ? Number.POSITIVE_INFINITY : createdAt + SCAN_PULSE_TTL_MS,
+        expiresAt: staysUntilTapped(state) ? Number.POSITIVE_INFINITY : createdAt + SCAN_PULSE_TTL_MS,
         displayName: person?.display_name ?? person?.contact_email ?? null,
         facts: personId ? facts[personId] ?? null : null,
         checkedInAt: person?.checked_in_at ?? null,
@@ -393,7 +465,7 @@ export default function CheckInDeskClient({
       };
       setScanCards((prev) => {
         const next = [card, ...prev];
-        const stops = next.filter((c) => toneOf(c.state) === "stop");
+        const stops = next.filter((c) => staysUntilTapped(c.state));
         const rest = next.filter((c) => toneOf(c.state) !== "stop").slice(0, SCAN_PULSE_LIMIT);
         return next.filter((c) => stops.includes(c) || rest.includes(c));
       });
@@ -483,6 +555,20 @@ export default function CheckInDeskClient({
     void getDeskPinState(conferenceId).then((res) => {
       if (!live) return;
       setHandOverOrderId(readHandOver(conferenceId));
+      // The door: keep a pick that is still good; otherwise ask, but only when
+      // an event's window is open now.
+      const cookieName = `${doorCookieName(conferenceId)}=`;
+      const stored = parseDoorChoice(
+        document.cookie.split("; ").find((part) => part.startsWith(cookieName))?.slice(cookieName.length)
+      );
+      const now = doorClock();
+      const stillGood =
+        stored !== null &&
+        (stored.entityId === ""
+          ? Date.parse(stored.until) > now.getTime()
+          : doorChoiceStillValid(stored, doorEvents, now));
+      if (stillGood) setDoorChoice(stored);
+      else if (doorEventsOpenNow(doorEvents, now, timeZone).length > 0) setDoorPicker("auto");
       // A refused read leaves the desk usable but every PIN prompt will fail
       // closed on the server, which is where the decision lives anyway.
       setPinState(res.success ? { hasPin: res.data.hasPin, mayChoose: res.data.mayResetWithoutPin } : { hasPin: true, mayChoose: false });
@@ -490,7 +576,7 @@ export default function CheckInDeskClient({
     return () => {
       live = false;
     };
-  }, [conferenceId]);
+  }, [conferenceId, doorClock, doorEvents, timeZone]);
 
   // Back from a hand-over and unlocked: what happened to the sale? Paid shows
   // the print cards; not paid closes the card link so it cannot be paid later.
@@ -629,6 +715,7 @@ export default function CheckInDeskClient({
           qr_token: token,
           scan_timestamp: new Date().toISOString(),
           device_id: selectedCameraId || undefined,
+          entity_id: doorEntityRef.current ?? undefined,
         },
         true
       );
@@ -740,18 +827,24 @@ export default function CheckInDeskClient({
           {
             method: "PATCH",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ op: "manual_check_in", testMode }),
+            body: JSON.stringify({ op: "manual_check_in", testMode, entityId: doorEntityRef.current }),
           }
         );
-        const payload = (await response.json()) as { error?: string };
+        const payload = (await response.json()) as { error?: string; state?: string };
         if (!response.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "They could not be checked in by name.");
           return;
         }
         // Announce it the same way a scan does, so the desk has one place to
         // look for "what just happened" regardless of how it happened — but
-        // under its own state, because it is not what a scan did.
-        pushScanCard("manual_checked_in", personId);
+        // under its own state, because it is not what a scan did. At a door,
+        // the result is the door's (not on their ticket, already in).
+        pushScanCard(
+          payload.state === "not_on_ticket" || payload.state === "already_checked_in"
+            ? payload.state
+            : "manual_checked_in",
+          personId
+        );
         setLookupOpen(false);
         setNameLookup("");
         await loadRows();
@@ -1008,6 +1101,28 @@ export default function CheckInDeskClient({
             void settleHandOver(orderId);
           }}
         />
+      ) : null}
+      {/* ⛔ The door picker comes AFTER the PIN: it only shows once the desk is
+          unlocked and nothing else is covering it. */}
+      {pinState?.hasPin && !handOverOrderId && doorPicker ? (
+        <DoorPicker
+          events={doorEvents}
+          openNow={doorEventsOpenNow(doorEvents, doorClock(), timeZone)}
+          showAll={doorPicker === "manual"}
+          activeId={activeDoorEvent?.id ?? null}
+          onPick={rememberDoor}
+          onClose={doorPicker === "manual" ? () => setDoorPicker(null) : null}
+        />
+      ) : null}
+      {activeDoorEvent ? (
+        <button
+          type="button"
+          onClick={() => setDoorPicker("manual")}
+          className="absolute bottom-6 left-6 z-30 flex min-h-12 items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-black shadow-lg"
+        >
+          <CalendarIcon />
+          At: {activeDoorEvent.name}
+        </button>
       ) : null}
       {flash && flash.tone !== "info" ? (
         <div
@@ -1284,6 +1399,15 @@ export default function CheckInDeskClient({
                   {reprintBusy === card.personId ? "…" : "Print badge"}
                 </button>
               ) : null}
+              {card.state === "not_on_ticket" && card.personId ? (
+                <button
+                  type="button"
+                  onClick={() => sellForPerson(card.personId as string)}
+                  className="mt-3 inline-flex min-h-12 items-center rounded-lg bg-white px-4 text-base font-semibold text-black"
+                >
+                  Sell it to them →
+                </button>
+              ) : null}
               {card.state === "not_valid_today" && card.personId ? (
                 <button
                   type="button"
@@ -1293,7 +1417,7 @@ export default function CheckInDeskClient({
                   Sell them a day pass →
                 </button>
               ) : null}
-              {toneOf(card.state) === "stop" ? (
+              {staysUntilTapped(card.state) ? (
                 <button
                   type="button"
                   onClick={() => setScanCards((prev) => prev.filter((entry) => entry.id !== card.id))}
@@ -1667,8 +1791,36 @@ export default function CheckInDeskClient({
               showLabel
               icon={<SellIcon />}
               label="Sell"
-              onClick={() => openSell({})}
+              onClick={() => openSell({ doorEventId: doorEntityRef.current })}
             />
+            {doorEvents.length > 0 ? (
+              <ToolButton
+                size="lg"
+                showLabel
+                icon={<CalendarIcon />}
+                label="Change which event you're checking in"
+                onClick={() => {
+                  setDeskMenuOpen(false);
+                  setDoorPicker("manual");
+                }}
+              />
+            ) : null}
+            {activeDoorEvent ? (
+              <ToolButton
+                size="lg"
+                showLabel
+                icon={<PrintIcon />}
+                label={`Print list: ${activeDoorEvent.name}`}
+                onClick={() => {
+                  setDeskMenuOpen(false);
+                  window.open(
+                    `/admin/conference/${conferenceId}/check-in/door-list?entity=${activeDoorEvent.id}`,
+                    "_blank",
+                    "noopener"
+                  );
+                }}
+              />
+            ) : null}
             <ToolButton
               size="lg"
               showLabel
@@ -1729,5 +1881,96 @@ function SellIcon() {
       />
       <circle cx="7.5" cy="7.5" r="1.5" />
     </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+    </svg>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.83c-.24.03-.48.06-.72.1m.72-.1a42.4 42.4 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.17c.24.03.48.06.72.1m-.72-.1L17.66 18m0 0 .23 2.5a1.13 1.13 0 0 1-1.12 1.24H7.23a1.13 1.13 0 0 1-1.12-1.24L6.34 18m11.32 0h1.09A2.25 2.25 0 0 0 21 15.75V9.46c0-1.08-.77-2.01-1.84-2.18a48.4 48.4 0 0 0-1.66-.22M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.46c0-1.08.77-2.01 1.84-2.18.55-.08 1.1-.16 1.66-.22m11 0a48.6 48.6 0 0 0-11 0m11 0V3.38c0-.62-.5-1.13-1.13-1.13H7.63c-.62 0-1.13.5-1.13 1.13v3.68" />
+    </svg>
+  );
+}
+
+/** "17:30" → "5:30 pm". */
+function wallTime(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const suffix = h >= 12 ? "pm" : "am";
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${suffix}`;
+}
+
+/**
+ * Which event is this device checking in to? Asked after the PIN when an
+ * event's window is open; reopened from the toolkit, where every event is
+ * listed (reconciling afterwards, or an uncapped one like an AGM).
+ */
+function DoorPicker({
+  events,
+  openNow,
+  showAll,
+  activeId,
+  onPick,
+  onClose,
+}: {
+  events: DoorEvent[];
+  openNow: DoorEvent[];
+  showAll: boolean;
+  activeId: string | null;
+  onPick: (event: DoorEvent | null) => void;
+  onClose: (() => void) | null;
+}) {
+  const others = showAll ? events.filter((event) => !openNow.some((open) => open.id === event.id)) : [];
+  const row = (event: DoorEvent) => (
+    <button
+      key={event.id}
+      type="button"
+      onClick={() => onPick(event)}
+      className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-xl px-5 py-3 text-left text-base font-semibold ${
+        event.id === activeId ? "bg-emerald-400 text-black" : "bg-white text-black"
+      }`}
+    >
+      <span>{event.name}</span>
+      <span className="shrink-0 text-sm font-normal text-gray-600">
+        {shortDay(event.date)} · {wallTime(event.startTime)} to {wallTime(event.endTime)}
+      </span>
+    </button>
+  );
+  return (
+    <div className="fixed inset-0 z-[90] flex flex-col items-center overflow-y-auto bg-gray-950 px-5 py-10 text-white">
+      <div className="w-full max-w-lg space-y-4">
+        <p className="text-2xl font-bold">
+          {openNow.length > 0 ? "Is this check-in for an event?" : "Which event are you checking in?"}
+        </p>
+        {openNow.length > 0 ? <div className="space-y-2">{openNow.map(row)}</div> : null}
+        <button
+          type="button"
+          onClick={() => onPick(null)}
+          className={`min-h-14 w-full rounded-xl border px-5 text-base font-semibold ${
+            activeId === null ? "border-emerald-400 text-emerald-300" : "border-white/40 text-white"
+          }`}
+        >
+          No, badge pickup
+        </button>
+        {others.length > 0 ? (
+          <div className="space-y-2 pt-4">
+            <p className="text-sm uppercase tracking-wider text-gray-400">Other events</p>
+            {others.map(row)}
+          </div>
+        ) : null}
+        {onClose ? (
+          <button type="button" onClick={onClose} className="min-h-12 w-full rounded-lg px-5 text-base text-gray-300 underline">
+            Cancel
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }

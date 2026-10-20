@@ -60,6 +60,8 @@ export async function loadDeskSaleOffers(params: {
   organizationId: string;
   /** The person standing there, when the desk knows them (scan or Find). */
   personId?: string | null;
+  /** The event this device is checking in to — it is offered first. */
+  doorEventId?: string | null;
 }): Promise<
   Result<{
     groups: DeskOfferGroup[];
@@ -95,7 +97,7 @@ export async function loadDeskSaleOffers(params: {
   return {
     success: true,
     data: {
-      groups: rankDeskOffers({ offers: offersRes.data, personDates, today }),
+      groups: rankDeskOffers({ offers: offersRes.data, personDates, today, doorEventId: params.doorEventId ?? null }),
       knownPerson: personDates !== null,
       attendee: personRow
         ? {

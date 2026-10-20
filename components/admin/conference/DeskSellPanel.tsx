@@ -39,6 +39,8 @@ export type DeskSellContext = {
   organizationId?: string | null;
   /** What was typed into Find, to pre-fill the company search. */
   companyHint?: string | null;
+  /** The event this device is checking in to: offered first. */
+  doorEventId?: string | null;
 };
 
 type Org = { id: string; name: string; type: string | null };
@@ -163,7 +165,12 @@ export default function DeskSellPanel({
   useEffect(() => {
     if (!orgId) return;
     let cancelled = false;
-    void loadDeskSaleOffers({ conferenceId, organizationId: orgId, personId: context.personId ?? null }).then(
+    void loadDeskSaleOffers({
+      conferenceId,
+      organizationId: orgId,
+      personId: context.personId ?? null,
+      doorEventId: context.doorEventId ?? null,
+    }).then(
       (res) => {
         if (cancelled) return;
         if (res.success) {
@@ -188,7 +195,7 @@ export default function DeskSellPanel({
     return () => {
       cancelled = true;
     };
-  }, [conferenceId, orgId, context.personId]);
+  }, [conferenceId, orgId, context.personId, context.doorEventId]);
 
   // The cart total follows every add, through the same signal the site header uses.
   useEffect(() => {

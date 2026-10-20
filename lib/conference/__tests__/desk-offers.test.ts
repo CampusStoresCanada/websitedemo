@@ -90,3 +90,24 @@ describe("rankDeskOffers", () => {
     expect(groups[0].offers.map((o) => o.offer.id)).toEqual(["rec", "merch"]);
   });
 });
+
+describe("at an event's door", () => {
+  it("puts the event at this door first, for a known person", () => {
+    const groups = rankDeskOffers({ offers: catalogue, personDates: [TUE], today: TUE, doorEventId: "offsite" });
+    expect(groups[0]).toMatchObject({ key: "at_this_door", title: "At this door" });
+    expect(groups[0].offers.map((o) => o.offer.id)).toEqual(["offsite"]);
+    // Not listed twice.
+    expect(groups.flatMap((g) => g.offers.map((o) => o.offer.id)).filter((id) => id === "offsite")).toHaveLength(1);
+  });
+
+  it("and first for a walk-up too", () => {
+    const groups = rankDeskOffers({ offers: catalogue, personDates: null, today: TUE, doorEventId: "reception" });
+    expect(groups[0].offers.map((o) => o.offer.id)).toEqual(["reception"]);
+  });
+
+  it("changes nothing when this device is not at a door", () => {
+    expect(ids(rankDeskOffers({ offers: catalogue, personDates: [TUE], today: TUE, doorEventId: null }))).toEqual(
+      ids(rankDeskOffers({ offers: catalogue, personDates: [TUE], today: TUE }))
+    );
+  });
+});

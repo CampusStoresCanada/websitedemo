@@ -27,8 +27,10 @@ import {
   spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
 import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
-import { admittedDates, type AccessSummary } from "@/lib/conference/entity-commerce";
-import { loadSeatHoldings } from "@/lib/conference/seats";
+import { admittedDates, entityWhen, resolveAccess, type AccessSummary } from "@/lib/conference/entity-commerce";
+import { ENTITY_SELECT, buildEntityGraph, loadSeatHoldings } from "@/lib/conference/seats";
+import { capacityOf } from "@/lib/conference/attendance";
+import type { DoorEvent } from "@/lib/conference/door";
 
 export type CheckInFacts = {
   /** Who they are here with. The card used to show a bare name. */
@@ -233,6 +235,10 @@ export type CheckInFactsPayload = {
    * completely useless. The verdict only means something on a conference day.
    */
   conferenceDates: string[];
+  /** Every timed event, for the door picker (lib/conference/door.ts). */
+  doorEvents: DoorEvent[];
+  /** The venue's timezone: an event's window is judged on its clock. */
+  timeZone: string;
 };
 
 /**
@@ -262,11 +268,62 @@ export async function loadCheckInFacts(
     : [];
 
 
+  // ⚠️ A failure here costs the door picker, never the desk.
+  const door = await loadDoorEvents(db, conferenceId).catch(() => ({ doorEvents: [], timeZone: DEFAULT_DOOR_TIME_ZONE }));
+
   return {
     facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
     openSeats: openSeatsFromRun(run),
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
+    ...door,
   };
+}
+
+const DEFAULT_DOOR_TIME_ZONE = "America/Toronto";
+
+/**
+ * The conference's timed events, for the door picker. Capped ones are the
+ * doors the desk offers on its own; the rest can still be picked by hand.
+ */
+async function loadDoorEvents(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<{ doorEvents: DoorEvent[]; timeZone: string }> {
+  const [entityRes, refRes, confRes] = await Promise.all([
+    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
+    db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", conferenceId),
+    db.from("conference_instances").select("timezone").eq("id", conferenceId).maybeSingle(),
+  ]);
+  if (entityRes.error) throw new Error(entityRes.error.message);
+  if (refRes.error) throw new Error(refRes.error.message);
+  const byId = new Map(buildEntityGraph(entityRes.data ?? [], refRes.data ?? []).map((e) => [e.id, e]));
+  const doorEvents: DoorEvent[] = [];
+  for (const entity of byId.values()) {
+    if (entity.kind !== "event") continue;
+    const when = entityWhen(entity.id, byId);
+    if (!when.date || !when.startTime || !when.endTime) continue;
+    doorEvents.push({ id: entity.id, name: entity.name, ...when, capped: capacityOf(entity) !== null });
+  }
+  doorEvents.sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
+  return {
+    doorEvents,
+    timeZone: (confRes.data?.timezone as string | null) || DEFAULT_DOOR_TIME_ZONE,
+  };
+}
+
+/**
+ * Does this person's access reach this event? The door's one question.
+ * ⛔ resolveAccess over every seat they hold — the same closure the attendance
+ * numbers count, so the door and the caterer's number cannot disagree.
+ */
+export async function personReachesEntity(conferenceId: string, personId: string, entityId: string): Promise<boolean> {
+  const { seats, entitiesById } = await loadSeatHoldings(createAdminClient(), {
+    conferenceId,
+    holderPersonId: personId,
+  });
+  const heldIds = [...new Set(seats.map((seat) => seat.entityId))];
+  if (heldIds.length === 0) return false;
+  return resolveAccess(heldIds, entitiesById).has(entityId);
 }
 
 /** Day entity name → ISO date, for this conference. */

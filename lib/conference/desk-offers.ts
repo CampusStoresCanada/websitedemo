@@ -15,6 +15,8 @@
  *   Walk-up (nobody known yet):
  *     1. Registrations, soonest first                    — they need a badge
  *     2. Events and extras, soonest first
+ *   At an event's door (either case): that event comes first — the person is
+ *   standing at it (Stephen, 2026-10-20).
  *
  * Hidden: anything ineligible or sold out, booths and membership renewals (the
  * same exclusion as the self-purchase block — selfBuyableOffers), and anything
@@ -26,7 +28,7 @@
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { selfBuyableOffers } from "@/lib/conference/self-purchase";
 
-export type DeskOfferGroupKey = "adds_days" | "registrations" | "extras" | "for_colleague";
+export type DeskOfferGroupKey = "at_this_door" | "adds_days" | "registrations" | "extras" | "for_colleague";
 
 export type RankedDeskOffer = {
   offer: ConferenceOffer;
@@ -41,6 +43,7 @@ export type DeskOfferGroup = {
 };
 
 const GROUP_TITLES: Record<DeskOfferGroupKey, string> = {
+  at_this_door: "At this door",
   adds_days: "Adds a day",
   registrations: "Registrations",
   extras: "Events and extras",
@@ -67,6 +70,8 @@ export function rankDeskOffers(params: {
   personDates: string[] | null;
   /** Today at the conference, YYYY-MM-DD. */
   today: string;
+  /** The event this device is checking in to, if any (lib/conference/door.ts). */
+  doorEventId?: string | null;
 }): DeskOfferGroup[] {
   const { personDates, today } = params;
   const held = new Set(personDates ?? []);
@@ -86,6 +91,11 @@ export function rankDeskOffers(params: {
     if (dates.length > 0 && upcoming.length === 0) continue;
     const soonest = upcoming[0] ?? null;
     const isRegistration = offer.kind === "registration";
+
+    if (params.doorEventId && offer.id === params.doorEventId) {
+      put("at_this_door", { offer, soonest, reason: "" });
+      continue;
+    }
 
     if (!isRegistration) {
       put("extras", { offer, soonest, reason: soonest ? shortDay(soonest) : "" });
@@ -108,8 +118,8 @@ export function rankDeskOffers(params: {
 
   const order: DeskOfferGroupKey[] =
     personDates === null
-      ? ["registrations", "extras"]
-      : ["adds_days", "extras", "for_colleague"];
+      ? ["at_this_door", "registrations", "extras"]
+      : ["at_this_door", "adds_days", "extras", "for_colleague"];
 
   return order
     .map((key) => ({

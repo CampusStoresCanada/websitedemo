@@ -108,6 +108,24 @@ function whenDate(entityId: string, byId: Map<string, BuildEntity>): string {
 }
 
 /**
+ * When a timed thing happens: its day's date and its own wall times. Empty
+ * strings when it has none. ⛔ The same resolution the badge back uses
+ * (resolvedDay), so the door and the badge cannot disagree about a time.
+ */
+export function entityWhen(
+  entityId: string,
+  byId: Map<string, BuildEntity>
+): { date: string; startTime: string; endTime: string } {
+  const attributes = byId.get(entityId)?.attributes ?? {};
+  const clean = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  return {
+    date: whenDate(entityId, byId),
+    startTime: clean(attributes.start_time),
+    endTime: clean(attributes.end_time),
+  };
+}
+
+/**
  * The calendar dates a holder may be on site for — the CHECK-IN rule.
  *
  * Every day they are granted, plus the `when` day of every session and event

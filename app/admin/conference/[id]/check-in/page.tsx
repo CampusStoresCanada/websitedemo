@@ -3,6 +3,7 @@ import { listConferencePeople } from "@/lib/actions/conference-people";
 import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import CheckInDeskClient from "@/components/admin/conference/CheckInDeskClient";
 import { loadCheckInFacts } from "@/lib/conference/badges/checkin";
+import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 
 export const metadata = {
   title: "Conference Check-in Desk | Admin",
@@ -40,8 +41,12 @@ export default async function ConferenceCheckInDeskPage({
   // ⚠️ Only honoured in test mode. Pretending it is a different day is how you
   // rehearse the day-pass verdict in September; it is not something a live desk
   // should ever be able to do by editing its own URL.
+  // `as_of` may carry a venue time too (2027-02-01T18:00): the event door
+  // decides what to offer by the clock, so rehearsing it needs an hour.
   const asOfRaw = testMode ? one(query.as_of).trim() : "";
-  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw) ? asOfRaw : null;
+  const asOfMatch = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?$/.exec(asOfRaw);
+  const asOf = asOfMatch ? asOfMatch[1] : null;
+  const asOfTime = asOfMatch?.[2] ?? null;
   // ⛔ What each person HOLDS, resolved once when the desk opens rather than on
   // the roster poll — see loadCheckInFacts for why. A failure here must not take
   // the desk down with it: a desk that shows a name and no entitlement still
@@ -49,7 +54,13 @@ export default async function ConferenceCheckInDeskPage({
   const [conferenceResult, peopleResult, facts] = await Promise.all([
     getConference(id),
     listConferencePeople(id),
-    loadCheckInFacts(id).catch(() => ({ facts: {}, conferenceDates: [], openSeats: [] })),
+    loadCheckInFacts(id).catch(() => ({
+      facts: {},
+      conferenceDates: [],
+      openSeats: [],
+      doorEvents: [],
+      timeZone: "America/Toronto",
+    })),
   ]);
 
   if (!conferenceResult.success || !conferenceResult.data) {
@@ -71,6 +82,9 @@ export default async function ConferenceCheckInDeskPage({
         testMode={testMode}
         asOf={asOf}
         storefrontPath={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}`}
+        doorEvents={facts.doorEvents}
+        timeZone={facts.timeZone}
+        doorNow={asOf && asOfTime ? zonedWallTimeToUtcIso(asOf, asOfTime, facts.timeZone) : null}
       />
     </>
   );

@@ -22,6 +22,7 @@ export async function POST(
     device_id?: string;
     test_mode?: boolean;
     as_of?: string | null;
+    entity_id?: string | null;
   };
 
   try {
@@ -31,6 +32,7 @@ export async function POST(
       device_id?: string;
       test_mode?: boolean;
       as_of?: string | null;
+      entity_id?: string | null;
     };
   } catch {
     return NextResponse.json(
@@ -57,6 +59,8 @@ export async function POST(
     testMode: payload.test_mode === true,
     // Rehearsal only; the action ignores it outside test mode.
     asOf: payload.as_of ?? null,
+    // The event this device is at (door mode), or none for badge pickup.
+    entityId: typeof payload.entity_id === "string" && payload.entity_id ? payload.entity_id : null,
   });
 
   if (!result.success) {

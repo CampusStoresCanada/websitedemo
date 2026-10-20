@@ -107,7 +107,10 @@ export async function loadAttendance(
     .from("conference_check_in_events")
     .select("entity_id")
     .eq("conference_id", conferenceId)
-    .eq("result_state", "valid")
+    // ⛔ "Not on their ticket" is still somebody IN THE ROOM: the door lets them
+    // in and invoices (enforcement is off by default). A re-entry is
+    // "already_checked_in" and is not counted again.
+    .in("result_state", ["valid", "not_on_ticket"])
     .not("entity_id", "is", null);
   const scanCount = new Map<string, number>();
   for (const row of (scanRows ?? []) as Array<{ entity_id: string | null }>) {
@@ -165,7 +168,7 @@ export async function loadAttendance(
  * report a room as fine when it is not — so anything unrecognised returns null
  * (uncapped) rather than a guess.
  */
-function capacityOf(entity: BuildEntity): number | null {
+export function capacityOf(entity: BuildEntity): number | null {
   const raw: unknown = entity.inventory;
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   if (typeof raw === "string" && raw.trim() && Number.isFinite(Number(raw))) return Number(raw);
@@ -174,4 +177,72 @@ function capacityOf(entity: BuildEntity): number | null {
     if (typeof cap === "number" && Number.isFinite(cap)) return cap;
   }
   return null;
+}
+
+export type DoorRosterRow = {
+  personId: string;
+  name: string;
+  organizationName: string;
+  /** Already recorded at this event's door. */
+  inAlready: boolean;
+};
+
+/**
+ * Everyone whose access reaches one event — the door's printed backup list.
+ *
+ * ⛔ The SAME walk as loadAttendance's `expectedNamed`, so the paper list and
+ * the attendance number cannot disagree. Named people only: an unnamed seat
+ * has no person to tick off. The 2026-09-08 decisions require this list — the
+ * phone is never the only way in.
+ */
+export async function loadDoorRoster(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any,
+  conferenceId: string,
+  entityId: string
+): Promise<DoorRosterRow[]> {
+  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+
+  const heldByPerson = new Map<string, { held: string[]; name: string; organizationId: string }>();
+  for (const seat of seats) {
+    if (!seat.holderPersonId) continue;
+    const entry = heldByPerson.get(seat.holderPersonId) ?? {
+      held: [],
+      name: seat.holderName ?? "",
+      organizationId: seat.organizationId,
+    };
+    if (!entry.held.includes(seat.entityId)) entry.held.push(seat.entityId);
+    heldByPerson.set(seat.holderPersonId, entry);
+  }
+
+  const reaching = [...heldByPerson.entries()].filter(([, entry]) =>
+    resolveAccess(entry.held, entitiesById).has(entityId)
+  );
+  const orgIds = [...new Set(reaching.map(([, entry]) => entry.organizationId))];
+
+  const [{ data: orgs, error: orgError }, { data: scans, error: scanError }] = await Promise.all([
+    orgIds.length
+      ? db.from("organizations").select("id, name").in("id", orgIds)
+      : Promise.resolve({ data: [], error: null }),
+    db
+      .from("conference_check_in_events")
+      .select("person_id")
+      .eq("conference_id", conferenceId)
+      .eq("entity_id", entityId)
+      .in("result_state", ["valid", "not_on_ticket"]),
+  ]);
+  if (orgError) throw new Error(`Could not load organisations: ${orgError.message}`);
+  if (scanError) throw new Error(`Could not load door scans: ${scanError.message}`);
+
+  const orgName = new Map(((orgs ?? []) as Array<{ id: string; name: string }>).map((o) => [o.id, o.name]));
+  const inAlready = new Set(((scans ?? []) as Array<{ person_id: string | null }>).map((r) => r.person_id));
+
+  return reaching
+    .map(([personId, entry]) => ({
+      personId,
+      name: entry.name,
+      organizationName: orgName.get(entry.organizationId) ?? "",
+      inAlready: inAlready.has(personId),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
