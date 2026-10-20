@@ -220,36 +220,82 @@ export function planReprint(params: {
  * registration type it was printed for, so the nearest stack would put somebody
  * else's four days on the back of their badge.
  */
-export function suggestStock(params: {
+/**
+ * A company blank is keyed by company AND registration type. ⛔ Its back was
+ * printed with the schedule of the SEAT it was printed for, so a Thursday-only
+ * person handed a Full Conference blank would carry four days they do not have.
+ */
+export const blankCardKey = (organizationId: string, registrationTypeId: string) =>
+  `${organizationId}|${registrationTypeId}`;
+
+/**
+ * Which cards exist for this person — the ONE answer the desk's guess and the
+ * "Which card are you holding?" choices both read, so they cannot disagree.
+ * Built from the print run (blanks per unnamed seat, spares per type), never
+ * hand-listed: a new registration type appears here at the next run.
+ */
+export type CardsOnHand = {
+  /** A blank was printed for their company AND their registration type. */
+  companyBlank: boolean;
+  /** Spares the run printed for their registration type (0 = none). */
+  spareCount: number;
+  /** Their registration type, in the catalogue's words, for the choices. */
+  typeName: string | null;
+};
+
+export function cardsOnHand(params: {
   organizationId: string | null;
-  unnamedSeatOrganizationIds: Iterable<string>;
-  /** The registration type this person's badge is printed as. */
   registrationTypeId: string | null;
+  registrationTypeName?: string | null;
+  /** blankCardKey for every unnamed seat in the run. */
+  unnamedSeatKeys: Iterable<string>;
   /** Spares the run printed, per registration type. Empty when spares are off. */
   sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }>;
-}): { stock: BadgeStock; reason: string } {
-  const { organizationId, registrationTypeId, sparesByType } = params;
-  if (organizationId && new Set(params.unnamedSeatOrganizationIds).has(organizationId)) {
+}): CardsOnHand {
+  const { organizationId, registrationTypeId } = params;
+  const keys = new Set(params.unnamedSeatKeys);
+  const spare = params.sparesByType.find((t) => t.entityId === registrationTypeId);
+  return {
+    companyBlank: Boolean(organizationId && registrationTypeId && keys.has(blankCardKey(organizationId, registrationTypeId))),
+    spareCount: spare?.count ?? 0,
+    typeName: params.registrationTypeName ?? spare?.name ?? null,
+  };
+}
+
+export function suggestStock(params: {
+  organizationId: string | null;
+  /** blankCardKey for every unnamed seat in the run. */
+  unnamedSeatKeys: Iterable<string>;
+  /** The registration type this person's badge is printed as. */
+  registrationTypeId: string | null;
+  registrationTypeName?: string | null;
+  /** Spares the run printed, per registration type. Empty when spares are off. */
+  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }>;
+}): { stock: BadgeStock; reason: string; cards: CardsOnHand } {
+  const cards = cardsOnHand(params);
+  const type = cards.typeName ?? "their registration type";
+  if (cards.companyBlank) {
     return {
       stock: "company_blank",
-      reason: "This company has an unnamed seat, so a blank for it was printed.",
+      reason: `This company has an unnamed ${type} seat, so a blank for it was printed.`,
+      cards,
     };
   }
-  const printed = sparesByType.filter((t) => t.count > 0);
-  const match = printed.find((t) => t.entityId === registrationTypeId);
-  if (match) {
+  if (cards.spareCount > 0) {
     return {
       stock: "spare",
-      reason: `No blank for this company; use one of the ${match.count} ${match.name} spares.`,
+      reason: `No ${type} blank for this company; use one of the ${cards.spareCount} ${type} spares.`,
+      cards,
     };
   }
-  if (printed.length > 0) {
+  if (params.sparesByType.some((t) => t.count > 0)) {
     return {
       stock: "none",
       reason:
-        "No blank, and no spare was printed for their registration type. Another " +
-        "type's spare would carry the wrong schedule.",
+        `No ${type} blank, and no ${type} spare was printed. Another type's card ` +
+        "would carry the wrong schedule.",
+      cards,
     };
   }
-  return { stock: "none", reason: "No blank for this company and no spares in this run." };
+  return { stock: "none", reason: "No blank for this company and no spares in this run.", cards };
 }

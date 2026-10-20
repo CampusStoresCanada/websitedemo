@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planReprint, suggestStock } from "../reprint-plan";
+import { blankCardKey, planReprint, suggestStock } from "../reprint-plan";
 
 /**
  * ⛔ The delta follows the CARD, not the person. A QL cannot overprint a rigid
@@ -49,7 +49,8 @@ describe("the write the desk must not skip", () => {
 });
 
 describe("which stock to reach for", () => {
-  const orgs = ["org-crestar"];
+  // A blank is printed for a company AND a registration type.
+  const orgs = [blankCardKey("org-crestar", "reg-full")];
   const spares = [
     { entityId: "reg-full", name: "Full Delegate", count: 6 },
     { entityId: "reg-day", name: "Day Pass", count: 0 },
@@ -59,7 +60,7 @@ describe("which stock to reach for", () => {
     expect(
       suggestStock({
         organizationId: "org-crestar",
-        unnamedSeatOrganizationIds: orgs,
+        unnamedSeatKeys: orgs,
         registrationTypeId: "reg-full",
         sparesByType: spares,
       }).stock
@@ -69,7 +70,7 @@ describe("which stock to reach for", () => {
   it("falls back to a spare of THEIR type when the company has no blank", () => {
     const r = suggestStock({
       organizationId: "org-other",
-      unnamedSeatOrganizationIds: orgs,
+      unnamedSeatKeys: orgs,
       registrationTypeId: "reg-full",
       sparesByType: spares,
     });
@@ -83,7 +84,7 @@ describe("which stock to reach for", () => {
     expect(
       suggestStock({
         organizationId: "org-other",
-        unnamedSeatOrganizationIds: orgs,
+        unnamedSeatKeys: orgs,
         registrationTypeId: "reg-day",
         sparesByType: spares,
       }).stock
@@ -94,18 +95,42 @@ describe("which stock to reach for", () => {
     expect(
       suggestStock({
         organizationId: "org-other",
-        unnamedSeatOrganizationIds: orgs,
+        unnamedSeatKeys: orgs,
         registrationTypeId: "reg-full",
         sparesByType: [],
       }).stock
     ).toBe("none");
   });
 
+  // ⛔ The blank's back carries the schedule of the seat it was printed for.
+  it("never suggests a company blank of another registration type", () => {
+    const r = suggestStock({
+      organizationId: "org-crestar",
+      unnamedSeatKeys: orgs,
+      registrationTypeId: "reg-day",
+      registrationTypeName: "Day Pass",
+      sparesByType: spares,
+    });
+    expect(r.stock).toBe("none");
+    expect(r.cards).toEqual({ companyBlank: false, spareCount: 0, typeName: "Day Pass" });
+  });
+
+  it("lists the cards that exist for them, for the desk's choices", () => {
+    const r = suggestStock({
+      organizationId: "org-crestar",
+      unnamedSeatKeys: orgs,
+      registrationTypeId: "reg-full",
+      registrationTypeName: "Full Delegate",
+      sparesByType: spares,
+    });
+    expect(r.cards).toEqual({ companyBlank: true, spareCount: 6, typeName: "Full Delegate" });
+  });
+
   it("does not let one company's blank cover another company's person", () => {
     expect(
       suggestStock({
         organizationId: null,
-        unnamedSeatOrganizationIds: orgs,
+        unnamedSeatKeys: orgs,
         registrationTypeId: "reg-full",
         sparesByType: [],
       }).stock

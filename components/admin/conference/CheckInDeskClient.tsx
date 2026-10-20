@@ -51,6 +51,8 @@ type CheckInFacts = {
   /** Resolved server-side — see lib/conference/badges/checkin.ts. */
   reprintStock?: "company_blank" | "spare" | "none";
   reprintReason?: string;
+  /** The cards that exist for them (reprint-plan cardsOnHand). */
+  reprintCards?: { companyBlank: boolean; spareCount: number; typeName: string | null };
 };
 
 type PendingScan = {
@@ -1007,22 +1009,31 @@ export default function CheckInDeskClient({
     cardInHandRef.current = cardInHand;
   }, [cardInHand]);
   const cardInHandPicker = (personId: string) => {
-    const chosen = cardInHand[personId] ?? facts[personId]?.reprintStock ?? "none";
+    // ⛔ Only cards that EXIST for this person: a blank printed for their
+    // company AND their type, or a spare of their type. Another type's card
+    // carries another type's schedule on its back.
+    const cards = facts[personId]?.reprintCards;
+    const type = cards?.typeName ? ` (${cards.typeName})` : "";
+    // In a rehearsal every card is offered, so printing can be tried on the
+    // test badges without changing the conference's print-stock settings.
     const options: Array<["company_blank" | "spare" | "none", string]> = [
-      ["company_blank", "Company blank"],
-      ["spare", "Spare card"],
+      ...(cards?.companyBlank || testMode ? [["company_blank", `Company blank${type}`] as ["company_blank", string]] : []),
+      ...((cards && cards.spareCount > 0) || testMode ? [["spare", `Spare${type}`] as ["spare", string]] : []),
       ["none", "No card"],
     ];
+    const suggested = facts[personId]?.reprintStock ?? "none";
+    const chosen =
+      cardInHand[personId] ?? (options.some(([value]) => value === suggested) ? suggested : "none");
     return (
       <div className="mt-2">
         <p className="text-sm text-gray-200">Which card are you holding?</p>
-        <div className="mt-1 grid grid-cols-3 gap-1.5">
+        <div className="mt-1 flex flex-wrap gap-1.5">
           {options.map(([value, label]) => (
             <button
               key={value}
               type="button"
               onClick={() => setCardInHand((prev) => ({ ...prev, [personId]: value }))}
-              className={`min-h-12 rounded-lg px-2 text-sm font-semibold ${
+              className={`min-h-12 rounded-lg px-3 text-sm font-semibold ${
                 chosen === value ? "bg-emerald-400 text-black" : "border border-white/40 text-white"
               }`}
             >
@@ -1030,7 +1041,12 @@ export default function CheckInDeskClient({
             </button>
           ))}
         </div>
-        {chosen === "none" ? (
+        {options.length === 1 ? (
+          <p className="mt-1 text-xs text-amber-200">
+            No blank or spare{type} was printed for them, so there is no card for a sticker. The label printer
+            can&apos;t print a full badge.
+          </p>
+        ) : chosen === "none" ? (
           <p className="mt-1 text-xs text-amber-200">No card: the label printer can&apos;t print a full badge.</p>
         ) : null}
       </div>

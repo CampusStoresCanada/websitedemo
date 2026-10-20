@@ -26,7 +26,7 @@ import {
   spareCountsByType,
   spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
-import { suggestStock, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
+import { blankCardKey, suggestStock, type BadgeStock, type CardsOnHand } from "@/lib/conference/badges/reprint-plan";
 import { admittedDates, entityWhen, resolveAccess, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { ENTITY_SELECT, buildEntityGraph, loadSeatHoldings } from "@/lib/conference/seats";
 import { capacityOf } from "@/lib/conference/attendance";
@@ -59,6 +59,8 @@ export type CheckInFacts = {
   reprintStock: BadgeStock;
   /** Why, in words an operator can act on. */
   reprintReason: string;
+  /** The cards that exist for them — what "Which card are you holding?" offers. */
+  reprintCards?: CardsOnHand;
 };
 
 /**
@@ -143,10 +145,11 @@ export function checkInFactsFromRun(
   // these went into the print run carrying that company's name, logo and map —
   // so a reprint for one of their people only has to add the variable part,
   // which is a job the on-site thermal printer can do in monochrome.
-  const unnamedSeatOrganizationIds = new Set<string>();
+  // ⛔ Keyed by company AND type: the blank's back carries that type's schedule.
+  const unnamedSeatKeys = new Set<string>();
   for (const type of run.types) {
     for (const seat of type.seats) {
-      if (!seat.person && seat.organizationId) unnamedSeatOrganizationIds.add(seat.organizationId);
+      if (!seat.person && seat.organizationId) unnamedSeatKeys.add(blankCardKey(seat.organizationId, type.entityId));
     }
   }
 
@@ -176,13 +179,14 @@ export function checkInFactsFromRun(
           days.map((name) => dateByDayName.get(name)).filter((date): date is string => Boolean(date)),
         admittedTo: deskAccessLines(access),
         ...(() => {
-          const { stock, reason } = suggestStock({
+          const { stock, reason, cards } = suggestStock({
             organizationId: seat.organizationId || null,
-            unnamedSeatOrganizationIds,
+            unnamedSeatKeys,
             registrationTypeId: resolved.entityId,
+            registrationTypeName: resolved.name,
             sparesByType,
           });
-          return { reprintStock: stock, reprintReason: reason };
+          return { reprintStock: stock, reprintReason: reason, reprintCards: cards };
         })(),
       };
     }
