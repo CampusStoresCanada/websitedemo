@@ -148,6 +148,13 @@ const SCAN_STATUS_COPY: Record<
     description: "No badge scanned. Checked in by hand and recorded against you.",
     className: "text-emerald-700",
   },
+  // A reprint planned as the FULL colour badge: no card in hand to put a
+  // sticker on. The label printer cannot print it.
+  reprint_needs_full_badge: {
+    title: "Needs the full badge",
+    description: "The label printer only prints stickers. Reprint again and pick the card you're holding.",
+    className: "text-amber-700",
+  },
   badge_reprinted: {
     title: "Ready to print",
     description: "Print the stickers on this device, or send them to the print station.",
@@ -199,6 +206,7 @@ const SCAN_TONE: Record<string, ScanTone> = {
   sale_invoiced: "go",
   already_checked_in: "check",
   not_on_ticket: "check",
+  reprint_needs_full_badge: "check",
   invalid_token: "stop",
   revoked_token: "stop",
   not_found: "stop",
@@ -216,7 +224,10 @@ const toneOf = (state: string): ScanTone => SCAN_TONE[state] ?? "info";
  * fade before the operator gets to it.
  */
 const staysUntilTapped = (state: string, card?: Pick<ScanPulseCard, "printJob">): boolean =>
-  toneOf(state) === "stop" || state === "not_on_ticket" || Boolean(card?.printJob);
+  toneOf(state) === "stop" ||
+  state === "not_on_ticket" ||
+  state === "reprint_needs_full_badge" ||
+  Boolean(card?.printJob);
 
 const TONE_STYLE: Record<ScanTone, { header: string; flash: string }> = {
   go: { header: "bg-emerald-600 text-white", flash: "bg-emerald-500" },
@@ -988,6 +999,44 @@ export default function CheckInDeskClient({
    * silent failure if they typed anything else. That is a developer's debug
    * affordance standing in for a desk control, at a desk, with a queue.
    */
+  // ⛔ The card the operator is HOLDING decides the print (reprint-plan.ts):
+  // the desk only guesses, so they say. Kept per person until the page reloads.
+  const [cardInHand, setCardInHand] = useState<Record<string, "company_blank" | "spare" | "none">>({});
+  const cardInHandRef = useRef(cardInHand);
+  useEffect(() => {
+    cardInHandRef.current = cardInHand;
+  }, [cardInHand]);
+  const cardInHandPicker = (personId: string) => {
+    const chosen = cardInHand[personId] ?? facts[personId]?.reprintStock ?? "none";
+    const options: Array<["company_blank" | "spare" | "none", string]> = [
+      ["company_blank", "Company blank"],
+      ["spare", "Spare card"],
+      ["none", "No card"],
+    ];
+    return (
+      <div className="mt-2">
+        <p className="text-sm text-gray-200">Which card are you holding?</p>
+        <div className="mt-1 grid grid-cols-3 gap-1.5">
+          {options.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setCardInHand((prev) => ({ ...prev, [personId]: value }))}
+              className={`min-h-12 rounded-lg px-2 text-sm font-semibold ${
+                chosen === value ? "bg-emerald-400 text-black" : "border border-white/40 text-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {chosen === "none" ? (
+          <p className="mt-1 text-xs text-amber-200">No card: the label printer can&apos;t print a full badge.</p>
+        ) : null}
+      </div>
+    );
+  };
+
   const reprintBadge = useCallback(
     // ops_override is the desk's FIRST print for someone it just sold to — not
     // one of the operator's reprint reasons, so it carries a note saying so.
@@ -1003,7 +1052,8 @@ export default function CheckInDeskClient({
             op: "reprint_badge",
             reprintReason: reason,
             ...(reason === "ops_override" ? { reprintNote: "First badge for a desk sale" } : {}),
-            stockInHand: facts[personId]?.reprintStock,
+            // What the operator says they are holding, else the desk's guess.
+            stockInHand: cardInHandRef.current[personId] ?? facts[personId]?.reprintStock,
           }),
         });
         const payload = (await response.json()) as {
@@ -1015,15 +1065,19 @@ export default function CheckInDeskClient({
           pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
           return;
         }
-        const labelPrintable = payload.labelPrintable === true;
-        pushScanCard(
-          "badge_reprinted",
-          personId,
-          labelPrintable
-            ? null
-            : "No blank or spare card for them, so this is the full colour badge. The label printer can't print it.",
-          payload.badgePrintJobId ? { jobId: payload.badgePrintJobId, labelPrintable, queued: false } : null
-        );
+        if (payload.labelPrintable === true && payload.badgePrintJobId) {
+          pushScanCard("badge_reprinted", personId, null, {
+            jobId: payload.badgePrintJobId,
+            labelPrintable: true,
+            queued: false,
+          });
+        } else {
+          pushScanCard(
+            "reprint_needs_full_badge",
+            personId,
+            "No company blank or spare card was picked, so this was planned as the full colour badge."
+          );
+        }
         await loadRows();
       } catch {
         pushScanCard("scan_failed", personId, "The reprint could not be sent.");
@@ -1243,6 +1297,9 @@ export default function CheckInDeskClient({
               <div className={`px-4 py-3 ${TONE_STYLE[toneOf(card.state)].header}`}>
                 <p className="text-xl font-bold">{SCAN_STATUS_COPY[card.state]?.title ?? "Scan result"}</p>
                 <p className="mt-0.5 text-base">{SCAN_STATUS_COPY[card.state]?.description ?? card.state}</p>
+                {/* What actually happened, when there is more to say than the
+                    state's own line — a server error, why no sticker. */}
+                {card.detail ? <p className="mt-1 text-sm font-semibold">{card.detail}</p> : null}
               </div>
               <div className="p-4">
               {card.displayName ? (
@@ -1357,7 +1414,7 @@ export default function CheckInDeskClient({
                           ? "Label onto a company blank"
                           : card.facts.reprintStock === "spare"
                             ? "Label onto a spare"
-                            : "Full badge — colour printer"}
+                            : "No blank or spare expected"}
                       </strong>{" "}
                       {card.facts.reprintReason}
                       {card.facts.reprintStock === "none"
@@ -1365,6 +1422,7 @@ export default function CheckInDeskClient({
                         : " Check the pile first; print in full if it is empty."}
                     </p>
                   ) : null}
+                  {cardInHandPicker(card.personId)}
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {REPRINT_REASONS.map(([value, label]) => (
                       <button
@@ -1408,6 +1466,7 @@ export default function CheckInDeskClient({
                   </button>
                 ) : null}
               </div>
+              {reprintOpenId === card.id && card.personId ? cardInHandPicker(card.personId) : null}
               {reprintOpenId === card.id && card.personId ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {REPRINT_REASONS.map(([value, label]) => (
