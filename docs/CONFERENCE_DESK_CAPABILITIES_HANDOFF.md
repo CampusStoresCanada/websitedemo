@@ -232,7 +232,9 @@ staff walking the room.
   delegates should say "sign in in Safari (Chrome on Android)". Test how long
   an unused session lasts (Supabase setting) on a real phone before relying on
   it.
-- To check before building: where the bursary list is already collected.
+- ⛔ **Waits on the CANCOLL bursary work**, which is not built yet (Stephen,
+  2026-10-20). The card needs to know who is on the bursary; build that first,
+  then the card reads it. The event door does not depend on it.
 
 ## 3a. Device test checklist (before pushing)
 
