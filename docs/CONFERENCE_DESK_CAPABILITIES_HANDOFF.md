@@ -194,9 +194,15 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   with `--kiosk-printing` prints with no dialog.
 - Desk staff may now reprint, queue, and open their conference's reprint
   stickers. The full badge document stays admin-only.
-- ⚠️ **Print stock for CSC 2027 is unset** (Badges page → print stock). Until it
-  is, a person whose company has no unnamed seat gets "no blank or spare: full
-  colour badge", which the QL cannot print.
+- **Print stock for CSC 2027 set 2026-10-20** (Stephen): spares on, exhibitor
+  20%, member 35%, member minimum 50. On today's numbers that is 48 exhibitor +
+  50 member = 98 spares (35% overtakes the 50 minimum above ~143 named
+  members). Change it on the conference's Badges page → print stock. Company
+  blanks are separate: one per unnamed seat, automatically.
+- Reprint asks "Which card are you holding?" and offers only cards that exist
+  for that person: a blank for their company AND type, a spare of their type,
+  or No card. Test mode offers every card. Front and back print as two jobs
+  (one shared page height would waste 27–46 mm of film per reprint).
 - ⚠️ **Hotel Wi-Fi usually isolates devices**, which breaks AirPrint. Bring a
   travel router or hotspot that the printer and every desk device join. The
   printer's own direct Wi-Fi takes the device off the internet.
