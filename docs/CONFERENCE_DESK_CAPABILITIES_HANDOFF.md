@@ -172,6 +172,68 @@ stale end date.
 - **`requireConferenceOpsAccess` is a misleading name** now that it means global
   admin; renaming touches ~30 files.
 
+## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)
+
+Nothing below is built. Both were sorted before building, per the repo rule.
+
+### Event door = this desk with an event picked (NOT a new screen)
+
+Supersedes "distinct from the desk" in `planning/conference-check-in-model.md`
+Phase 2 — that was written before the desk became full-screen and phone-first.
+
+- **When it asks:** after the PIN, if an event's window is open, the desk asks
+  "Is this check-in for <event>?". Window = **1 hour before start to 1 hour
+  after end** (the hour after is for reconciling against the paper list).
+  Overlapping events are all listed, plus "Not for an event (badge pickup)".
+- **Remembered per device** in a cookie that **expires when the window
+  closes**, so a reception choice cannot leak into the next morning's scans.
+- **Toolkit:** a calendar icon, "Change which event you are checking in".
+  After the window, events stay pickable here (not offered automatically) for
+  reconciliation; those entries are recorded as by hand.
+- **Records** `conference_check_in_events.entity_id` (the column exists,
+  nothing writes it yet).
+- **A badge SCAN at the door also checks them in to the conference** (they
+  hold the badge, so they picked it up). ⛔ A **by-name** door check-in counts
+  for the event ONLY: otherwise the desk later reads them as already checked in
+  and assumes a reprint (settled rule, check-in model §7).
+- ⛔ The door asks "is this event in their access?" (`resolveAccess`), never
+  the desk's day rule — a Thursday-only holder who bought the Tuesday reception
+  must not be refused at it.
+- **Toolkit "Print list"** for the picked event: the backup roster the
+  2026-09-08 decisions require (the digital path is never the only path).
+- **Sell:** the event at this door goes first, pre-filled with the person.
+  Default on a missing ticket stays "admit and invoice" (enforcement off).
+
+### Meetings = a booth card, for CANCOLL's bursary
+
+CANCOLL's sponsorship needs proof that bursary meetings happened, without
+staff walking the room.
+
+- **One printed card per booth** (cardstock), a QR that **requires sign-in**,
+  like the badge's back QR (`/scan/[token]`). Not per meeting: the schedule
+  says which meeting from who, which booth and when.
+- **Either side scans; one scan counts; two is never an error.**
+  - Delegate scans: if they are on the bursary and have a meeting with that
+    exhibitor around now, it is confirmed.
+  - Exhibitor scans their own card: their page shows who they are scheduled
+    with now, pre-selected; they tap Confirm (covers a delegate who will not
+    use their phone).
+  - Second scan adds the other side's confirmation, same meeting.
+- **Record who confirmed** (delegate / exhibitor / both) — CANCOLL's report
+  shows every confirmed meeting and how strongly.
+- Anyone not on the bursary who scans it sees the company's page.
+- ⛔ Not the badges: the front QR is anonymous (records nothing); an exhibitor
+  scanning a delegate's back QR sends a contact-details request (lead capture)
+  — wrong for a sponsored meeting and it would pollute the lead data.
+- **One instruction:** "When you sit down for your meeting, one of you scans
+  the card on the table."
+- ⚠️ **Sign-in is per BROWSER, not per phone.** The iPhone camera opens Safari;
+  someone signed in on Chrome is asked again. Badge pickup for bursary
+  delegates should say "sign in in Safari (Chrome on Android)". Test how long
+  an unused session lasts (Supabase setting) on a real phone before relying on
+  it.
+- To check before building: where the bursary list is already collected.
+
 ## 3a. Device test checklist (before pushing)
 
 The laptop webcam never read a code; a real device on the preview does
