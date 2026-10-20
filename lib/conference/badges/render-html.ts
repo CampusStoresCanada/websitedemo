@@ -466,7 +466,10 @@ const BACK_BLOCK_CSS = `
       .bb-name { flex: 1 1 auto; }
       .bb-room { opacity: 0.62; }
       .bb-room::before { content: " · "; }
-      .bb-more { font-style: italic; opacity: 0.75; margin-top: 0.3em; }`;
+      .bb-more { font-style: italic; opacity: 0.75; margin-top: 0.3em; }
+      /* Operator wording (the QR caption, the venue's extra line) keeps the line
+         breaks it was typed with. */
+      .bb-row { white-space: pre-line; }`;
 
 /**
  * Every back block, laid out.
