@@ -194,11 +194,13 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   with `--kiosk-printing` prints with no dialog.
 - Desk staff may now reprint, queue, and open their conference's reprint
   stickers. The full badge document stays admin-only.
-- **Print stock for CSC 2027 set 2026-10-20** (Stephen): spares on, exhibitor
-  20%, member 35%, member minimum 50. On today's numbers that is 48 exhibitor +
-  50 member = 98 spares (35% overtakes the 50 minimum above ~143 named
-  members). Change it on the conference's Badges page → print stock. Company
-  blanks are separate: one per unnamed seat, automatically.
+- **Print stock for CSC 2027 set 2026-10-20** (Stephen): spares on, 20% for
+  exhibitors and members, member minimum 35. On today's numbers: 48 exhibitor +
+  35 member = 83 spares (20% overtakes the 35 minimum at 175 named members).
+  Change it on the conference's Badges page → print stock. Company blanks are
+  separate: one per unnamed seat, automatically.
+  ⚠️ Spares split across types in proportion to seats sold, so a small type can
+  round to ZERO spares (Big Ideas Day — Operations Partner gets 0 today).
 - Reprint asks "Which card are you holding?" and offers only cards that exist
   for that person: a blank for their company AND type, a spare of their type,
   or No card. Test mode offers every card. Front and back print as two jobs
