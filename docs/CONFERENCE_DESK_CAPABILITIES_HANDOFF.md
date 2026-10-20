@@ -205,8 +205,9 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   separate: one per unnamed seat, automatically.
 - ⛔ **Spares are generic, one stack per badge LOOK** (Stephen, 2026-10-20: "the
   guessing was fun, but it was never gonna work"). A spare prints with its
-  schedule area EMPTY; when the desk uses one it prints three stickers: front,
-  the person's schedule, and the QR. CSC 2027 has two looks → two stacks:
+  schedule area EMPTY; when the desk uses one it prints TWO stickers: the front,
+  and one back sticker carrying the person's schedule above the QR, each at its
+  place on the card (Stephen: two stickers, not three). CSC 2027 has two looks → two stacks:
   exhibitor (navy, 48) and delegate (red, 35). `spareStacks` groups types by
   `badgeLookKey` (front design + colour theme), so a new look gets its own
   stack. The print run and the desk read the same `loadSpareStacks`.
@@ -214,7 +215,14 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   column, 62 mm wide. 📏 Thursday-only 17 mm; Full Conference 104 mm of text,
   more than the ~95 mm between the schedule area and the QR, so a long schedule
   scales down to fit (90% for Full Conference, measured in a browser: 91 mm of
-  text on a 96 mm sticker).
+  text on a 96 mm sticker). On a spare it is the top of the one back sticker
+  (`stackStickerParts`).
+- **QR caption wording is still the built-in default** ("This code identifies
+  your badge for check-in and scanning on site"), which undersells it: the code
+  checks in at the desk, opens your page when you scan it, opens your Circle
+  profile for another attendee, and asks your permission when an exhibitor
+  scans it. Set it on the Badges page → badge design → back → QR caption →
+  "Caption wording", BEFORE the print run (it prints on every card).
 - Reprint asks "Which card are you holding?" and offers only cards that exist
   for that person: a blank for their company AND type, a spare of their type,
   or No card. Test mode offers every card. Front and back print as two jobs
@@ -227,7 +235,7 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
 - [ ] Reprint someone whose company has an unnamed seat (company blank) → card shows "Print now: front/back"
 - [ ] Print now: front → the dialog opens itself → AirPrint finds the QL → prints 62 mm at full size, not scaled
 - [ ] Print now: back → the QR sticker scans at the desk
-- [ ] A spare reprint prints front, schedule and QR; the schedule sits in the empty schedule area, clear of the QR, and reads at its size
+- [ ] A spare reprint prints front + one back sticker (~120 mm); placed at the top-left of the schedule area, the QR lands on the card's QR spot (measured in Chrome: QR at 100 mm down / 4 mm in, 8.9 mm below the last schedule line); the schedule reads at its size
 - [ ] **"Print now: all stickers" on the iPad**: one job, each sticker its own length (CSS named pages). iPad Safari's page sizing is reported unreliable — if lengths come out wrong, use one-at-a-time, or send to the print station (Chrome honours named pages: verified 67/96/21 mm in Chrome)
 - [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
 

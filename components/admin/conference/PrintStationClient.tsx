@@ -110,7 +110,7 @@ export default function PrintStationClient({
           {paused ? "Paused" : printing ? `Printing ${printing}…` : queue.length ? `${queue.length} waiting` : "Waiting for stickers"}
         </p>
         <p className="mt-1 text-sm text-gray-600">
-          Any desk device can send stickers here with “Send to print queue”. Each one prints as a single job: front, schedule (spare cards only), then the QR, cut apart by the printer.
+          Any desk device can send stickers here with “Send to print queue”. Each one prints as a single job of two stickers, front then back (on a spare card the back carries the schedule as well as the QR), cut apart by the printer.
         </p>
         <button
           type="button"

@@ -1546,7 +1546,7 @@ export default function CheckInDeskClient({
                           rel="noopener"
                           className="underline"
                         >
-                          {side === "back" ? "QR" : side === "front" ? "Front" : "Schedule"}
+                          {side === "back" ? "Back" : side === "front" ? "Front" : "Schedule"}
                         </a>
                       </span>
                     ))}

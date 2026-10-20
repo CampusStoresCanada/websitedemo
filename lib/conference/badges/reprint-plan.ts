@@ -302,11 +302,13 @@ export function suggestStock(params: {
 
 /**
  * The stickers a label reprint prints, in the order to apply them: the front,
- * then the schedule (a spare only — its schedule area is empty), then the QR.
+ * then the back (the QR; on a spare, the schedule above it in the same piece).
  * Empty when the reprint is a full badge, which the QL cannot print.
  */
 export type StickerSide = "front" | "schedule" | "back";
 export function stickersFor(plan: Pick<ReprintPlan, "transport" | "delta"> | null | undefined): StickerSide[] {
   if (!plan || plan.transport !== "ql_label") return [];
-  return plan.delta.includes("schedule") ? ["front", "schedule", "back"] : ["front", "back"];
+  // ⛔ Two stickers either way: on a spare the back carries the schedule AND
+  // the QR in one piece (label-document), so there is never a third.
+  return ["front", "back"];
 }
