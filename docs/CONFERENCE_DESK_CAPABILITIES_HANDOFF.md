@@ -217,6 +217,12 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   scales down to fit (90% for Full Conference, measured in a browser: 91 mm of
   text on a 96 mm sticker). On a spare it is the top of the one back sticker
   (`stackStickerParts`).
+- **Badge scan rules changed 2026-10-20** (Stephen): the BACK QR across types
+  is a contact share in BOTH directions — "attendee scans company" went from
+  the company page to `capture` (exhibitor scans attendee already was).
+  Attendee↔attendee stays the Circle profile; exhibitor↔exhibitor the company
+  page; your own badge, your page. The FRONT QR (exhibitor badges) is a direct
+  company-page link, outside these rules. Badges page → badge scan rules.
 - **QR caption wording is still the built-in default** ("This code identifies
   your badge for check-in and scanning on site"), which undersells it: the code
   checks in at the desk, opens your page when you scan it, opens your Circle
