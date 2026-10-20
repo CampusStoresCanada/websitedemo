@@ -39,6 +39,10 @@ vi.mock("@/lib/ops/audit", () => ({
   logAuditEventSafe: logAuditEventSafeMock,
 }));
 
+// addConferenceAttendee reuses resolveChosenPerson from registration-mint,
+// which also sends the registration confirmation.
+vi.mock("@/lib/comms/conference-triggers", () => ({ triggerConferenceRegistrationConfirmation: vi.fn() }));
+
 import { addConferenceAttendee, removeConferenceAttendee } from "../conference-entity-commerce";
 
 const AUTH_OK = { ok: true, ctx: { userId: "admin-1", globalRole: "org_admin", activeOrgIds: ["org-1"] } };

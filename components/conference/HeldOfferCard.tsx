@@ -54,7 +54,7 @@ export default function HeldOfferCard({
     email: ((c.work_email ?? c.email) as string | undefined) ?? null,
   }));
 
-  const assignTo = (person: { name: string; email: string | null }) => {
+  const assignTo = (person: { name: string; email: string | null; contactId: string }) => {
     setPicking(false);
     if (!freeSeat) return;
     setFeedback(null);
@@ -62,6 +62,7 @@ export default function HeldOfferCard({
       const added = await addConferenceAttendee(conferenceId, organizationId, {
         displayName: person.name,
         contactEmail: person.email,
+        contactId: person.contactId,
       });
       if (!added.success) {
         setFeedback({ text: added.error, ok: false });
