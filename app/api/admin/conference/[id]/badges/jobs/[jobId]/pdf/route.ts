@@ -7,8 +7,10 @@ import {
 } from "@/lib/conference/badges/document";
 import {
   buildReprintLabelDocument,
+  combineStickerDocuments,
   LabelDocumentError,
 } from "@/lib/conference/badges/label-document";
+import { stickersFor, type ReprintPlan } from "@/lib/conference/badges/reprint-plan";
 
 /**
  * Serve one badge job's printable document.
@@ -21,24 +23,39 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ id: string; jobId: string }> }
 ) {
-  // ── The QL sticker for an on-site reprint (?side=front|back|schedule) ─────
+  // ── The QL sticker(s) for an on-site reprint (?side=front|back|schedule|all) ─
   // ⛔ The label renderer was written and never served: this route imported it
   // and only ever returned the full colour badge, which a QL cannot print.
   // Desk staff may open their own conference's reprint labels (the builder
   // refuses any other job); the full badge below stays admin-only.
   const url = new URL(request.url);
   const side = url.searchParams.get("side");
-  if (side === "front" || side === "back" || side === "schedule") {
+  if (side === "front" || side === "back" || side === "schedule" || side === "all") {
     const { id: labelConferenceId, jobId: labelJobId } = await context.params;
     const deskAuth = await requireConferenceDeskAccess(labelConferenceId);
     if (!deskAuth.ok) return NextResponse.json({ error: deskAuth.error }, { status: 403 });
     try {
-      const { html } = await buildReprintLabelDocument({
-        db: createAdminClient(),
-        conferenceId: labelConferenceId,
-        jobId: labelJobId,
-        side,
-      });
+      const db = createAdminClient();
+      let html: string;
+      if (side === "all") {
+        // ⛔ One print job, every sticker at its own length — see
+        // combineStickerDocuments. The job's plan says which stickers.
+        const { data: job } = await db
+          .from("badge_print_jobs")
+          .select("metadata")
+          .eq("id", labelJobId)
+          .eq("conference_id", labelConferenceId)
+          .maybeSingle();
+        const sides = stickersFor((job?.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan);
+        if (sides.length === 0) throw new LabelDocumentError("This reprint is a full badge, not stickers.");
+        const docs = [];
+        for (const one of sides) {
+          docs.push(await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side: one }));
+        }
+        html = combineStickerDocuments(docs);
+      } else {
+        html = (await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side })).html;
+      }
       // `print=1`: "Print now" on the device in hand. Open the print dialog as
       // soon as the sticker has drawn (AirPrint on an iPad or iPhone, the
       // Brother driver on a laptop).

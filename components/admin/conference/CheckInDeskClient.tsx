@@ -1524,21 +1524,33 @@ export default function CheckInDeskClient({
               ) : null}
               {card.printJob?.labelPrintable ? (
                 <div className="mt-3 space-y-2">
-                  {/* One print per sticker, each at its own length: sharing one
-                      page height wasted 27–46 mm of film per reprint. */}
-                  <div className={`grid gap-2 ${card.printJob.stickers.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                    {card.printJob.stickers.map((side) => (
-                      <a
-                        key={side}
-                        href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob?.jobId}/pdf?side=${side}&print=1`}
-                        target="_blank"
-                        rel="noopener"
-                        className="flex min-h-12 items-center justify-center rounded-lg bg-white px-3 text-base font-semibold text-black"
-                      >
-                        Print {side === "back" ? "QR" : side}
-                      </a>
+                  {/* ⛔ One print job, every sticker at its own length (named
+                      pages, combineStickerDocuments). iPad Safari's page sizing
+                      is unreliable, so one-at-a-time stays as the fallback. */}
+                  <a
+                    href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob.jobId}/pdf?side=all&print=1`}
+                    target="_blank"
+                    rel="noopener"
+                    className="flex min-h-12 w-full items-center justify-center rounded-lg bg-white px-3 text-base font-semibold text-black"
+                  >
+                    Print now: all {card.printJob.stickers.length} stickers
+                  </a>
+                  <p className="text-center text-sm text-gray-300">
+                    Or one at a time:{" "}
+                    {card.printJob.stickers.map((side, idx) => (
+                      <span key={side}>
+                        {idx > 0 ? " · " : ""}
+                        <a
+                          href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob?.jobId}/pdf?side=${side}&print=1`}
+                          target="_blank"
+                          rel="noopener"
+                          className="underline"
+                        >
+                          {side === "back" ? "QR" : side === "front" ? "Front" : "Schedule"}
+                        </a>
+                      </span>
                     ))}
-                  </div>
+                  </p>
                   <button
                     type="button"
                     disabled={card.printJob.queued}

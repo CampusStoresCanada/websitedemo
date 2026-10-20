@@ -33,12 +33,12 @@ export default function PrintStationClient({
   const skippedRef = useRef(new Set<string>());
 
   const printSide = useCallback(
-    async (jobId: string, side: "front" | "schedule" | "back") => {
+    async (jobId: string, side: "all" | "front" | "schedule" | "back") => {
       const url = `/api/admin/conference/${conferenceId}/badges/jobs/${jobId}/pdf?side=${side}`;
       const check = await fetch(url, { cache: "no-store" });
       if (!check.ok) {
         const body = (await check.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `The ${side} sticker could not be drawn.`);
+        throw new Error(body.error ?? `The ${side === "all" ? "" : `${side} `}stickers could not be drawn.`);
       }
       const frame = frameRef.current;
       if (!frame) throw new Error("The print frame is missing.");
@@ -75,10 +75,9 @@ export default function PrintStationClient({
     busyRef.current = true;
     setPrinting(next.personName || "someone");
     try {
-      // In the order they go on the card: front, schedule (spares), QR.
-      for (const side of next.stickers.length ? next.stickers : (["front", "back"] as const)) {
-        await printSide(next.jobId, side);
-      }
+      // ⛔ ONE print job: every sticker in order (front, schedule on a spare,
+      // QR), each at its own length — Chrome honours the named pages.
+      await printSide(next.jobId, "all");
       const done = await markLabelPrinted({ conferenceId, jobId: next.jobId });
       if (!done.success) throw new Error(done.error);
       setPrinted((prev) => [{ name: next.personName, at: new Date().toLocaleTimeString() }, ...prev].slice(0, 10));
@@ -111,7 +110,7 @@ export default function PrintStationClient({
           {paused ? "Paused" : printing ? `Printing ${printing}…` : queue.length ? `${queue.length} waiting` : "Waiting for stickers"}
         </p>
         <p className="mt-1 text-sm text-gray-600">
-          Any desk device can send stickers here with “Send to print queue”. They print in order: front, schedule (spare cards only), then the QR.
+          Any desk device can send stickers here with “Send to print queue”. Each one prints as a single job: front, schedule (spare cards only), then the QR, cut apart by the printer.
         </p>
         <button
           type="button"

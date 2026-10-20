@@ -191,3 +191,59 @@ export async function buildReprintLabelDocument(params: {
 
 /** So the print stock policy stays one normalizer. */
 export { normalizeBadgePrintStock };
+
+/**
+ * Every sticker of one reprint as ONE print job (Stephen, 2026-10-20).
+ *
+ * ⛔ Each sticker keeps its OWN length: a CSS named page per sticker
+ * (`page: pN` + `@page pN { size }`), so the QL's auto-cut separates them and
+ * no sticker is padded to another's height — sharing one page height wasted
+ * 27–46 mm of film per reprint, and a schedule runs to ~96 mm. Chrome honours
+ * named pages (the print station); iPad Safari's page sizing is unreliable, so
+ * the desk keeps one-sticker-at-a-time as the fallback.
+ *
+ * Pure: takes the finished sticker documents, so each is still rendered by its
+ * own renderer and nothing about a sticker's layout changes.
+ */
+export function combineStickerDocuments(
+  stickers: ReadonlyArray<{ html: string; widthMm: number; heightMm: number }>
+): string {
+  const pages = stickers.filter((s) => s.html && s.heightMm > 0);
+  if (pages.length === 0) return "";
+  const styles: string[] = [];
+  const bodies: string[] = [];
+  let rootVars = "";
+  pages.forEach((sticker, i) => {
+    const name = `p${i + 1}`;
+    const style = /<style>([\s\S]*?)<\/style>/.exec(sticker.html)?.[1] ?? "";
+    const body = /<body>([\s\S]*?)<\/body>/.exec(sticker.html)?.[1] ?? "";
+    // The page size moves to a named @page; html/body are set once below.
+    let css = style
+      .replace(/@page\s*\{[^}]*\}/g, "")
+      .replace(/html\s*,\s*body\s*\{[^}]*\}/g, "");
+    // Each sticker's root vars are the same template's fonts; keep the fullest.
+    const root = /:root\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    if (root.length > rootVars.length) rootVars = root;
+    css = css.replace(/:root\s*\{[^}]*\}/g, "");
+    // ⛔ `.label` carries each sticker's own width and height — rename it per
+    // page so the stickers' sizes cannot overwrite each other.
+    css = css.replace(/\.label\b/g, `.label-${name}`);
+    styles.push(
+      `@page ${name} { size: ${sticker.widthMm}mm ${sticker.heightMm}mm; margin: 0; }\n` +
+        `.page-${name} { page: ${name}; break-after: page; width: ${sticker.widthMm}mm; height: ${sticker.heightMm}mm; overflow: hidden; }\n` +
+        css
+    );
+    bodies.push(`<section class="page-${name}">${body.replace(/class="label"/g, `class="label-${name}"`)}</section>`);
+  });
+  const first = pages[0];
+  const typekit = /<link rel="stylesheet" href="([^"]+)"/.exec(first.html)?.[1];
+  return `<!doctype html><html><head><meta charset="utf-8">
+${typekit ? `<link rel="stylesheet" href="${typekit}" />` : ""}
+<style>
+  @page { size: ${first.widthMm}mm ${first.heightMm}mm; margin: 0; }
+  ${rootVars}
+  html,body { margin:0; padding:0; background:transparent; }
+  section:last-of-type { break-after: auto; }
+  ${styles.join("\n")}
+</style></head><body>${bodies.join("")}</body></html>`;
+}

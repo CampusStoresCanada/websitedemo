@@ -183,7 +183,11 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   device), DK-2113 frosted clear continuous 62 mm. Stickers go on a company
   blank or a spare card: front (name, title; company too on a spare) and back
   (the QR).
-- **Print now** (any device): the reprint card has "Print now: front / back" →
+- **One job per reprint** (`?side=all`, `combineStickerDocuments`): every
+  sticker in one document, each its own named page at its own length, so the
+  auto-cut separates them with no padding. The print station always uses it.
+- **Print now** (any device): the reprint card has "Print now: all stickers",
+  plus one-at-a-time links as the fallback →
   `…/badges/jobs/[jobId]/pdf?side=front|back&print=1`, the sticker at its own
   `@page` size, print dialog opens itself. iPad/iPhone: AirPrint → the QL.
 - **Send to print queue**: the job becomes `printer_bridge` / `sent_to_printer`
@@ -224,6 +228,7 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
 - [ ] Print now: front → the dialog opens itself → AirPrint finds the QL → prints 62 mm at full size, not scaled
 - [ ] Print now: back → the QR sticker scans at the desk
 - [ ] A spare reprint prints front, schedule and QR; the schedule sits in the empty schedule area, clear of the QR, and reads at its size
+- [ ] **"Print now: all stickers" on the iPad**: one job, each sticker its own length (CSS named pages). iPad Safari's page sizing is reported unreliable — if lengths come out wrong, use one-at-a-time, or send to the print station (Chrome honours named pages: verified 67/96/21 mm in Chrome)
 - [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
 
 ## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)
