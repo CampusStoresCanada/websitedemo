@@ -1,6 +1,7 @@
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import {
   DEFAULT_BADGE_TEMPLATE_CONFIG_V1,
+  badgeLookKey,
   normalizeBadgeTemplateConfig,
   type BadgePersonRecord,
 } from "@/lib/conference/badges/template";
@@ -24,8 +25,8 @@ import {
 import { arrangeBadges, normalizeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgePrintStock,
-  spareCountsByType,
-  spareCountsForJob,
+  loadSpareStacks,
+  type SpareStack,
 } from "@/lib/conference/badges/print-stock";
 
 /**
@@ -369,21 +370,21 @@ function toBadgePerson(
  * somebody's employer on it would be a guess. It maps the conference hotel for
  * the same reason — there is no home city to show.
  *
- * ⚠️ It DOES carry the registration type's schedule, which is why spares are
- * generated per type rather than as one anonymous pile: a Thursday Day Pass
- * spare and a Full Conference spare admit different people to different days,
- * and a desk handing out the wrong one has given somebody the wrong conference.
+ * ⛔ No schedule either (Stephen, 2026-10-20). The schedule area prints EMPTY
+ * and the desk prints the person's own schedule on a sticker, so one stack fits
+ * everybody whose badge looks the same — see spareStacks. Printing a type's
+ * schedule here is what made spares a forecast of which types would need one.
  */
 function spareBadgeRecord(params: {
-  type: BadgeRunType;
+  stack: SpareStack;
   index: number;
   venue: { latitude: number | null; longitude: number | null };
 }): HydratedBadgePerson {
-  const { type, index, venue } = params;
+  const { stack, index, venue } = params;
   return {
-    id: `spare:${type.entityId}:${index}`,
-    variantKey: type.entityId,
-    variantName: type.name,
+    id: `spare:${stack.key}:${index}`,
+    variantKey: stack.variantTypeId,
+    variantName: `${stack.label} spare`,
     displayName: null,
     firstName: null,
     lastName: null,
@@ -400,8 +401,8 @@ function spareBadgeRecord(params: {
     province: null,
     organizationType: null,
     roomNumber: null,
-    access: type.accessSummary,
-    agenda: type.agenda,
+    access: null,
+    agenda: [],
   };
 }
 
@@ -530,28 +531,7 @@ export async function buildBadgeJobDocument(params: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     templateConfig = normalizeBadgeTemplateConfig((configRow as any)?.field_mapping ?? null);
   } else {
-    let activeConfigRow: Record<string, unknown> | null = null;
-    const { data } = await db
-      .from("badge_template_configs")
-      .select("field_mapping")
-      .eq("conference_id", conferenceId)
-      .eq("status", "active")
-      .order("config_version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    activeConfigRow = (data as Record<string, unknown> | null) ?? null;
-    if (!activeConfigRow) {
-      const { data: latestConfigRow } = await db
-        .from("badge_template_configs")
-        .select("field_mapping")
-        .eq("conference_id", conferenceId)
-        .order("config_version", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      activeConfigRow = (latestConfigRow as Record<string, unknown> | null) ?? null;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    templateConfig = normalizeBadgeTemplateConfig((activeConfigRow as any)?.field_mapping ?? null);
+    templateConfig = await loadActiveBadgeTemplate(db, conferenceId);
   }
 
   // Which registration type each person's badge is for — from the run, the same
@@ -937,19 +917,19 @@ export async function buildBadgeJobDocument(params: {
         longitude:
           typeof venueRow?.location_longitude === "number" ? venueRow.location_longitude : null,
       };
-      // ⛔ Split across the types that actually sell seats, because a spare
-      // carries its type's schedule. Proportional to seats sold, so the stack
-      // the desk reaches for most is the one it has most of.
-      const counts = await spareCountsForJob(db, conferenceId, run, stock);
-      // ⛔ ONE rule for how spares divide across types — shared with the desk, so
-      // it is told to reach for a stack that actually exists.
-      const byType = spareCountsByType(run, counts.total);
+      // ⛔ One stack per badge LOOK, schedule area empty — the same loader the
+      // desk reads, so it is told to reach for a stack that actually exists.
+      const stacks = await loadSpareStacks({
+        db,
+        conferenceId,
+        run,
+        stock,
+        lookOf: (typeId) => badgeLookKey(templateConfig, typeId),
+      });
       const spares: HydratedBadgePerson[] = [];
-      for (const entry of byType) {
-        const type = run.types.find((t) => t.entityId === entry.entityId);
-        if (!type) continue;
-        for (let n = 0; n < entry.count; n += 1) {
-          spares.push(spareBadgeRecord({ type, index: n, venue }));
+      for (const stack of stacks) {
+        for (let n = 0; n < stack.count; n += 1) {
+          spares.push(spareBadgeRecord({ stack, index: n, venue }));
         }
       }
       ordered = [...ordered, ...spares];
@@ -985,4 +965,37 @@ export async function buildBadgeJobDocument(params: {
   });
 
   return { html, title: `Badge Job ${job.id}`, badgeCount: ordered.length };
+}
+
+/**
+ * The badge template a conference prints with now: the ACTIVE version, else the
+ * latest. ⛔ One rule for the print run, the desk's spare stacks and the reprint
+ * sticker — a sticker laid out against a different version than the card it
+ * goes on lands in the wrong place.
+ */
+export async function loadActiveBadgeTemplate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any,
+  conferenceId: string
+) {
+  const { data: active } = await db
+    .from("badge_template_configs")
+    .select("field_mapping")
+    .eq("conference_id", conferenceId)
+    .eq("status", "active")
+    .order("config_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let row = (active as Record<string, unknown> | null) ?? null;
+  if (!row) {
+    const { data: latest } = await db
+      .from("badge_template_configs")
+      .select("field_mapping")
+      .eq("conference_id", conferenceId)
+      .order("config_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    row = (latest as Record<string, unknown> | null) ?? null;
+  }
+  return normalizeBadgeTemplateConfig(row?.field_mapping ?? null);
 }

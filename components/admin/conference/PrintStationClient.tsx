@@ -33,7 +33,7 @@ export default function PrintStationClient({
   const skippedRef = useRef(new Set<string>());
 
   const printSide = useCallback(
-    async (jobId: string, side: "front" | "back") => {
+    async (jobId: string, side: "front" | "schedule" | "back") => {
       const url = `/api/admin/conference/${conferenceId}/badges/jobs/${jobId}/pdf?side=${side}`;
       const check = await fetch(url, { cache: "no-store" });
       if (!check.ok) {
@@ -75,8 +75,10 @@ export default function PrintStationClient({
     busyRef.current = true;
     setPrinting(next.personName || "someone");
     try {
-      await printSide(next.jobId, "front");
-      await printSide(next.jobId, "back");
+      // In the order they go on the card: front, schedule (spares), QR.
+      for (const side of next.stickers.length ? next.stickers : (["front", "back"] as const)) {
+        await printSide(next.jobId, side);
+      }
       const done = await markLabelPrinted({ conferenceId, jobId: next.jobId });
       if (!done.success) throw new Error(done.error);
       setPrinted((prev) => [{ name: next.personName, at: new Date().toLocaleTimeString() }, ...prev].slice(0, 10));
@@ -109,7 +111,7 @@ export default function PrintStationClient({
           {paused ? "Paused" : printing ? `Printing ${printing}…` : queue.length ? `${queue.length} waiting` : "Waiting for stickers"}
         </p>
         <p className="mt-1 text-sm text-gray-600">
-          Any desk device can send stickers here with “Send to print queue”. They print in order, front then back.
+          Any desk device can send stickers here with “Send to print queue”. They print in order: front, schedule (spare cards only), then the QR.
         </p>
         <button
           type="button"

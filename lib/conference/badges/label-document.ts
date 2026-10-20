@@ -13,7 +13,10 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { normalizeBadgeTemplateConfig, resolveBadgeVariant } from "@/lib/conference/badges/template";
+import { resolveBadgeVariant, type BadgePersonRecord } from "@/lib/conference/badges/template";
+import { renderScheduleLabel } from "@/lib/conference/badges/render-html";
+import { loadActiveBadgeTemplate } from "@/lib/conference/badges/document";
+import { badgeTypeForPerson, resolveBadgeRun } from "@/lib/conference/badges/run";
 import { renderReprintLabel } from "@/lib/conference/badges/label-html";
 import { reservedPlatesFromOverlay } from "@/lib/conference/badges/label-placement";
 import { normalizeBadgePrintStock } from "@/lib/conference/badges/print-stock";
@@ -82,9 +85,12 @@ export async function buildReprintLabelDocument(params: {
   db: any;
   conferenceId: string;
   jobId: string;
-  /** Which sticker. A reprint onto a blank needs both. */
-  side?: "front" | "back";
-}): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" }> {
+  /**
+   * Which sticker. A reprint onto a blank needs front and back (the QR); onto a
+   * spare also the schedule, because a spare prints its schedule area empty.
+   */
+  side?: "front" | "back" | "schedule";
+}): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" | "schedule" }> {
   const { db, conferenceId, jobId } = params;
 
   const { data: job } = await db
@@ -114,32 +120,44 @@ export async function buildReprintLabelDocument(params: {
     .maybeSingle();
   if (!person) throw new LabelDocumentError("That person is no longer on this conference.");
 
-  const { data: seat } = await db
-    .from("entity_balance_seats")
-    .select("entity_id")
-    .eq("holder_person_id", job.person_id)
-    .eq("conference_id", conferenceId)
-    .limit(1)
-    .maybeSingle();
+  // ⛔ Which badge this person's card is: the badge run's own answer
+  // (badgeTypeForPerson), not "any seat they hold" — an event seat would pick
+  // the wrong design, and the sticker would land off its card.
+  const run = await resolveBadgeRun(conferenceId);
+  const badgeTypeId = badgeTypeForPerson(run, job.person_id as string)?.entityId ?? null;
 
-  const { data: tplRow } = await db
-    .from("badge_template_configs")
-    .select("field_mapping")
-    .eq("conference_id", conferenceId)
-    .order("config_version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const template = normalizeBadgeTemplateConfig(tplRow?.field_mapping);
+  // The template the cards were printed with — the same rule as the print run.
+  const template = await loadActiveBadgeTemplate(db, conferenceId);
 
   // ⛔ Same resolver the badge printer uses. A label resolved any other way is a
   // second answer to "what does this person's badge look like".
-  const { front } = resolveBadgeVariant(template, { variantKey: seat?.entity_id ?? null });
+  const { front } = resolveBadgeVariant(template, { variantKey: badgeTypeId });
 
   const display = String(person.display_name ?? "").trim();
   const gap = display.lastIndexOf(" ");
   const stock = plan.stockSpec ?? DEFAULT_REPRINT_STOCK;
 
   const side = params.side ?? "front";
+
+  // ── The schedule sticker (spares only) ─────────────────────────────────────
+  if (side === "schedule") {
+    if (!plan.delta.includes("schedule")) {
+      throw new LabelDocumentError("This card already carries its schedule; there is no schedule sticker.");
+    }
+    // ⛔ The person's OWN access and schedule, as their badge would print them:
+    // the badge run's entitlement, not their type's (add-ons count).
+    const entitlement = run.entitlements.find((e) => e.personId === job.person_id);
+    if (!entitlement) throw new LabelDocumentError("Nothing on this person's registration to put on a schedule.");
+    const { back } = resolveBadgeVariant(template, { variantKey: badgeTypeId });
+    const out = renderScheduleLabel({
+      template: { ...template, back },
+      person: { access: entitlement.access, agenda: entitlement.agenda, qrPayload: "" } as unknown as BadgePersonRecord,
+      widthMm: stock.widthMm,
+    });
+    if (!out.html) throw new LabelDocumentError("There is nothing to print on this schedule.");
+    return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
+  }
+
   const qrDataUri = side === "back"
     ? await personQrDataUri(db, conferenceId, job.person_id as string)
     : null;

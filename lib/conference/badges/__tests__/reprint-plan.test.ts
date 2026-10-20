@@ -50,91 +50,53 @@ describe("the write the desk must not skip", () => {
 
 describe("which stock to reach for", () => {
   // A blank is printed for a company AND a registration type.
-  const orgs = [blankCardKey("org-crestar", "reg-full")];
-  const spares = [
-    { entityId: "reg-full", name: "Full Delegate", count: 6 },
-    { entityId: "reg-day", name: "Day Pass", count: 0 },
+  const blanks = [blankCardKey("org-crestar", "reg-full")];
+  // Spares are generic within a badge LOOK: the schedule prints at the desk.
+  const stacks = [
+    { label: "Delegate", typeIds: ["reg-full", "reg-day", "reg-board"], count: 35 },
+    { label: "Exhibitor", typeIds: ["reg-exhibitor"], count: 48 },
   ];
 
-  it("suggests the company blank when that company has an unnamed seat", () => {
-    expect(
-      suggestStock({
-        organizationId: "org-crestar",
-        unnamedSeatKeys: orgs,
-        registrationTypeId: "reg-full",
-        sparesByType: spares,
-      }).stock
-    ).toBe("company_blank");
-  });
-
-  it("falls back to a spare of THEIR type when the company has no blank", () => {
-    const r = suggestStock({
-      organizationId: "org-other",
-      unnamedSeatKeys: orgs,
-      registrationTypeId: "reg-full",
-      sparesByType: spares,
-    });
-    expect(r.stock).toBe("spare");
-    expect(r.reason).toContain("Full Delegate");
-  });
-
-  // ⛔ A spare carries its type's schedule. Day Pass printed none; Full
-  // Delegate spares exist but would print the wrong days on the back.
-  it("refuses another type's spare", () => {
-    expect(
-      suggestStock({
-        organizationId: "org-other",
-        unnamedSeatKeys: orgs,
-        registrationTypeId: "reg-day",
-        sparesByType: spares,
-      }).stock
-    ).toBe("none");
-  });
-
-  it("says none when the run carried no spares", () => {
-    expect(
-      suggestStock({
-        organizationId: "org-other",
-        unnamedSeatKeys: orgs,
-        registrationTypeId: "reg-full",
-        sparesByType: [],
-      }).stock
-    ).toBe("none");
+  it("suggests the company blank when that company has an unnamed seat of their type", () => {
+    const r = suggestStock({ organizationId: "org-crestar", unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: stacks });
+    expect(r.stock).toBe("company_blank");
   });
 
   // ⛔ The blank's back carries the schedule of the seat it was printed for.
   it("never suggests a company blank of another registration type", () => {
-    const r = suggestStock({
-      organizationId: "org-crestar",
-      unnamedSeatKeys: orgs,
-      registrationTypeId: "reg-day",
-      registrationTypeName: "Day Pass",
-      sparesByType: spares,
-    });
-    expect(r.stock).toBe("none");
-    expect(r.cards).toEqual({ companyBlank: false, spareCount: 0, typeName: "Day Pass" });
+    const r = suggestStock({ organizationId: "org-crestar", unnamedSeatKeys: blanks, registrationTypeId: "reg-day", registrationTypeName: "Day Pass", spareStacks: stacks });
+    expect(r.cards.companyBlank).toBe(false);
+    expect(r.stock).toBe("spare");
   });
 
-  it("lists the cards that exist for them, for the desk's choices", () => {
-    const r = suggestStock({
-      organizationId: "org-crestar",
-      unnamedSeatKeys: orgs,
-      registrationTypeId: "reg-full",
-      registrationTypeName: "Full Delegate",
-      sparesByType: spares,
-    });
-    expect(r.cards).toEqual({ companyBlank: true, spareCount: 6, typeName: "Full Delegate" });
+  // ⛔ Stephen, 2026-10-20: no more forecasting by type. A small type no longer
+  // rounds to zero — any delegate spare fits a Day Pass holder.
+  it("any spare of their badge's look fits, whatever their type", () => {
+    const r = suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-day", registrationTypeName: "Day Pass", spareStacks: stacks });
+    expect(r.stock).toBe("spare");
+    expect(r.cards).toEqual({ companyBlank: false, spareCount: 35, spareLabel: "Delegate", typeName: "Day Pass" });
+  });
+
+  it("an exhibitor gets an exhibitor spare, never a delegate one", () => {
+    const r = suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-exhibitor", spareStacks: stacks });
+    expect(r.cards).toMatchObject({ spareCount: 48, spareLabel: "Exhibitor" });
+  });
+
+  it("says none when the run carried no spares", () => {
+    expect(
+      suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: [] }).stock
+    ).toBe("none");
   });
 
   it("does not let one company's blank cover another company's person", () => {
     expect(
-      suggestStock({
-        organizationId: null,
-        unnamedSeatKeys: orgs,
-        registrationTypeId: "reg-full",
-        sparesByType: [],
-      }).stock
+      suggestStock({ organizationId: null, unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: [] }).stock
     ).toBe("none");
+  });
+
+  it("a spare reprint prints the schedule; a company blank already has it", () => {
+    expect(planReprint({ stock: "spare", personIsSeated: true }).delta).toContain("schedule");
+    expect(planReprint({ stock: "company_blank", personIsSeated: true }).delta).not.toContain("schedule");
   });
 });
 

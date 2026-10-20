@@ -52,7 +52,7 @@ type CheckInFacts = {
   reprintStock?: "company_blank" | "spare" | "none";
   reprintReason?: string;
   /** The cards that exist for them (reprint-plan cardsOnHand). */
-  reprintCards?: { companyBlank: boolean; spareCount: number; typeName: string | null };
+  reprintCards?: { companyBlank: boolean; spareCount: number; spareLabel: string | null; typeName: string | null };
 };
 
 type PendingScan = {
@@ -83,7 +83,7 @@ type ScanPulseCard = {
    * A reprint's job: the card offers "Print now" (the stickers on this device)
    * and "Send to print queue" (the print station beside the QL).
    */
-  printJob?: { jobId: string; labelPrintable: boolean; queued: boolean } | null;
+  printJob?: { jobId: string; labelPrintable: boolean; queued: boolean; stickers: Array<"front" | "schedule" | "back"> } | null;
 };
 
 const POLL_MS = 30_000;
@@ -1018,7 +1018,11 @@ export default function CheckInDeskClient({
     // test badges without changing the conference's print-stock settings.
     const options: Array<["company_blank" | "spare" | "none", string]> = [
       ...(cards?.companyBlank || testMode ? [["company_blank", `Company blank${type}`] as ["company_blank", string]] : []),
-      ...((cards && cards.spareCount > 0) || testMode ? [["spare", `Spare${type}`] as ["spare", string]] : []),
+      // A spare fits anyone whose badge looks the same; the desk prints their
+      // schedule on a sticker, so it is named by its stack, not a type.
+      ...((cards && cards.spareCount > 0) || testMode
+        ? [["spare", cards?.spareLabel ? `Spare (${cards.spareLabel.toLowerCase()})` : "Spare"] as ["spare", string]]
+        : []),
       ["none", "No card"],
     ];
     const suggested = facts[personId]?.reprintStock ?? "none";
@@ -1043,7 +1047,7 @@ export default function CheckInDeskClient({
         </div>
         {options.length === 1 ? (
           <p className="mt-1 text-xs text-amber-200">
-            No blank or spare{type} was printed for them, so there is no card for a sticker. The label printer
+            No blank or spare was printed that fits them, so there is no card for a sticker. The label printer
             can&apos;t print a full badge.
           </p>
         ) : chosen === "none" ? (
@@ -1076,6 +1080,7 @@ export default function CheckInDeskClient({
           error?: string;
           badgePrintJobId?: string;
           labelPrintable?: boolean;
+          stickers?: Array<"front" | "schedule" | "back">;
         };
         if (!response.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
@@ -1086,6 +1091,7 @@ export default function CheckInDeskClient({
             jobId: payload.badgePrintJobId,
             labelPrintable: true,
             queued: false,
+            stickers: payload.stickers?.length ? payload.stickers : ["front", "back"],
           });
         } else {
           pushScanCard(
@@ -1518,8 +1524,10 @@ export default function CheckInDeskClient({
               ) : null}
               {card.printJob?.labelPrintable ? (
                 <div className="mt-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["front", "back"] as const).map((side) => (
+                  {/* One print per sticker, each at its own length: sharing one
+                      page height wasted 27–46 mm of film per reprint. */}
+                  <div className={`grid gap-2 ${card.printJob.stickers.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+                    {card.printJob.stickers.map((side) => (
                       <a
                         key={side}
                         href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob?.jobId}/pdf?side=${side}&print=1`}
@@ -1527,7 +1535,7 @@ export default function CheckInDeskClient({
                         rel="noopener"
                         className="flex min-h-12 items-center justify-center rounded-lg bg-white px-3 text-base font-semibold text-black"
                       >
-                        Print now: {side}
+                        Print {side === "back" ? "QR" : side}
                       </a>
                     ))}
                   </div>

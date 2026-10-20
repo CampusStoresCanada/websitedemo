@@ -199,8 +199,18 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
   35 member = 83 spares (20% overtakes the 35 minimum at 175 named members).
   Change it on the conference's Badges page → print stock. Company blanks are
   separate: one per unnamed seat, automatically.
-  ⚠️ Spares split across types in proportion to seats sold, so a small type can
-  round to ZERO spares (Big Ideas Day — Operations Partner gets 0 today).
+- ⛔ **Spares are generic, one stack per badge LOOK** (Stephen, 2026-10-20: "the
+  guessing was fun, but it was never gonna work"). A spare prints with its
+  schedule area EMPTY; when the desk uses one it prints three stickers: front,
+  the person's schedule, and the QR. CSC 2027 has two looks → two stacks:
+  exhibitor (navy, 48) and delegate (red, 35). `spareStacks` groups types by
+  `badgeLookKey` (front design + colour theme), so a new look gets its own
+  stack. The print run and the desk read the same `loadSpareStacks`.
+- **Schedule sticker** (`renderScheduleLabel`): the badge back's own schedule
+  column, 62 mm wide. 📏 Thursday-only 17 mm; Full Conference 104 mm of text,
+  more than the ~95 mm between the schedule area and the QR, so a long schedule
+  scales down to fit (90% for Full Conference, measured in a browser: 91 mm of
+  text on a 96 mm sticker).
 - Reprint asks "Which card are you holding?" and offers only cards that exist
   for that person: a blank for their company AND type, a spare of their type,
   or No card. Test mode offers every card. Front and back print as two jobs
@@ -213,6 +223,7 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
 - [ ] Reprint someone whose company has an unnamed seat (company blank) → card shows "Print now: front/back"
 - [ ] Print now: front → the dialog opens itself → AirPrint finds the QL → prints 62 mm at full size, not scaled
 - [ ] Print now: back → the QR sticker scans at the desk
+- [ ] A spare reprint prints front, schedule and QR; the schedule sits in the empty schedule area, clear of the QR, and reads at its size
 - [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
 
 ## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)

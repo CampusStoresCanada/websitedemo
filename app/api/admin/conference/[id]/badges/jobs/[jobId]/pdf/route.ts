@@ -21,14 +21,14 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ id: string; jobId: string }> }
 ) {
-  // ── The QL sticker for an on-site reprint (?side=front|back) ──────────────
+  // ── The QL sticker for an on-site reprint (?side=front|back|schedule) ─────
   // ⛔ The label renderer was written and never served: this route imported it
   // and only ever returned the full colour badge, which a QL cannot print.
   // Desk staff may open their own conference's reprint labels (the builder
   // refuses any other job); the full badge below stays admin-only.
   const url = new URL(request.url);
   const side = url.searchParams.get("side");
-  if (side === "front" || side === "back") {
+  if (side === "front" || side === "back" || side === "schedule") {
     const { id: labelConferenceId, jobId: labelJobId } = await context.params;
     const deskAuth = await requireConferenceDeskAccess(labelConferenceId);
     if (!deskAuth.ok) return NextResponse.json({ error: deskAuth.error }, { status: 403 });

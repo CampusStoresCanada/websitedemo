@@ -261,33 +261,104 @@ export async function spareCountsForJob(
 }
 
 /**
- * How the spare stack divides across registration types.
+ * The spare stacks: one per BADGE LOOK, never per registration type.
  *
- * ⛔ THE SPARE MANIFEST IS NOT RECORDED ANYWHERE, so it has to be re-derived by
- * the same rule that produced it — proportional to seats sold, largest first,
- * remainder to the last. Two copies of that rule would mean the desk is told to
- * reach for a stack the printer never made.
+ * ⛔ Stephen, 2026-10-20: dealing spares out across registration types was a
+ * forecast of who would lose a badge, and small types rounded to zero ("the
+ * guessing was fun, but it was never gonna work"). A spare now prints with its
+ * schedule area EMPTY; the desk prints the person's schedule on a sticker. So
+ * a spare fits anybody whose badge looks the same — and the only thing that
+ * still differs is the LOOK: the front design and colour theme of a variant
+ * (resolveBadgeVariant). CSC 2027 has two: exhibitor (navy, with the company
+ * QR) and delegate (red).
  *
- * ⚠️ A spare carries the SCHEDULE of the type it was printed for. That is why
- * which types have spares is a question with consequences and not bookkeeping:
- * 📏 on this conference 98 spares divide 58/32/5/2/1, so a late Full Conference
- * signup has exactly one correct card in the box.
+ * The two pools keep their own bases (exhibitor % and member %) and each pool
+ * splits only across the looks its types use — one stack each, almost always.
+ * A conference with a third look gets a third stack without a code change.
  */
-export function spareCountsByType(
-  run: { types: Array<{ entityId: string; name: string; seats: unknown[] }> },
-  total: number
-): Array<{ entityId: string; name: string; count: number }> {
-  const sold = run.types
-    .map((type) => ({ entityId: type.entityId, name: type.name, sold: type.seats.length }))
-    .filter((e) => e.sold > 0);
-  const soldTotal = sold.reduce((sum, e) => sum + e.sold, 0) || 1;
-  let remaining = total;
-  return sold.map((e, i) => {
-    const count =
-      i === sold.length - 1
-        ? remaining
-        : Math.min(remaining, Math.round((total * e.sold) / soldTotal));
-    remaining -= count;
-    return { entityId: e.entityId, name: e.name, count };
+export type SpareStack = {
+  /** Stable for a given catalogue and template: `${pool}:${n}`. */
+  key: string;
+  /** For the operator: "Delegate", "Exhibitor". */
+  label: string;
+  /** Every registration type this stack's cards fit. */
+  typeIds: string[];
+  /** The type whose variant the card is printed as (same look as the rest). */
+  variantTypeId: string;
+  count: number;
+};
+
+export function spareStacks(params: {
+  types: ReadonlyArray<{ entityId: string; name: string; sold: number }>;
+  exhibitorTypeIds: ReadonlySet<string>;
+  /** Front design + colour theme of a type's badge — what a card LOOKS like. */
+  lookOf: (typeId: string) => string;
+  counts: { exhibitor: number; member: number };
+}): SpareStack[] {
+  const pools = [
+    { pool: "exhibitor", label: "Exhibitor", count: params.counts.exhibitor, types: params.types.filter((t) => params.exhibitorTypeIds.has(t.entityId)) },
+    { pool: "delegate", label: "Delegate", count: params.counts.member, types: params.types.filter((t) => !params.exhibitorTypeIds.has(t.entityId)) },
+  ];
+  const stacks: SpareStack[] = [];
+  for (const pool of pools) {
+    if (pool.count <= 0 || pool.types.length === 0) continue;
+    const byLook = new Map<string, Array<{ entityId: string; name: string; sold: number }>>();
+    for (const type of pool.types) {
+      const look = params.lookOf(type.entityId);
+      byLook.set(look, [...(byLook.get(look) ?? []), type]);
+    }
+    const looks = [...byLook.values()];
+    const soldOf = (group: typeof looks[number]) => group.reduce((sum, t) => sum + t.sold, 0);
+    const soldTotal = looks.reduce((sum, g) => sum + soldOf(g), 0);
+    let remaining = pool.count;
+    looks.forEach((group, i) => {
+      // Usually one look per pool, which takes the whole count. Several looks
+      // share it by seats sold (evenly if nothing has sold), remainder last.
+      const count =
+        i === looks.length - 1
+          ? remaining
+          : Math.min(remaining, Math.round(soldTotal > 0 ? (pool.count * soldOf(group)) / soldTotal : pool.count / looks.length));
+      remaining -= count;
+      const lead = [...group].sort((a, b) => b.sold - a.sold)[0];
+      stacks.push({
+        key: `${pool.pool}:${i}`,
+        label: looks.length > 1 ? `${pool.label} (${lead.name})` : pool.label,
+        typeIds: group.map((t) => t.entityId),
+        variantTypeId: lead.entityId,
+        count,
+      });
+    });
+  }
+  return stacks;
+}
+
+/**
+ * The spare stacks for a conference, from its policy and badge template.
+ * ⛔ ONE loader, two callers: the print run that makes the cards and the desk
+ * that reaches for them. Two copies would send the desk to a stack that was
+ * never printed.
+ */
+export async function loadSpareStacks(params: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any;
+  conferenceId: string;
+  run: BadgeRun;
+  stock: BadgePrintStock;
+  lookOf: (typeId: string) => string;
+}): Promise<SpareStack[]> {
+  if (!params.stock.enabled) return [];
+  const { seats, entitiesById } = await loadSeatHoldings(params.db, { conferenceId: params.conferenceId });
+  const exhibitorTypeIds = exhibitorRegistrationIds(entitiesById);
+  const counts = computeSpareCounts({
+    stock: params.stock,
+    possibleExhibitorSeats: totalPossibleExhibitorSeats(entitiesById),
+    soldExhibitorSeats: seats.filter((seat) => exhibitorTypeIds.has(seat.entityId)).length,
+    memberRoster: params.run.types.reduce((sum, type) => sum + type.seats.filter((seat) => seat.person).length, 0),
+  });
+  return spareStacks({
+    types: params.run.types.map((t) => ({ entityId: t.entityId, name: t.name, sold: t.seats.length })),
+    exhibitorTypeIds,
+    lookOf: params.lookOf,
+    counts,
   });
 }

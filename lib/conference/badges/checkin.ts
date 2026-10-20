@@ -21,10 +21,12 @@ import {
   type BadgeRun,
 } from "@/lib/conference/badges/run";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadActiveBadgeTemplate } from "@/lib/conference/badges/document";
+import { badgeLookKey } from "@/lib/conference/badges/template";
 import {
   getBadgePrintStock,
-  spareCountsByType,
-  spareCountsForJob,
+  loadSpareStacks,
+  type SpareStack,
 } from "@/lib/conference/badges/print-stock";
 import { blankCardKey, suggestStock, type BadgeStock, type CardsOnHand } from "@/lib/conference/badges/reprint-plan";
 import { admittedDates, entityWhen, resolveAccess, type AccessSummary } from "@/lib/conference/entity-commerce";
@@ -135,8 +137,8 @@ export function checkInFactsFromRun(
   run: BadgeRun,
   /** Day entity name → ISO date, for the "is today included" answer. */
   dateByDayName: Map<string, string> = new Map(),
-  /** Spares the run printed, per registration type. Empty when spares are off. */
-  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }> = []
+  /** The run's spare stacks, one per badge look. Empty when spares are off. */
+  spareStacks: ReadonlyArray<SpareStack> = []
 ): Record<string, CheckInFacts> {
   const entitlementByPerson = new Map(run.entitlements.map((e) => [e.personId, e]));
   const facts: Record<string, CheckInFacts> = {};
@@ -184,7 +186,7 @@ export function checkInFactsFromRun(
             unnamedSeatKeys,
             registrationTypeId: resolved.entityId,
             registrationTypeName: resolved.name,
-            sparesByType,
+            spareStacks,
           });
           return { reprintStock: stock, reprintReason: reason, reprintCards: cards };
         })(),
@@ -263,11 +265,13 @@ export async function loadCheckInFacts(
     getBadgePrintStock(conferenceId),
   ]);
 
-  // Spares by type, by the printer's own rule — the manifest is not stored.
+  // The spare stacks, by the printer's own rule — the manifest is not stored.
   // ⚠️ A failure here costs the spare suggestion, never the desk.
-  const sparesByType = printStock.enabled
-    ? await spareCountsForJob(db, conferenceId, run, printStock)
-        .then((counts) => spareCountsByType(run, counts.total))
+  const spareStackList = printStock.enabled
+    ? await loadActiveBadgeTemplate(db, conferenceId)
+        .then((template) =>
+          loadSpareStacks({ db, conferenceId, run, stock: printStock, lookOf: (typeId) => badgeLookKey(template, typeId) })
+        )
         .catch(() => [])
     : [];
 
@@ -276,7 +280,7 @@ export async function loadCheckInFacts(
   const door = await loadDoorEvents(db, conferenceId).catch(() => ({ doorEvents: [], timeZone: DEFAULT_DOOR_TIME_ZONE }));
 
   return {
-    facts: checkInFactsFromRun(run, dateByDayName, sparesByType),
+    facts: checkInFactsFromRun(run, dateByDayName, spareStackList),
     openSeats: openSeatsFromRun(run),
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
     ...door,

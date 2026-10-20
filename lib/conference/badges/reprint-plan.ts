@@ -131,7 +131,7 @@ export type BadgeStock = "company_blank" | "spare" | "none";
  * goes — the clear zone on a company blank is not in the same place as the empty
  * upper third of a spare.
  */
-export type DeltaField = "name" | "title" | "qr" | "organization" | "logo";
+export type DeltaField = "name" | "title" | "qr" | "organization" | "logo" | "schedule";
 
 const DELTA_BY_STOCK: Record<Exclude<BadgeStock, "none">, DeltaField[]> = {
   // The company half is already on the card, in colour, with the map.
@@ -139,7 +139,7 @@ const DELTA_BY_STOCK: Record<Exclude<BadgeStock, "none">, DeltaField[]> = {
   // ⚠️ A spare carries its registration type's schedule but no organisation, so
   // the label has to supply the company too. Monochrome logo on thermal stock is
   // the weakest part of this path — see `logoIsPrintable` at the call site.
-  spare: ["name", "title", "qr", "organization", "logo"],
+  spare: ["name", "title", "qr", "organization", "logo", "schedule"],
 };
 
 export type ReprintPlan = {
@@ -237,11 +237,16 @@ export const blankCardKey = (organizationId: string, registrationTypeId: string)
 export type CardsOnHand = {
   /** A blank was printed for their company AND their registration type. */
   companyBlank: boolean;
-  /** Spares the run printed for their registration type (0 = none). */
+  /** Spares that fit them: the stack for their badge's look (any type). */
   spareCount: number;
+  /** That stack, in the operator's words: "Delegate", "Exhibitor". */
+  spareLabel: string | null;
   /** Their registration type, in the catalogue's words, for the choices. */
   typeName: string | null;
 };
+
+/** The parts of a spare stack the desk needs (print-stock.ts SpareStack). */
+type SpareStackLike = { typeIds: string[]; count: number; label: string };
 
 export function cardsOnHand(params: {
   organizationId: string | null;
@@ -249,16 +254,20 @@ export function cardsOnHand(params: {
   registrationTypeName?: string | null;
   /** blankCardKey for every unnamed seat in the run. */
   unnamedSeatKeys: Iterable<string>;
-  /** Spares the run printed, per registration type. Empty when spares are off. */
-  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }>;
+  /** The run's spare stacks. Empty when spares are off. */
+  spareStacks: ReadonlyArray<SpareStackLike>;
 }): CardsOnHand {
   const { organizationId, registrationTypeId } = params;
   const keys = new Set(params.unnamedSeatKeys);
-  const spare = params.sparesByType.find((t) => t.entityId === registrationTypeId);
+  // ⛔ A spare is generic within its LOOK: the schedule is printed at the desk.
+  const stack = registrationTypeId
+    ? params.spareStacks.find((s) => s.typeIds.includes(registrationTypeId))
+    : undefined;
   return {
     companyBlank: Boolean(organizationId && registrationTypeId && keys.has(blankCardKey(organizationId, registrationTypeId))),
-    spareCount: spare?.count ?? 0,
-    typeName: params.registrationTypeName ?? spare?.name ?? null,
+    spareCount: stack?.count ?? 0,
+    spareLabel: stack?.label ?? null,
+    typeName: params.registrationTypeName ?? null,
   };
 }
 
@@ -269,8 +278,8 @@ export function suggestStock(params: {
   /** The registration type this person's badge is printed as. */
   registrationTypeId: string | null;
   registrationTypeName?: string | null;
-  /** Spares the run printed, per registration type. Empty when spares are off. */
-  sparesByType: ReadonlyArray<{ entityId: string; name: string; count: number }>;
+  /** The run's spare stacks. Empty when spares are off. */
+  spareStacks: ReadonlyArray<SpareStackLike>;
 }): { stock: BadgeStock; reason: string; cards: CardsOnHand } {
   const cards = cardsOnHand(params);
   const type = cards.typeName ?? "their registration type";
@@ -284,18 +293,20 @@ export function suggestStock(params: {
   if (cards.spareCount > 0) {
     return {
       stock: "spare",
-      reason: `No ${type} blank for this company; use one of the ${cards.spareCount} ${type} spares.`,
-      cards,
-    };
-  }
-  if (params.sparesByType.some((t) => t.count > 0)) {
-    return {
-      stock: "none",
-      reason:
-        `No ${type} blank, and no ${type} spare was printed. Another type's card ` +
-        "would carry the wrong schedule.",
+      reason: `No ${type} blank for this company; use a ${cards.spareLabel?.toLowerCase() ?? ""} spare (${cards.spareCount} printed). The schedule prints on a sticker.`,
       cards,
     };
   }
   return { stock: "none", reason: "No blank for this company and no spares in this run.", cards };
+}
+
+/**
+ * The stickers a label reprint prints, in the order to apply them: the front,
+ * then the schedule (a spare only — its schedule area is empty), then the QR.
+ * Empty when the reprint is a full badge, which the QL cannot print.
+ */
+export type StickerSide = "front" | "schedule" | "back";
+export function stickersFor(plan: Pick<ReprintPlan, "transport" | "delta"> | null | undefined): StickerSide[] {
+  if (!plan || plan.transport !== "ql_label") return [];
+  return plan.delta.includes("schedule") ? ["front", "schedule", "back"] : ["front", "back"];
 }

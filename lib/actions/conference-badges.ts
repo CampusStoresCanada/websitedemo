@@ -2,7 +2,7 @@
 
 import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { ReprintPlan } from "@/lib/conference/badges/reprint-plan";
+import { stickersFor, type ReprintPlan, type StickerSide } from "@/lib/conference/badges/reprint-plan";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
@@ -1130,7 +1130,7 @@ export async function sendReprintToQueue(params: {
   return { success: true, data: null };
 }
 
-export type QueuedLabel = { jobId: string; personName: string; queuedAt: string };
+export type QueuedLabel = { jobId: string; personName: string; queuedAt: string; stickers: StickerSide[] };
 
 /** What the print station has to print, oldest first. */
 export async function listQueuedLabels(conferenceId: string): Promise<QueueResult<QueuedLabel[]>> {
@@ -1139,7 +1139,7 @@ export async function listQueuedLabels(conferenceId: string): Promise<QueueResul
   const db = createAdminClient();
   const { data: jobs, error } = await db
     .from("badge_print_jobs")
-    .select("id, person_id, updated_at")
+    .select("id, person_id, updated_at, metadata")
     .eq("conference_id", conferenceId)
     .eq("pipeline_type", "onsite_reprint")
     .eq("status", "sent_to_printer")
@@ -1158,6 +1158,7 @@ export async function listQueuedLabels(conferenceId: string): Promise<QueueResul
       jobId: j.id as string,
       personName: nameById.get(j.person_id as string) ?? "",
       queuedAt: j.updated_at as string,
+      stickers: stickersFor((j.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan),
     })),
   };
 }

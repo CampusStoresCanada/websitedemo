@@ -1010,3 +1010,13 @@ export function resolveBadgeVariant(
     resolvedKey: key,
   };
 }
+
+/**
+ * What a registration type's badge LOOKS like — front design and colour theme —
+ * as a comparable key. Two types with the same key print identical cards, so
+ * one spare stack fits both (print-stock.ts spareStacks).
+ */
+export function badgeLookKey(template: BadgeTemplateConfigV1, typeId: string | null): string {
+  const { front, theme } = resolveBadgeVariant(template, { variantKey: typeId });
+  return JSON.stringify({ front, theme });
+}
