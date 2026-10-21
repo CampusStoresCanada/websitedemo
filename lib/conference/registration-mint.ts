@@ -3,6 +3,7 @@ import { findExistingUserByEmail } from "@/lib/actions/conference-entity-commerc
 import { createPersonOnAddress, peopleOnAddress } from "@/lib/identity/lifecycle";
 import { deriveRegistrationTier } from "./registration-tier";
 import { triggerConferenceRegistrationConfirmation } from "../comms/conference-triggers";
+import { seatIncludedEvents } from "./included-seats";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -138,6 +139,9 @@ async function mintOneRegistrationAttendee(
     console.error(
       `mintRegistrationAttendeesFromOrder: failed to allocate seat for order item ${itemId}: ${seatUpdateError.message}`
     );
+  } else {
+    // Whoever holds a registration holds what it includes (included-seats.ts).
+    await seatIncludedEvents(db, seatId, personId);
   }
 
   if (attendee.email) {
@@ -229,8 +233,9 @@ export async function mintRegistrationAttendeesFromOrder(
      * supplied for gets no badge, and the org's roster reads as one spare
      * registration plus a reception seat held by someone unregistered.
      *
-     * The included event seats are deliberately left open: they belong to the
-     * org to allocate, exactly like a booth's seats do.
+     * The included event seats follow the registration seat (Stephen,
+     * 2026-10-21): mintOneRegistrationAttendee seats them via
+     * seatIncludedEvents. This query still picks the REGISTRATION seat only.
      *
      * ⚠️ Only reachable when a name is supplied AT PURCHASE TIME. The ordinary
      * path — the org assigning people on their own page afterwards — names a

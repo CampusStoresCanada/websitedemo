@@ -19,6 +19,7 @@ import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
 import { findUserByEmail } from "../supabase/user-lookup";
 import { resolveChosenPerson } from "../conference/registration-mint";
+import { freeIncludedEvents, seatIncludedEvents } from "../conference/included-seats";
 
 /**
  * v3 fulfill — the read/allocate side. The buy-side (cart → checkout → mint)
@@ -235,6 +236,9 @@ export async function allocateSeat(
     .eq("id", personId);
   if (personUpdateError) return { success: false, error: personUpdateError.message };
 
+  // Whoever holds a registration holds what it includes (included-seats.ts).
+  if (entity.kind === "registration") await seatIncludedEvents(db, seatId, personId);
+
   return { success: true, data: { warning } };
 }
 
@@ -246,7 +250,7 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   const db = createAdminClient();
   const { data: seat, error: seatErr } = await db
     .from("entity_balance_seats")
-    .select("organization_id, conference_id, holder_person_id")
+    .select("organization_id, conference_id, holder_person_id, conference_entities(kind)")
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
@@ -258,6 +262,9 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   if (error) return { success: false, error: error.message };
 
   if (seat.holder_person_id) {
+    // Their registration's included events go with it (included-seats.ts).
+    const kind = (seat.conference_entities as { kind?: string } | null)?.kind;
+    if (kind === "registration") await freeIncludedEvents(db, seatId, seat.holder_person_id);
     await releaseRosterEntry(db, seat.holder_person_id, seat.organization_id, auth.ctx.userId ?? null);
   }
 
