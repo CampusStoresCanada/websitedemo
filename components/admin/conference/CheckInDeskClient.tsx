@@ -1521,6 +1521,64 @@ export default function CheckInDeskClient({
     void startCameraScanner();
   }, [startCameraScanner]);
 
+  // ⛔ Keep the camera alive (Stephen, 2026-10-21: coming back from an unpaid
+  // sale froze it on iPad Safari). iOS pauses or mutes a camera stream around
+  // a page coming back from Stripe, a PIN pad, the keyboard, the app being
+  // backgrounded, and says nothing. Rather than guess which, the desk WATCHES
+  // the picture: a stream that ended or went mute, or video that stopped
+  // moving for ~6s while the desk is on screen, is restarted.
+  const cameraStateRef = useRef(cameraState);
+  useEffect(() => {
+    cameraStateRef.current = cameraState;
+  }, [cameraState]);
+  const startCameraRef = useRef(startCameraScanner);
+  useEffect(() => {
+    startCameraRef.current = startCameraScanner;
+  }, [startCameraScanner]);
+  useEffect(() => {
+    let lastTime = -1;
+    let stalledTicks = 0;
+    const restart = () => {
+      stalledTicks = 0;
+      lastTime = -1;
+      void startCameraRef.current();
+    };
+    const watchdog = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || cameraStateRef.current !== "active") {
+        stalledTicks = 0;
+        return;
+      }
+      const video = videoRef.current;
+      const track = (video?.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
+      if (!video || !track || track.readyState === "ended") return restart();
+      // A paused element with a live track only needs to play again.
+      if (video.paused) void video.play().catch(() => undefined);
+      if (track.muted || video.currentTime === lastTime) {
+        stalledTicks += 1;
+        if (stalledTicks >= 3) restart();
+      } else {
+        stalledTicks = 0;
+      }
+      lastTime = video.currentTime;
+    }, 2000);
+    // Safari restoring the page from its back/forward cache runs no effects.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) restart();
+    };
+    const onVisible = () => {
+      // Never after "denied" or "unsupported": that would re-ask, or fail, forever.
+      const state = cameraStateRef.current;
+      if (document.visibilityState === "visible" && (state === "idle" || state === "error")) restart();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(watchdog);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   useEffect(() => {
     document.body.classList.add("check-in-kiosk");
     return () => {
@@ -1550,6 +1608,9 @@ export default function CheckInDeskClient({
             endHandOver(conferenceId);
             setHandOverOrderId(null);
             void settleHandOver(orderId);
+            // The device was in somebody else's hands and on Stripe: a fresh
+            // camera, not whatever iOS left of the old one.
+            void startCameraScanner();
           }}
         />
       ) : null}
