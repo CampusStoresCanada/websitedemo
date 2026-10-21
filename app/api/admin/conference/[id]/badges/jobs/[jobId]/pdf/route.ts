@@ -59,11 +59,23 @@ export async function GET(
       // `print=1`: "Print now" on the device in hand. Open the print dialog as
       // soon as the sticker has drawn (AirPrint on an iPad or iPhone, the
       // Brother driver on a laptop).
-      const autoPrint =
-        url.searchParams.get("print") === "1"
-          ? `<script>addEventListener("load",function(){setTimeout(function(){print()},400)})</script>`
-          : "";
-      const body = html.includes("</body>") ? html.replace("</body>", `${autoPrint}</body>`) : html + autoPrint;
+      // `print=1`: a PERSON tapped "Print now". ⛔ Safari (above all on an iPad)
+      // ignores a print() that no tap started, so the auto-print alone can do
+      // nothing at all. A big Print button — a tap — always works; the
+      // auto-print stays for browsers that allow it. The bar never prints.
+      const forPerson = url.searchParams.get("print") === "1";
+      const printBar = forPerson
+        ? `<style>@media print{.no-print{display:none!important}}</style>` +
+          `<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:12px;align-items:center;` +
+          `padding:12px;background:#111;color:#fff;font:16px -apple-system,Helvetica,Arial,sans-serif;">` +
+          `<button onclick="print()" style="font-size:18px;font-weight:600;padding:12px 28px;border-radius:8px;border:0;background:#fff;color:#000;">Print stickers</button>` +
+          `<span>Choose the Brother QL printer, 62 mm roll, at 100%.</span></div>`
+        : "";
+      const autoPrint = forPerson
+        ? `<script>addEventListener("load",function(){setTimeout(function(){try{print()}catch(e){}},400)})</script>`
+        : "";
+      const withBar = html.includes("<body>") ? html.replace("<body>", `<body>${printBar}`) : printBar + html;
+      const body = withBar.includes("</body>") ? withBar.replace("</body>", `${autoPrint}</body>`) : withBar + autoPrint;
       return new NextResponse(body, {
         status: 200,
         headers: {
@@ -73,10 +85,20 @@ export async function GET(
         },
       });
     } catch (error) {
-      if (error instanceof LabelDocumentError) {
-        return NextResponse.json({ error: error.message }, { status: 422 });
+      // ⛔ Say WHY, in words. A bare error page after "Print now" is
+      // indistinguishable from "nothing happened". The print station reads the
+      // JSON; a person who tapped Print now gets a page.
+      const message = error instanceof Error ? error.message : "The sticker could not be drawn.";
+      const status = error instanceof LabelDocumentError ? 422 : 500;
+      if (url.searchParams.get("print") === "1") {
+        const safe = message.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
+        return new NextResponse(
+          `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>` +
+            `<body style="font:18px -apple-system,Helvetica,Arial,sans-serif;padding:24px;"><h1 style="font-size:22px;">This sticker can't print</h1><p>${safe}</p></body></html>`,
+          { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }
+        );
       }
-      throw error;
+      return NextResponse.json({ error: message }, { status });
     }
   }
 
