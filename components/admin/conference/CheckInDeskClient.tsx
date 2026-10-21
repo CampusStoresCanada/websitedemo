@@ -1041,9 +1041,30 @@ export default function CheckInDeskClient({
         setWalkUpContactId(null);
         setNameLookup("");
         setLookupOpen(false);
-        // An unknown person on a card makes the desk refetch roster, facts and
-        // open seats — see pushScanCard.
-        pushScanCard("seat_named", added.data.id, recordProblem);
+        // ⛔ Naming them at the desk PRINTS their badge (Stephen, 2026-10-21):
+        // no second tap. The card is the desk's own suggestion for them (a
+        // company blank, else a spare), read fresh because they are new here.
+        let stock: "company_blank" | "spare" | "none" | undefined;
+        try {
+          const factsResponse = await fetch(`/api/admin/conference/${conferenceId}/check-in/facts`, {
+            cache: "no-store",
+          });
+          if (factsResponse.ok) {
+            const fresh = (await factsResponse.json()) as { facts?: Record<string, CheckInFacts> };
+            stock = fresh.facts?.[added.data.id]?.reprintStock;
+          }
+        } catch {
+          // No suggestion: the print path plans it as a full badge and says so.
+        }
+        if (recordProblem) pushScanCard("seat_named", added.data.id, recordProblem);
+        const printed = await reprintBadgeRef.current(
+          added.data.id,
+          "ops_override",
+          "First badge, named at the desk",
+          stock
+        );
+        // If the print did not go, the named card stays with its Print badge.
+        if (!printed && !recordProblem) pushScanCard("seat_named", added.data.id, null);
       } catch {
         setNamingError("Could not name them to that seat. Try again.");
       } finally {
@@ -1120,7 +1141,14 @@ export default function CheckInDeskClient({
   const reprintBadge = useCallback(
     // ops_override is the desk's FIRST print for someone it just sold to — not
     // one of the operator's reprint reasons, so it carries a note saying so.
-    async (personId: string, reason: BadgeReprintReason, note?: string): Promise<boolean> => {
+    async (
+      personId: string,
+      reason: BadgeReprintReason,
+      note?: string,
+      // A caller that already knows the card (Name to seat), before the desk's
+      // own facts for a brand-new person have loaded.
+      knownStock?: "company_blank" | "spare" | "none"
+    ): Promise<boolean> => {
       setReprintBusy(personId);
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
@@ -1133,7 +1161,7 @@ export default function CheckInDeskClient({
             reprintReason: reason,
             ...(note ? { reprintNote: note } : {}),
             // What the operator says they are holding, else the desk's guess.
-            stockInHand: cardInHandRef.current[personId] ?? facts[personId]?.reprintStock,
+            stockInHand: cardInHandRef.current[personId] ?? knownStock ?? facts[personId]?.reprintStock,
           }),
         });
         const payload = (await response.json()) as {
@@ -1179,6 +1207,11 @@ export default function CheckInDeskClient({
     },
     [conferenceId, facts, loadRows, pushScanCard]
   );
+  // Name to seat is declared above this, so it reaches the print through a ref.
+  const reprintBadgeRef = useRef(reprintBadge);
+  useEffect(() => {
+    reprintBadgeRef.current = reprintBadge;
+  }, [reprintBadge]);
 
   /**
    * The reprint preview: what will print, editable in place (Stephen,
