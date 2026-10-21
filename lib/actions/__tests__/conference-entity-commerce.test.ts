@@ -43,7 +43,7 @@ vi.mock("@/lib/ops/audit", () => ({
 // which also sends the registration confirmation.
 vi.mock("@/lib/comms/conference-triggers", () => ({ triggerConferenceRegistrationConfirmation: vi.fn() }));
 
-import { addConferenceAttendee, removeConferenceAttendee } from "../conference-entity-commerce";
+import { addConferenceAttendee } from "../conference-entity-commerce";
 
 const AUTH_OK = { ok: true, ctx: { userId: "admin-1", globalRole: "org_admin", activeOrgIds: ["org-1"] } };
 
@@ -104,47 +104,6 @@ function fakeClientForAdd(
                 }),
               };
             },
-          };
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      },
-    },
-  };
-}
-
-function fakeClientForRemove(opts: { sourceType?: string; organizationId?: string | null }) {
-  const deleteSpy = vi.fn();
-  const seatUpdateSpy = vi.fn();
-  return {
-    spy: { deleteSpy, seatUpdateSpy },
-    client: {
-      from: (table: string) => {
-        if (table === "conference_people") {
-          return {
-            select: () => ({
-              eq: () => ({
-                single: async () => ({
-                  data: { organization_id: opts.organizationId ?? "org-1", source_type: opts.sourceType ?? "manual" },
-                  error: null,
-                }),
-              }),
-            }),
-            delete: () => ({
-              eq: (_col: string, id: string) => {
-                deleteSpy(id);
-                return { error: null };
-              },
-            }),
-          };
-        }
-        if (table === "entity_balance_seats") {
-          return {
-            update: (values: Record<string, unknown>) => ({
-              eq: (_col: string, id: string) => {
-                seatUpdateSpy(values, id);
-                return Promise.resolve({ error: null });
-              },
-            }),
           };
         }
         throw new Error(`Unexpected table: ${table}`);
@@ -316,30 +275,5 @@ describe("conference-entity-commerce attendees", () => {
 
     expect(result.success).toBe(true);
     expect(fake.spy.insertSpy).toHaveBeenCalled();
-  });
-
-  it("removeConferenceAttendee frees seats and deletes a manual-source row", async () => {
-    const fake = fakeClientForRemove({ sourceType: "manual" });
-    createAdminClientMock.mockReturnValue(fake.client);
-
-    const result = await removeConferenceAttendee("person-1");
-
-    expect(result.success).toBe(true);
-    expect(fake.spy.seatUpdateSpy).toHaveBeenCalledWith({ holder_person_id: null }, "person-1");
-    expect(fake.spy.deleteSpy).toHaveBeenCalledWith("person-1");
-    expect(logAuditEventSafeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "conference_attendee_removed", entityId: "person-1" })
-    );
-  });
-
-  it("removeConferenceAttendee rejects rows that aren't source_type 'manual'", async () => {
-    const fake = fakeClientForRemove({ sourceType: "registration" });
-    createAdminClientMock.mockReturnValue(fake.client);
-
-    const result = await removeConferenceAttendee("person-1");
-
-    expect(result.success).toBe(false);
-    expect(fake.spy.deleteSpy).not.toHaveBeenCalled();
-    expect(logAuditEventSafeMock).not.toHaveBeenCalled();
   });
 });

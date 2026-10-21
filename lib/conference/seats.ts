@@ -20,13 +20,19 @@ import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /** The column list every seat read selects — kept beside the row type, as ENTITY_SELECT is. */
 export const SEAT_SELECT =
-  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id, created_at";
+  "id, conference_id, organization_id, entity_id, balance_id, seat_index, holder_person_id, created_at";
 
 export type SeatHolding = {
   seatId: string;
   conferenceId: string;
   organizationId: string;
   seatIndex: number | null;
+  /**
+   * The balance (one purchase line) the seat came from. Widened in for a
+   * registration's included events, which are the seats minted by the SAME
+   * purchase (included-seats.ts).
+   */
+  balanceId: string | null;
   /** The catalogue thing this seat is for. */
   entityId: string;
   entityKind: string;
@@ -80,6 +86,8 @@ export type SeatQuery = {
    * seated.
    */
   balanceIds?: string[];
+  /** Only these seats. */
+  seatIds?: string[];
 };
 
 // The shape of the client this needs. Kept structural rather than importing a
@@ -115,6 +123,7 @@ export async function loadSeatHoldings(
   if (query.assigned === true) seatQuery = seatQuery.not("holder_person_id", "is", null);
   if (query.assigned === false) seatQuery = seatQuery.is("holder_person_id", null);
   if (query.balanceIds) seatQuery = seatQuery.in("balance_id", query.balanceIds);
+  if (query.seatIds) seatQuery = seatQuery.in("id", query.seatIds);
 
   const [seatRes, entityRes, refRes] = await Promise.all([
     seatQuery,
@@ -155,6 +164,7 @@ export async function loadSeatHoldings(
       conferenceId: query.conferenceId,
       organizationId: typeof row.organization_id === "string" ? row.organization_id : "",
       seatIndex: typeof row.seat_index === "number" ? row.seat_index : null,
+      balanceId: typeof row.balance_id === "string" ? row.balance_id : null,
       entityId,
       entityKind: entity.kind,
       entityName: entity.name,
@@ -210,6 +220,31 @@ export async function loadSeatHoldings(
   }
 
   return { seats: out, entitiesById: byId };
+}
+
+/**
+ * Name somebody to a seat, or empty it, with the guard that keeps two writers
+ * from bumping each other: `onlyIfEmpty` fills a seat nobody holds,
+ * `onlyIfHeldBy` empties a seat only if that person still holds it. Returns
+ * whether the seat changed.
+ *
+ * Kept beside the reader so a seat is touched in one file. allocateSeat and the
+ * purchase mint predate this and still write their own (grandfathered in the
+ * eslint list); new code comes here.
+ */
+export async function setSeatHolder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin client
+  db: any,
+  seatId: string,
+  personId: string | null,
+  guard: { onlyIfEmpty?: boolean; onlyIfHeldBy?: string } = {}
+): Promise<{ changed: boolean; error: string | null }> {
+  let write = db.from("entity_balance_seats").update({ holder_person_id: personId }).eq("id", seatId);
+  if (guard.onlyIfEmpty) write = write.is("holder_person_id", null);
+  if (guard.onlyIfHeldBy) write = write.eq("holder_person_id", guard.onlyIfHeldBy);
+  const { data, error } = await write.select("id");
+  if (error) return { changed: false, error: error.message };
+  return { changed: Array.isArray(data) && data.length > 0, error: null };
 }
 
 /** The catalogue graph, for callers that also need to walk it (access, obligations). */

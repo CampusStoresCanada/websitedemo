@@ -141,7 +141,7 @@ async function mintOneRegistrationAttendee(
     );
   } else {
     // Whoever holds a registration holds what it includes (included-seats.ts).
-    await seatIncludedEvents(db, seatId, personId);
+    await seatIncludedEvents(db, conferenceId, seatId, personId);
   }
 
   if (attendee.email) {

@@ -1,4 +1,5 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { loadSeatHoldings, setSeatHolder, type SeatHolding } from "@/lib/conference/seats";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -19,90 +20,75 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * (somebody else's registration) are never taken.
  */
 
-async function siblingEventSeats(db: AdminClient, registrationSeatId: string) {
-  const { data: seat } = await db
-    .from("entity_balance_seats")
-    .select("id, balance_id, entity_id, conference_id")
-    .eq("id", registrationSeatId)
-    .maybeSingle();
-  if (!seat) return null;
+async function siblingEventSeats(
+  db: AdminClient,
+  conferenceId: string,
+  registrationSeatId: string
+): Promise<SeatHolding[]> {
+  const { seats: found } = await loadSeatHoldings(db, { conferenceId, seatIds: [registrationSeatId] });
+  const registration = found[0];
+  if (!registration?.balanceId) return [];
   const { data: balance } = await db
     .from("entity_balances")
     .select("purchase_id")
-    .eq("id", seat.balance_id as string)
+    .eq("id", registration.balanceId)
     .maybeSingle();
-  if (!balance?.purchase_id) return null;
+  if (!balance?.purchase_id) return [];
   const { data: balances } = await db
     .from("entity_balances")
     .select("id")
     .eq("purchase_id", balance.purchase_id as string);
   const balanceIds = (balances ?? []).map((b) => b.id as string);
-  if (balanceIds.length === 0) return null;
-  const { data: seats } = await db
-    .from("entity_balance_seats")
-    .select("id, entity_id, seat_index, holder_person_id, conference_entities!inner(kind)")
-    .in("balance_id", balanceIds)
-    .neq("entity_id", seat.entity_id as string)
-    .eq("conference_entities.kind", "event")
-    .order("seat_index")
-    .order("id");
-  return {
-    conferenceId: seat.conference_id as string,
-    seats: (seats ?? []) as unknown as Array<{
-      id: string;
-      entity_id: string;
-      seat_index: number;
-      holder_person_id: string | null;
-    }>,
-  };
+  if (balanceIds.length === 0) return [];
+  const { seats } = await loadSeatHoldings(db, { conferenceId, balanceIds, entityKinds: ["event"] });
+  return seats
+    .filter((seat) => seat.entityId !== registration.entityId)
+    .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0) || a.seatId.localeCompare(b.seatId));
 }
 
 /** Seat the registration's holder in one open seat of each event it includes. */
 export async function seatIncludedEvents(
   db: AdminClient,
+  conferenceId: string,
   registrationSeatId: string,
   personId: string
 ): Promise<void> {
-  const found = await siblingEventSeats(db, registrationSeatId);
-  if (!found || found.seats.length === 0) return;
-
-  // Somebody already holding an event (from another seat) is not given a second.
-  const { data: held } = await db
-    .from("entity_balance_seats")
-    .select("entity_id")
-    .eq("conference_id", found.conferenceId)
-    .eq("holder_person_id", personId);
-  const alreadyHeld = new Set((held ?? []).map((row) => row.entity_id as string));
-
-  const byEntity = new Map<string, string>();
-  for (const seat of found.seats) {
-    if (seat.holder_person_id || alreadyHeld.has(seat.entity_id) || byEntity.has(seat.entity_id)) continue;
-    byEntity.set(seat.entity_id, seat.id);
-  }
-  for (const seatId of byEntity.values()) {
-    const { error } = await db
-      .from("entity_balance_seats")
-      .update({ holder_person_id: personId })
-      .eq("id", seatId)
-      .is("holder_person_id", null);
-    if (error) console.warn("[included-seats] could not seat an included event:", error.message);
+  try {
+    const siblings = await siblingEventSeats(db, conferenceId, registrationSeatId);
+    if (siblings.length === 0) return;
+    // Somebody already holding an event (from another seat) is not given a second.
+    const { seats: held } = await loadSeatHoldings(db, { conferenceId, holderPersonId: personId });
+    const alreadyHeld = new Set(held.map((seat) => seat.entityId));
+    const byEntity = new Map<string, string>();
+    for (const seat of siblings) {
+      if (seat.holderPersonId || alreadyHeld.has(seat.entityId) || byEntity.has(seat.entityId)) continue;
+      byEntity.set(seat.entityId, seat.seatId);
+    }
+    for (const seatId of byEntity.values()) {
+      const result = await setSeatHolder(db, seatId, personId, { onlyIfEmpty: true });
+      if (result.error) console.warn("[included-seats] could not seat an included event:", result.error);
+    }
+  } catch (error) {
+    // The registration itself is seated; a missed event is not worth failing it.
+    console.warn("[included-seats] could not seat included events:", error);
   }
 }
 
 /** Free the included event seats the registration's holder had from that purchase. */
 export async function freeIncludedEvents(
   db: AdminClient,
+  conferenceId: string,
   registrationSeatId: string,
   personId: string
 ): Promise<void> {
-  const found = await siblingEventSeats(db, registrationSeatId);
-  if (!found) return;
-  const mine = found.seats.filter((seat) => seat.holder_person_id === personId).map((seat) => seat.id);
-  if (mine.length === 0) return;
-  const { error } = await db
-    .from("entity_balance_seats")
-    .update({ holder_person_id: null })
-    .in("id", mine)
-    .eq("holder_person_id", personId);
-  if (error) console.warn("[included-seats] could not free included events:", error.message);
+  try {
+    const siblings = await siblingEventSeats(db, conferenceId, registrationSeatId);
+    for (const seat of siblings) {
+      if (seat.holderPersonId !== personId) continue;
+      const result = await setSeatHolder(db, seat.seatId, null, { onlyIfHeldBy: personId });
+      if (result.error) console.warn("[included-seats] could not free an included event:", result.error);
+    }
+  } catch (error) {
+    console.warn("[included-seats] could not free included events:", error);
+  }
 }

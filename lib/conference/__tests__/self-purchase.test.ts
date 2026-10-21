@@ -27,6 +27,7 @@ function seat(entityId: string, holderPersonId: string | null): SeatHolding {
     conferenceId: "conf-1",
     organizationId: "org-1",
     seatIndex: null,
+    balanceId: null,
     entityId,
     entityKind: "event",
     entityName: entityId,
