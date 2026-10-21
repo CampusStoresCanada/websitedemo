@@ -260,6 +260,7 @@ describe("openSeatsFromRun", () => {
         organizationName: "Sundry Goods",
         registrationTypeId: "type-full",
         registrationTypeName: "Full Conference",
+        entityKind: "registration",
       },
       {
         seatId: "s3",
@@ -267,6 +268,7 @@ describe("openSeatsFromRun", () => {
         organizationName: "Other Co",
         registrationTypeId: "type-day",
         registrationTypeName: "Day Pass",
+        entityKind: "registration",
       },
     ]);
   });

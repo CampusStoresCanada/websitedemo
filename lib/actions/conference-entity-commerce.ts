@@ -169,7 +169,7 @@ export async function allocateSeat(
 
   const { data: person, error: personErr } = await db
     .from("conference_people")
-    .select("conference_id, organization_id")
+    .select("conference_id, organization_id, person_kind")
     .eq("id", personId)
     .single();
   if (personErr || !person) return { success: false, error: personErr?.message ?? "Person not found." };
@@ -231,11 +231,18 @@ export async function allocateSeat(
     return { success: false, error: "This seat was just assigned to someone else — refresh and try again." };
   }
 
-  const { error: personUpdateError } = await db
-    .from("conference_people")
-    .update({ person_kind: tier.personKind, registration_tier: tier.tierLabel })
-    .eq("id", personId);
-  if (personUpdateError) return { success: false, error: personUpdateError.message };
+  // ⛔ Only a REGISTRATION says what kind of attendee someone is. Seating an
+  // exhibitor in the Meet & Greet used to make them a "delegate" labelled
+  // "Meet & Greet Reception" (6 people relabelled by 2026-10-21). Any other
+  // seat names a type only for somebody who has none yet: a guest given just a
+  // reception ticket at the door is still somebody the desk can find.
+  if (entity.kind === "registration" || person.person_kind === "unassigned") {
+    const { error: personUpdateError } = await db
+      .from("conference_people")
+      .update({ person_kind: tier.personKind, registration_tier: tier.tierLabel })
+      .eq("id", personId);
+    if (personUpdateError) return { success: false, error: personUpdateError.message };
+  }
 
   // Whoever holds a registration holds what it includes (included-seats.ts).
   if (entity.kind === "registration") await seatIncludedEvents(db, seat.conference_id, seatId, personId);

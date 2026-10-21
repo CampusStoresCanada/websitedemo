@@ -206,8 +206,15 @@ export type OpenSeat = {
   seatId: string;
   organizationId: string;
   organizationName: string;
+  /** The catalogue thing the seat is for: a registration type, or an event. */
   registrationTypeId: string;
   registrationTypeName: string;
+  /**
+   * An event seat is a company's spare ticket to one event (a Meet & Greet
+   * it bought for its people). The door names somebody to it; the badge desk
+   * names people to registrations.
+   */
+  entityKind: "registration" | "event";
 };
 
 /** Every open registration seat in the run, from the same walk as the badges. */
@@ -222,6 +229,7 @@ export function openSeatsFromRun(run: BadgeRun): OpenSeat[] {
         organizationName: seat.organizationName,
         registrationTypeId: type.entityId,
         registrationTypeName: type.name,
+        entityKind: "registration",
       });
     }
   }
@@ -278,16 +286,81 @@ export async function loadCheckInFacts(
 
   // ⚠️ A failure here costs the door picker, never the desk.
   const door = await loadDoorEvents(db, conferenceId).catch(() => ({ doorEvents: [], timeZone: DEFAULT_DOOR_TIME_ZONE }));
+  // ⚠️ A failure here costs naming at a door, never the desk.
+  const eventSeats = await openEventSeats(db, conferenceId).catch(() => [] as OpenSeat[]);
 
   return {
     facts: checkInFactsFromRun(run, dateByDayName, spareStackList),
-    openSeats: openSeatsFromRun(run),
+    openSeats: [...openSeatsFromRun(run), ...eventSeats],
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
     ...door,
   };
 }
 
 const DEFAULT_DOOR_TIME_ZONE = "America/Toronto";
+
+/**
+ * Companies' spare event tickets: event seats nobody is named to (Jenna at the
+ * door, 2026-10-21). Somebody from that company who is not on the event can
+ * be put on the company's own ticket instead of being sold another.
+ *
+ * ⛔ A seat a registration INCLUDES is not spare. Buying a Full Conference
+ * Registration mints a Meet & Greet seat beside it, and that seat waits for
+ * whoever the company names to the registration (included-seats.ts). So per
+ * purchase, as many open event seats as there are unnamed registrations are
+ * held back; only the rest (tickets bought on their own) can go to the door.
+ */
+export async function openEventSeats(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<OpenSeat[]> {
+  const { seats: open } = await loadSeatHoldings(db, {
+    conferenceId,
+    assigned: false,
+    entityKinds: ["event", "registration"],
+  });
+  const openEvents = open.filter((seat) => seat.entityKind === "event" && seat.organizationId && seat.balanceId);
+  if (openEvents.length === 0) return [];
+
+  const balanceIds = [...new Set(open.map((seat) => seat.balanceId).filter((id): id is string => Boolean(id)))];
+  const { data: balances, error } = await db.from("entity_balances").select("id, purchase_id").in("id", balanceIds);
+  if (error) throw new Error(error.message);
+  const purchaseOf = new Map((balances ?? []).map((b) => [b.id as string, b.purchase_id as string]));
+
+  // Unnamed registrations per purchase: that many of each event are held back.
+  const heldBack = new Map<string, number>();
+  for (const seat of open) {
+    if (seat.entityKind !== "registration" || !seat.balanceId) continue;
+    const purchase = purchaseOf.get(seat.balanceId);
+    if (purchase) heldBack.set(purchase, (heldBack.get(purchase) ?? 0) + 1);
+  }
+  const used = new Map<string, number>();
+  const spare = [...openEvents]
+    .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0) || a.seatId.localeCompare(b.seatId))
+    .filter((seat) => {
+      const purchase = purchaseOf.get(seat.balanceId as string);
+      if (!purchase) return true;
+      const key = `${purchase}:${seat.entityId}`;
+      const taken = used.get(key) ?? 0;
+      used.set(key, taken + 1);
+      return taken >= (heldBack.get(purchase) ?? 0);
+    });
+  if (spare.length === 0) return [];
+
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id, name")
+    .in("id", [...new Set(spare.map((seat) => seat.organizationId))]);
+  const nameById = new Map((orgs ?? []).map((org) => [org.id as string, org.name as string]));
+  return spare.map((seat) => ({
+    seatId: seat.seatId,
+    organizationId: seat.organizationId,
+    organizationName: nameById.get(seat.organizationId) ?? "",
+    registrationTypeId: seat.entityId,
+    registrationTypeName: seat.entityName,
+    entityKind: "event" as const,
+  }));
+}
 
 /**
  * The conference's timed events, for the door picker. Capped ones are the

@@ -946,6 +946,9 @@ export default function CheckInDeskClient({
     >();
     for (const seat of openSeats) {
       if (!seat.organizationName.toLowerCase().includes(q)) continue;
+      // ⛔ At an event's door, a company's spare tickets to THAT event; at the
+      // badge desk, its unnamed registrations. Never one for the other.
+      if (activeDoorEvent ? seat.registrationTypeId !== activeDoorEvent.id : seat.entityKind !== "registration") continue;
       const org =
         byOrg.get(seat.organizationId) ??
         { organizationId: seat.organizationId, organizationName: seat.organizationName, types: new Map() };
@@ -960,7 +963,7 @@ export default function CheckInDeskClient({
         types: [...org.types.entries()].map(([typeId, t]) => ({ typeId, ...t })),
       }))
       .slice(0, 5);
-  }, [nameLookup, openSeats]);
+  }, [activeDoorEvent, nameLookup, openSeats]);
 
   // The "name someone" form, open on one company at a time.
   const [namingOrgId, setNamingOrgId] = useState<string | null>(null);
@@ -998,10 +1001,16 @@ export default function CheckInDeskClient({
    * control, and its suggestion will be the company blank.
    */
   const nameWalkUp = useCallback(
-    async (org: { organizationId: string; types: Array<{ typeId: string; seatIds: string[] }> }) => {
+    async (org: {
+      organizationId: string;
+      organizationName: string;
+      types: Array<{ typeId: string; name: string; seatIds: string[] }>;
+    }) => {
       const type = org.types.find((t) => t.typeId === walkUpTypeId) ?? org.types[0];
       const seatId = type?.seatIds[0];
       if (!seatId || !walkUpName.trim()) return;
+      // A company's spare EVENT ticket, named at that event's door: no badge.
+      const eventTicket = openSeats.find((seat) => seat.seatId === seatId)?.entityKind === "event";
       setNamingBusy(true);
       setNamingError(null);
       try {
@@ -1031,7 +1040,9 @@ export default function CheckInDeskClient({
         }
         // ⛔ They are standing at the desk: naming them IS checking them in
         // (Stephen, 2026-10-21). The same hand check-in Find uses.
-        const checkedIn = await checkInByHand(added.data.id).catch(() => ({ ok: false, error: undefined }));
+        const checkedIn: { ok: boolean; state?: string; error?: string } = await checkInByHand(added.data.id).catch(() => ({
+          ok: false,
+        }));
         if (!checkedIn.ok) {
           recordProblem = [recordProblem, `Named, but not checked in: ${checkedIn.error ?? "try Find"}.`]
             .filter(Boolean)
@@ -1043,6 +1054,16 @@ export default function CheckInDeskClient({
         setWalkUpContactId(null);
         setNameLookup("");
         setLookupOpen(false);
+        if (eventTicket) {
+          // In the room on their company's ticket. An event ticket has no
+          // badge, so nothing prints; the card says whose ticket it was.
+          pushScanCard(
+            checkedIn.ok ? checkedIn.state ?? "valid" : "seat_named",
+            added.data.id,
+            [`On ${org.organizationName}'s ${type.name} ticket.`, recordProblem].filter(Boolean).join(" ")
+          );
+          return;
+        }
         // ⛔ Naming them at the desk PRINTS their badge (Stephen, 2026-10-21):
         // no second tap. The card is the desk's own suggestion for them (a
         // company blank, else a spare), read fresh because they are new here.
@@ -1073,7 +1094,7 @@ export default function CheckInDeskClient({
         setNamingBusy(false);
       }
     },
-    [checkInByHand, conferenceId, pushScanCard, walkUpContactId, walkUpEmail, walkUpName, walkUpTypeId]
+    [checkInByHand, conferenceId, openSeats, pushScanCard, walkUpContactId, walkUpEmail, walkUpName, walkUpTypeId]
   );
 
   /**
@@ -1379,6 +1400,54 @@ export default function CheckInDeskClient({
       );
     },
     [conferenceId, pushScanCard]
+  );
+
+  /**
+   * Their company's spare ticket to the event at this door, if it holds one
+   * (Jenna at the door, 2026-10-21): somebody not on the event whose company
+   * bought tickets nobody is named to goes on the company's ticket, not sold
+   * another.
+   */
+  const spareTicketFor = (personId: string): OpenSeat | null => {
+    if (!activeDoorEvent) return null;
+    const orgId = rows.find((row) => row.id === personId)?.organization_id;
+    if (!orgId) return null;
+    return (
+      openSeats.find(
+        (seat) =>
+          seat.entityKind === "event" && seat.registrationTypeId === activeDoorEvent.id && seat.organizationId === orgId
+      ) ?? null
+    );
+  };
+  const [spareBusy, setSpareBusy] = useState<string | null>(null);
+  const takeCompanyTicket = useCallback(
+    async (cardId: string, personId: string, seat: OpenSeat) => {
+      setSpareBusy(cardId);
+      try {
+        // The same allocateSeat the company's own seat matrix uses.
+        const seated = await allocateSeat(seat.seatId, personId);
+        if (!seated.success) {
+          pushScanCard("scan_failed", personId, seated.error);
+          return;
+        }
+        setOpenSeats((prev) => prev.filter((open) => open.seatId !== seat.seatId));
+        setScanCards((prev) =>
+          prev.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  state: "valid",
+                  detail: `On ${seat.organizationName}'s ${seat.registrationTypeName} ticket.`,
+                  expiresAt: Date.now() + SCAN_PULSE_TTL_MS,
+                }
+              : card
+          )
+        );
+      } finally {
+        setSpareBusy(null);
+      }
+    },
+    [pushScanCard]
   );
 
   const activeCards = useMemo(
@@ -1773,6 +1842,20 @@ export default function CheckInDeskClient({
                   {card.printJob.queued ? "Sent to the printer ✓" : "Send to printer"}
                 </button>
               ) : null}
+              {card.state === "not_on_ticket" && card.personId && spareTicketFor(card.personId) ? (
+                <button
+                  type="button"
+                  disabled={spareBusy === card.id}
+                  onClick={() =>
+                    void takeCompanyTicket(card.id, card.personId as string, spareTicketFor(card.personId as string) as OpenSeat)
+                  }
+                  className="mt-3 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
+                >
+                  {spareBusy === card.id
+                    ? "…"
+                    : `Use ${spareTicketFor(card.personId)?.organizationName}'s spare ticket`}
+                </button>
+              ) : null}
               {card.state === "not_on_ticket" && card.personId ? (
                 <button
                   type="button"
@@ -1883,7 +1966,7 @@ export default function CheckInDeskClient({
                       <div className="min-w-0">
                         <p className="truncate text-sm text-white">{org.organizationName}</p>
                         <p className="truncate text-sm text-emerald-200">
-                          Open seats:{" "}
+                          {activeDoorEvent ? "Spare tickets:" : "Open seats:"}{" "}
                           {org.types.map((t) => `${t.name} × ${t.seatIds.length}`).join(", ")}
                         </p>
                       </div>
