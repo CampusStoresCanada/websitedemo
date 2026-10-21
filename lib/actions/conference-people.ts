@@ -1121,12 +1121,18 @@ export async function reprintConferenceBadge(
   const db = createAdminClient();
   const { data: person, error: personError } = await db
     .from("conference_people")
-    .select("id, conference_id, badge_reprint_count")
+    .select("id, conference_id, badge_reprint_count, badge_print_status")
     .eq("id", personId)
     .maybeSingle();
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
   }
+  // ⛔ The desk's FIRST print for someone (a desk sale, or named to a seat at
+  // the desk) goes through this same path as ops_override. It is not a
+  // reprint: it must not inflate the reprint count. Only ops_override, because
+  // a pre-printed badge never marks itself printed, so "not_printed" alone
+  // cannot tell a first badge from a damaged one.
+  const firstPrint = reason === "ops_override" && person.badge_print_status === "not_printed";
   // ⛔ Desk staff for THIS person's conference, today.
   const auth = await requireConferenceDeskAccess(person.conference_id);
   if (!auth.ok) return { success: false, error: auth.error };
@@ -1158,12 +1164,12 @@ export async function reprintConferenceBadge(
     return { success: false, error: reprintJob.error ?? "Failed to queue badge reprint." };
   }
 
-  const nextReprintCount = (person.badge_reprint_count ?? 0) + 1;
+  const nextReprintCount = (person.badge_reprint_count ?? 0) + (firstPrint ? 0 : 1);
   const badgePrintedAt = new Date().toISOString();
   const { error: updateError } = await db
     .from("conference_people")
     .update({
-      badge_print_status: "reprinted",
+      badge_print_status: firstPrint ? "printed" : "reprinted",
       badge_reprint_count: nextReprintCount,
       badge_printed_at: badgePrintedAt,
       updated_at: badgePrintedAt,
@@ -1190,7 +1196,7 @@ export async function reprintConferenceBadge(
   return {
     success: true,
     data: {
-      badgePrintStatus: "reprinted",
+      badgePrintStatus: firstPrint ? "printed" : "reprinted",
       badgeReprintCount: nextReprintCount,
       badgePrintedAt,
       badgePrintJobId: reprintJob.data.jobId,

@@ -195,8 +195,8 @@ const SCAN_STATUS_COPY: Record<
   // A walk-up named to a seat their company already owns. Not a check-in and
   // not a print: the operator reprints from this card onto the company blank.
   seat_named: {
-    title: "Named to an open seat",
-    description: "Named to a seat their company already holds. Print their badge from here.",
+    title: "Named and checked in",
+    description: "Named to a seat their company already holds, and checked in. Check the badge, then print it.",
     className: "text-emerald-700",
   },
 };
@@ -868,20 +868,26 @@ export default function CheckInDeskClient({
    * full-screen desk, find the person in a different tool, and come back. Same
    * endpoint, same audit trail, reachable from where the problem happens.
    */
+  /** Check somebody in by hand: the one request Find and Name someone share. */
+  const checkInByHand = useCallback(
+    async (personId: string): Promise<{ ok: boolean; state?: string; error?: string }> => {
+      const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "manual_check_in", testMode, entityId: doorEntityRef.current }),
+      });
+      const payload = (await response.json()) as { error?: string; state?: string };
+      return { ok: response.ok, state: payload.state, error: payload.error };
+    },
+    [conferenceId, testMode]
+  );
+
   const manualCheckIn = useCallback(
     async (personId: string) => {
       setLookupBusy(personId);
       try {
-        const response = await fetch(
-          `/api/admin/conference/${conferenceId}/people/${personId}`,
-          {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ op: "manual_check_in", testMode, entityId: doorEntityRef.current }),
-          }
-        );
-        const payload = (await response.json()) as { error?: string; state?: string };
-        if (!response.ok) {
+        const payload = await checkInByHand(personId);
+        if (!payload.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "They could not be checked in by name.");
           return;
         }
@@ -904,7 +910,7 @@ export default function CheckInDeskClient({
         setLookupBusy(null);
       }
     },
-    [conferenceId, pushScanCard, loadRows]
+    [checkInByHand, pushScanCard, loadRows]
   );
 
   /**
@@ -1021,6 +1027,14 @@ export default function CheckInDeskClient({
           const recorded = await recordNameOnlyWalkUp({ conferenceId, conferencePersonId: added.data.id });
           if (!recorded.success) recordProblem = `Their badge may not print yet: ${recorded.error}`;
         }
+        // ⛔ They are standing at the desk: naming them IS checking them in
+        // (Stephen, 2026-10-21). The same hand check-in Find uses.
+        const checkedIn = await checkInByHand(added.data.id).catch(() => ({ ok: false, error: undefined }));
+        if (!checkedIn.ok) {
+          recordProblem = [recordProblem, `Named, but not checked in: ${checkedIn.error ?? "try Find"}.`]
+            .filter(Boolean)
+            .join(" ");
+        }
         setNamingOrgId(null);
         setWalkUpName("");
         setWalkUpEmail("");
@@ -1036,7 +1050,7 @@ export default function CheckInDeskClient({
         setNamingBusy(false);
       }
     },
-    [conferenceId, pushScanCard, walkUpContactId, walkUpEmail, walkUpName, walkUpTypeId]
+    [checkInByHand, conferenceId, pushScanCard, walkUpContactId, walkUpEmail, walkUpName, walkUpTypeId]
   );
 
   /**
@@ -1199,7 +1213,7 @@ export default function CheckInDeskClient({
   }, []);
 
   const printReprint = useCallback(
-    async (personId: string, cardId: string) => {
+    async (personId: string, cardId: string, firstBadge = false) => {
       const draft = reprintDrafts[personId];
       const preview = draft?.preview;
       if (!draft || !preview) return;
@@ -1232,18 +1246,21 @@ export default function CheckInDeskClient({
       }
       // ⛔ No reason to pick: an edit IS the reason, and otherwise the desk
       // cannot tell damaged from lost without asking, so it does not ask.
-      const printed = await reprintBadge(
-        personId,
-        changes.length > 0 ? "name_change" : "ops_override",
-        changes.length > 0 ? undefined : "Reprint at the desk"
-      );
+      // A first badge is not a reprint, and is not filed as a name change.
+      const printed = firstBadge
+        ? await reprintBadge(personId, "ops_override", "First badge, named at the desk")
+        : await reprintBadge(
+            personId,
+            changes.length > 0 ? "name_change" : "ops_override",
+            changes.length > 0 ? undefined : "Reprint at the desk"
+          );
       // The new "Sent to the printer" card replaces the one it was printed from.
       if (printed) setScanCards((prev) => prev.filter((card) => card.id !== cardId));
     },
     [conferenceId, ensureReprintDraft, pushScanCard, reprintBadge, reprintDrafts]
   );
 
-  const reprintPanel = (personId: string, cardId: string) => {
+  const reprintPanel = (personId: string, cardId: string, firstBadge = false) => {
     const draft = reprintDrafts[personId];
     if (!draft) return <p className="mt-2 text-sm text-gray-300">Loading their badge…</p>;
     if (draft.error || !draft.preview) {
@@ -1294,10 +1311,10 @@ export default function CheckInDeskClient({
         <button
           type="button"
           disabled={reprintBusy === personId}
-          onClick={() => void printReprint(personId, cardId)}
+          onClick={() => void printReprint(personId, cardId, firstBadge)}
           className="mt-2 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
         >
-          {reprintBusy === personId ? "…" : "Print"}
+          {reprintBusy === personId ? "…" : firstBadge ? "Print badge" : "Print"}
         </button>
       </div>
     );
@@ -1339,7 +1356,8 @@ export default function CheckInDeskClient({
   useEffect(() => {
     for (const card of activeCards) {
       if (!card.personId) continue;
-      if (card.state === "already_checked_in" || reprintOpenId === card.id) void ensureReprintDraft(card.personId);
+      if (card.state === "already_checked_in" || card.state === "seat_named" || reprintOpenId === card.id)
+        void ensureReprintDraft(card.personId);
     }
   }, [activeCards, ensureReprintDraft, reprintOpenId]);
 
@@ -1618,6 +1636,8 @@ export default function CheckInDeskClient({
                   ⛔ Still a TAP, never automatic. A double scan — two cameras,
                   a jittery trigger, somebody re-presenting a badge — must not
                   queue a print job on its own. */}
+              {/* Just named at the desk: their FIRST badge, printed from here. */}
+              {card.state === "seat_named" && card.personId ? reprintPanel(card.personId, card.id, true) : null}
               {card.state === "already_checked_in" && card.personId ? (
                 <div className="mt-2 rounded border border-white/25 bg-white/5 p-2">
                   <p className="text-sm text-gray-200">
@@ -1671,7 +1691,7 @@ export default function CheckInDeskClient({
                 </button>
                 {/* Reprint is on every other card too — it just is not the
                     assumption there, so it costs one more tap to open. */}
-                {card.personId && card.state !== "already_checked_in" ? (
+                {card.personId && card.state !== "already_checked_in" && card.state !== "seat_named" ? (
                   <button
                     type="button"
                     onClick={() =>
