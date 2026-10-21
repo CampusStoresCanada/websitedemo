@@ -6443,6 +6443,45 @@ export type Database = {
           },
         ]
       }
+      print_stations: {
+        Row: {
+          conference_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          key_hash: string
+          label: string
+          last_seen_at: string | null
+          printer_media: string | null
+          printer_status: string | null
+          revoked_at: string | null
+        }
+        Insert: {
+          conference_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key_hash: string
+          label: string
+          last_seen_at?: string | null
+          printer_media?: string | null
+          printer_status?: string | null
+          revoked_at?: string | null
+        }
+        Update: {
+          conference_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key_hash?: string
+          label?: string
+          last_seen_at?: string | null
+          printer_media?: string | null
+          printer_status?: string | null
+          revoked_at?: string | null
+        }
+        Relationships: []
+      }
       desk_pins: {
         Row: {
           failed_attempts: number

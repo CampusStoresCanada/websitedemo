@@ -245,6 +245,34 @@ renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
 - [ ] **"Print now: all stickers" on the iPad**: one job, each sticker its own length (CSS named pages). iPad Safari's page sizing is reported unreliable — if lengths come out wrong, use one-at-a-time, or send to the print station (Chrome honours named pages: verified 67/96/21 mm in Chrome)
 - [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
 
+## 3d. Print station: printing straight to the QL (built 2026-10-21)
+
+⛔ Browser printing cannot do this: the printer driver overrides every page's size
+with its own paper (a 120 mm back came out as two 100 mm pieces; a short front
+printed sideways). Proven 2026-10-21 on the Mac Studio: sending to the QL directly
+(brother_ql, last year's `csc-name-badges/printer.py`, model id QL-1060N, USB
+04f9:20a8) prints each sticker at its exact length and lines up with the card to
+fractions of a millimetre.
+
+- **CSC Print Station** (`print-station/`): a Python program on the laptop beside
+  the printer. Heartbeat → claim the oldest queued job → fetch each sticker page →
+  picture it with headless Chrome at 300 dpi, TRIM to 696 dots (never scale) →
+  print all of a job's stickers in one job, cut after each → report.
+- **Keys** (`print_stations`, migration `20261021000000`): one per laptop per
+  conference, shown once, SHA-256 only, revocable. Made on the desk: toolkit →
+  Open the print station → Get a key. Desk staff may make one.
+- **Endpoints** `/api/print-station/{heartbeat,claim,jobs/[id]/sticker,jobs/[id]/result}`,
+  key-only (never a session). A printer problem returns the job to the queue; a
+  sticker that cannot be drawn fails it.
+- The desk's "Send to print queue" says when no station is online. The print
+  station page is now management (stations, printer status, queue) — it no longer
+  prints through the dialog.
+- ✅ End to end 2026-10-21: two queued reprints printed through the queue; one a
+  stalled run had claimed came back after two minutes and printed.
+- ⚠️ Windows untested: use `tcp://PRINTER-IP:9100` (no USB driver needed).
+- ⚠️ Chrome must run with its own profile and a mock keychain, or macOS pops a
+  keychain dialog and the draw hangs (hit in testing).
+
 ## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)
 
 Nothing below is built. Both were sorted before building, per the repo rule.
@@ -441,6 +469,7 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - `20261020000000_desk_pins.sql` — the hashed desk PIN, server only.
 - `20261020010000_conference_walkup_without_email_template.sql` — the heads-up email.
 - `20261020020000_check_in_not_on_ticket.sql` — the door's "not on their ticket" result.
+- `20261021000000_print_stations.sql` — print station keys (hashed), heartbeat, printer status.
 
 ## 5. Why the first plan was cut
 

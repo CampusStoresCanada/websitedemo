@@ -27,7 +27,7 @@ vi.mock("@/lib/supabase/admin", () => ({
       let patch: Record<string, unknown> | null = null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const b: any = {};
-      for (const m of ["select", "order", "limit", "in"]) b[m] = () => b;
+      for (const m of ["select", "order", "limit", "in", "is"]) b[m] = () => b;
       b.eq = (col: string, val: unknown) => {
         filters[col] = val;
         return b;
@@ -64,6 +64,8 @@ describe("sending a sticker to the print station", () => {
     const { sendReprintToQueue } = await actions();
     const res = await sendReprintToQueue({ conferenceId: "conf-1", jobId: "job-1" });
     expect(res.success).toBe(true);
+    // No station has checked in, so the desk is told nothing will print it yet.
+    expect(res.success && res.data.stationOnline).toBe(false);
     expect(updates.find((u) => u.table === "badge_print_jobs")?.patch).toMatchObject({
       transport_method: "printer_bridge",
       status: "sent_to_printer",

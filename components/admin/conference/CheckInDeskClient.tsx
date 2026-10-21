@@ -1120,7 +1120,16 @@ export default function CheckInDeskClient({
       }
       setScanCards((prev) =>
         prev.map((card) =>
-          card.id === cardId && card.printJob ? { ...card, printJob: { ...card.printJob, queued: true } } : card
+          card.id === cardId && card.printJob
+            ? {
+                ...card,
+                printJob: { ...card.printJob, queued: true },
+                // Nothing will print it until a station is running.
+                detail: res.data.stationOnline
+                  ? card.detail
+                  : "Queued, but no print station is online. Start CSC Print Station on the laptop by the printer.",
+              }
+            : card
         )
       );
     },

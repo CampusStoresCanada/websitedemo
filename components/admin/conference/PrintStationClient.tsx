@@ -1,18 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { listQueuedLabels, markLabelPrinted, type QueuedLabel } from "@/lib/actions/conference-badges";
+import { useCallback, useEffect, useState } from "react";
+import {
+  createPrintStation,
+  listPrintStations,
+  listQueuedLabels,
+  revokePrintStation,
+  type PrintStationRow,
+  type QueuedLabel,
+} from "@/lib/actions/conference-badges";
 
 /**
- * The print station: one page open on the laptop beside the QL, printing every
- * sticker a desk device sends it, oldest first, front then back.
+ * The desk's print stations: the laptops that print the sticker queue.
  *
- * ⛔ The consumer `sent_to_printer` never had. The browser cannot pick a printer
- * itself, so the QL must be this laptop's DEFAULT printer; started with Chrome's
- * `--kiosk-printing` flag it prints with no dialog at all, otherwise each
- * sticker asks once.
+ * ⛔ This page does not print. A browser's print dialog lets the printer
+ * driver override each sticker's size with its own paper (a 120 mm back came
+ * out as two 100 mm pieces, 2026-10-21), so printing happens in CSC Print
+ * Station on the laptop, straight to the QL. Here you add that laptop (its
+ * key), see whether it is online and what the printer says, and what is
+ * waiting.
  */
-const POLL_MS = 4000;
+const POLL_MS = 5000;
 
 export default function PrintStationClient({
   conferenceId,
@@ -21,146 +29,152 @@ export default function PrintStationClient({
   conferenceId: string;
   conferenceName: string;
 }) {
+  const [stations, setStations] = useState<PrintStationRow[] | null>(null);
   const [queue, setQueue] = useState<QueuedLabel[]>([]);
-  const [printing, setPrinting] = useState<string | null>(null);
-  const [printed, setPrinted] = useState<Array<{ name: string; at: string }>>([]);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [paused, setPaused] = useState(false);
-  const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const busyRef = useRef(false);
-  // A job whose sticker cannot be drawn is skipped for this session rather than
-  // holding up everyone behind it; it stays in the queue for someone to look at.
-  const skippedRef = useRef(new Set<string>());
+  const [error, setError] = useState<string | null>(null);
+  const [label, setLabel] = useState("");
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const printSide = useCallback(
-    async (jobId: string, side: "all" | "front" | "schedule" | "back") => {
-      const url = `/api/admin/conference/${conferenceId}/badges/jobs/${jobId}/pdf?side=${side}`;
-      const check = await fetch(url, { cache: "no-store" });
-      if (!check.ok) {
-        const body = (await check.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `The ${side === "all" ? "" : `${side} `}stickers could not be drawn.`);
-      }
-      const frame = frameRef.current;
-      if (!frame) throw new Error("The print frame is missing.");
-      await new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(() => reject(new Error(`The ${side} sticker took too long to load.`)), 15000);
-        frame.onload = () => {
-          window.clearTimeout(timer);
-          // Let the fonts and logo settle before the sticker goes to the printer.
-          window.setTimeout(() => {
-            try {
-              frame.contentWindow?.print();
-              resolve();
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error("Printing failed."));
-            }
-          }, 500);
-        };
-        frame.src = url;
-      });
-    },
-    [conferenceId]
-  );
-
-  const tick = useCallback(async () => {
-    if (busyRef.current || paused) return;
-    const res = await listQueuedLabels(conferenceId);
-    if (!res.success) {
-      setProblem(res.error);
-      return;
-    }
-    setQueue(res.data);
-    const next = res.data.find((job) => !skippedRef.current.has(job.jobId));
-    if (!next) return;
-    busyRef.current = true;
-    setPrinting(next.personName || "someone");
-    try {
-      // ⛔ ONE print job: every sticker in order (front, schedule on a spare,
-      // QR), each at its own length — Chrome honours the named pages.
-      await printSide(next.jobId, "all");
-      const done = await markLabelPrinted({ conferenceId, jobId: next.jobId });
-      if (!done.success) throw new Error(done.error);
-      setPrinted((prev) => [{ name: next.personName, at: new Date().toLocaleTimeString() }, ...prev].slice(0, 10));
-      setProblem(null);
-    } catch (error) {
-      skippedRef.current.add(next.jobId);
-      setProblem(`${next.personName || "A sticker"}: ${error instanceof Error ? error.message : "could not print."}`);
-    } finally {
-      busyRef.current = false;
-      setPrinting(null);
-    }
-  }, [conferenceId, paused, printSide]);
+  const refresh = useCallback(async () => {
+    const [s, q] = await Promise.all([listPrintStations(conferenceId), listQueuedLabels(conferenceId)]);
+    if (s.success) setStations(s.data);
+    else setError(s.error);
+    if (q.success) setQueue(q.data);
+  }, [conferenceId]);
 
   useEffect(() => {
-    const id = window.setInterval(() => void tick(), POLL_MS);
-    const first = window.setTimeout(() => void tick(), 0);
+    const first = window.setTimeout(() => void refresh(), 0);
+    const id = window.setInterval(() => void refresh(), POLL_MS);
     return () => {
-      window.clearInterval(id);
       window.clearTimeout(first);
+      window.clearInterval(id);
     };
-  }, [tick]);
+  }, [refresh]);
+
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await createPrintStation({ conferenceId, label: label || "Print station" });
+    setBusy(false);
+    if (!res.success) {
+      setError(res.error);
+      return;
+    }
+    setNewKey(res.data.key);
+    setLabel("");
+    void refresh();
+  };
+
+  const revoke = async (station: PrintStationRow) => {
+    if (!window.confirm(`Stop "${station.label}" printing? Its key stops working at once.`)) return;
+    const res = await revokePrintStation({ conferenceId, stationId: station.id });
+    if (!res.success) setError(res.error);
+    void refresh();
+  };
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-8 text-gray-900">
-      <h1 className="text-2xl font-bold">Print station</h1>
+      <h1 className="text-2xl font-bold">Print stations</h1>
       <p className="text-sm text-gray-600">{conferenceName}</p>
+      <p className="mt-3 text-sm text-gray-700">
+        Stickers print on a laptop beside the Brother QL running <strong>CSC Print Station</strong>, straight to the
+        printer, each at its exact length. Any desk device sends to it with “Send to print queue”.
+      </p>
+      {error ? <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-      <div className="mt-6 rounded-xl border border-gray-200 p-5">
-        <p className="text-lg font-semibold">
-          {paused ? "Paused" : printing ? `Printing ${printing}…` : queue.length ? `${queue.length} waiting` : "Waiting for stickers"}
-        </p>
-        <p className="mt-1 text-sm text-gray-600">
-          Any desk device can send stickers here with “Send to print queue”. Each one prints as a single job of two stickers, front then back (on a spare card the back carries the schedule as well as the QR), cut apart by the printer.
-        </p>
-        <button
-          type="button"
-          onClick={() => setPaused((p) => !p)}
-          className="mt-4 min-h-12 rounded-lg border border-gray-300 px-5 text-base font-medium"
-        >
-          {paused ? "Resume printing" : "Pause (changing the roll)"}
-        </button>
-        {problem ? <p className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{problem}</p> : null}
-      </div>
-
-      {queue.length > 0 ? (
-        <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Waiting</h2>
+      <section className="mt-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Stations</h2>
+        {stations === null ? (
+          <p className="mt-2 text-sm text-gray-500">Loading…</p>
+        ) : stations.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-500">None yet. Add the laptop beside the printer below.</p>
+        ) : (
           <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
-            {queue.map((job) => (
-              <li key={job.jobId} className="flex justify-between px-4 py-2 text-sm">
-                <span>{job.personName || "Unnamed"}</span>
-                {skippedRef.current.has(job.jobId) ? <span className="text-red-600">skipped</span> : null}
+            {stations.map((station) => (
+              <li key={station.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    <span className={station.online ? "text-emerald-600" : "text-gray-400"}>●</span> {station.label}{" "}
+                    <span className="font-normal text-gray-500">{station.online ? "online" : "offline"}</span>
+                  </p>
+                  {station.printerStatus || station.printerMedia ? (
+                    <p className={`text-xs ${station.printerStatus && station.printerStatus !== "ready" ? "text-red-600" : "text-gray-500"}`}>
+                      Printer: {station.printerStatus ?? "unknown"}
+                      {station.printerMedia ? ` · ${station.printerMedia}` : ""}
+                    </p>
+                  ) : null}
+                </div>
+                <button type="button" onClick={() => void revoke(station)} className="shrink-0 text-xs font-medium text-red-600">
+                  Remove
+                </button>
               </li>
             ))}
           </ul>
-        </section>
-      ) : null}
+        )}
+      </section>
 
-      {printed.length > 0 ? (
-        <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Printed</h2>
-          <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
-            {printed.map((row, i) => (
-              <li key={i} className="flex justify-between px-4 py-2 text-sm">
-                <span>{row.name || "Unnamed"}</span>
-                <span className="text-gray-500">{row.at}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section className="mt-8 rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
-        <p className="font-semibold">Setting up this laptop</p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5">
-          <li>Install the Brother QL-1110NWB driver and make the QL the default printer, with the 62 mm roll.</li>
-          <li>Keep this page open. Leave the laptop awake and plugged in.</li>
-          <li>For no print dialog at all, start Chrome with <code>--kiosk-printing</code>. Otherwise press Print once per sticker.</li>
+      <section className="mt-6 rounded-xl border border-gray-200 p-5">
+        <h2 className="text-base font-semibold">Add this laptop</h2>
+        {newKey ? (
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-gray-700">
+              Its key, shown <strong>once</strong>. Paste it when CSC Print Station asks. Lost it? Remove the station
+              and add it again.
+            </p>
+            <div className="flex gap-2">
+              <code className="flex-1 break-all rounded bg-gray-100 px-3 py-2 text-sm">{newKey}</code>
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(newKey)}
+                className="min-h-10 rounded-lg border border-gray-300 px-3 text-sm"
+              >
+                Copy
+              </button>
+            </div>
+            <button type="button" onClick={() => setNewKey(null)} className="text-sm text-gray-600 underline">
+              Done
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 flex gap-2">
+            <input
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder="e.g. Registration desk laptop"
+              className="min-h-10 flex-1 rounded-lg border border-gray-300 px-3 text-sm"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void add()}
+              className="min-h-10 rounded-lg bg-gray-900 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? "…" : "Get a key"}
+            </button>
+          </div>
+        )}
+        <ol className="mt-4 list-decimal space-y-1 pl-5 text-sm text-gray-700">
+          <li>Plug the Brother QL into the laptop by USB, with the 62 mm continuous roll loaded.</li>
+          <li>Open <strong>CSC Print Station</strong> and paste the key.</li>
+          <li>Leave it running, plugged in and awake. It shows online here within a few seconds.</li>
         </ol>
       </section>
 
-      {/* The sticker is drawn here, off screen, then sent to the printer. */}
-      <iframe ref={frameRef} title="Sticker" className="pointer-events-none fixed -left-[9999px] top-0 h-[400px] w-[400px]" />
+      <section className="mt-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Waiting to print</h2>
+        {queue.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-500">Nothing waiting.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
+            {queue.map((job) => (
+              <li key={job.jobId} className="px-4 py-2 text-sm">
+                {job.personName || "Unnamed"} <span className="text-gray-500">· {job.stickers.length} stickers</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }
