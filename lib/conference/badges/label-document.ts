@@ -29,10 +29,12 @@ import { DEFAULT_REPRINT_STOCK, type ReprintPlan } from "@/lib/conference/badges
 export class LabelDocumentError extends Error {}
 
 /**
- * Never let a sticker be shorter than it is wide. ⛔ A browser reads a page
- * wider than it is tall as LANDSCAPE and rotates it onto the printer's paper —
- * a 62 × 53 mm front came out sideways (2026-10-21). A few millimetres of
- * clear film is the price of printing upright.
+ * For BROWSER printing only: never let a sticker be shorter than it is wide.
+ * A browser reads a page wider than it is tall as LANDSCAPE and rotates it onto
+ * the printer's paper — a 62 × 53 mm front came out sideways (2026-10-21).
+ * ⛔ Never for the print station: it sends the raster straight to the QL, so
+ * there is nothing to rotate, and the padding only adds film below the sticker
+ * that runs past the bottom of the card.
  */
 export function portraitLengthMm(widthMm: number, heightMm: number): number {
   return Math.max(heightMm, Math.ceil(widthMm) + 2);
@@ -104,6 +106,8 @@ export async function buildReprintLabelDocument(params: {
    * spare also the schedule, because a spare prints its schedule area empty.
    */
   side?: "front" | "back" | "schedule";
+  /** Through a browser's print dialog: pad short stickers so they print upright. */
+  forBrowserPrint?: boolean;
 }): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" | "schedule" }> {
   const { db, conferenceId, jobId } = params;
 
@@ -190,6 +194,7 @@ export async function buildReprintLabelDocument(params: {
       widthMm: stock.widthMm,
     });
     if (!out.html) throw new LabelDocumentError("There is nothing to print on this schedule.");
+    if (!params.forBrowserPrint) return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
     const length = portraitLengthMm(out.widthMm, out.heightMm);
     return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
   }
@@ -262,6 +267,7 @@ export async function buildReprintLabelDocument(params: {
     }
   }
 
+  if (!params.forBrowserPrint) return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
   const length = portraitLengthMm(out.widthMm, out.heightMm);
   return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
 }

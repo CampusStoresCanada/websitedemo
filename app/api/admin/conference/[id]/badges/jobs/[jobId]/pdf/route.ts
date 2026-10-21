@@ -50,11 +50,11 @@ export async function GET(
         if (sides.length === 0) throw new LabelDocumentError("This reprint is a full badge, not stickers.");
         const docs = [];
         for (const one of sides) {
-          docs.push(await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side: one }));
+          docs.push(await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side: one, forBrowserPrint: true }));
         }
         html = combineStickerDocuments(docs);
       } else {
-        html = (await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side })).html;
+        html = (await buildReprintLabelDocument({ db, conferenceId: labelConferenceId, jobId: labelJobId, side, forBrowserPrint: true })).html;
       }
       // `print=1`: "Print now" on the device in hand. Open the print dialog as
       // soon as the sticker has drawn (AirPrint on an iPad or iPhone, the

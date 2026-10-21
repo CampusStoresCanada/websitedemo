@@ -270,6 +270,10 @@ fractions of a millimetre.
 - ✅ End to end 2026-10-21: two queued reprints printed through the queue; one a
   stalled run had claimed came back after two minutes and printed.
 - ⚠️ Windows untested: use `tcp://PRINTER-IP:9100` (no USB driver needed).
+- ⛔ The station gets each sticker at its NATURAL length (front 42 mm, QR 21 mm
+  on a company blank). The "never shorter than wide" padding is for browser
+  printing only (`forBrowserPrint`): on the station it just added film below the
+  sticker that ran past the bottom of the card (Stephen, 2026-10-21).
 - ⚠️ Chrome must run with its own profile and a mock keychain, or macOS pops a
   keychain dialog and the draw hangs (hit in testing).
 
