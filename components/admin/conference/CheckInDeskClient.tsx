@@ -394,7 +394,7 @@ export default function CheckInDeskClient({
           ).toISOString();
       const choice: DoorChoice = { entityId: event?.id ?? "", until };
       const maxAge = Math.max(60, Math.round((Date.parse(until) - now.getTime()) / 1000));
-      document.cookie = `${doorCookieName(conferenceId)}=${serializeDoorChoice(choice)}; path=/admin/conference/${conferenceId}; max-age=${maxAge}; samesite=lax`;
+      document.cookie = `${doorCookieName(conferenceId, testMode)}=${serializeDoorChoice(choice)}; path=/admin/conference/${conferenceId}; max-age=${maxAge}; samesite=lax`;
       setDoorChoice(choice);
       setDoorPicker(null);
     },
@@ -428,6 +428,11 @@ export default function CheckInDeskClient({
   // mode: the whole risk of a writing test mode is a rehearsal nobody reset,
   // and it is the LIVE desk that needs to be told.
   const [testCounts, setTestCounts] = useState<{ people: number; events: number } | null>(null);
+  // ⛔ Every test check-in, door ones included. A check-in by name at an
+  // event's door marks no PERSON (they have not picked up a badge), only a
+  // door record, so counting people alone hid the reset and left a door
+  // rehearsal unclearable (Stephen, 2026-10-21).
+  const testCheckIns = testCounts ? Math.max(testCounts.events, testCounts.people) : 0;
   const [resetBusy, setResetBusy] = useState(false);
   const [reprintBusy, setReprintBusy] = useState<string | null>(null);
   const [reprintOpenId, setReprintOpenId] = useState<string | null>(null);
@@ -574,7 +579,7 @@ export default function CheckInDeskClient({
       setHandOverOrderId(readHandOver(conferenceId));
       // The door: keep a pick that is still good; otherwise ask, but only when
       // an event's window is open now.
-      const cookieName = `${doorCookieName(conferenceId)}=`;
+      const cookieName = `${doorCookieName(conferenceId, testMode)}=`;
       const stored = parseDoorChoice(
         document.cookie.split("; ").find((part) => part.startsWith(cookieName))?.slice(cookieName.length)
       );
@@ -583,7 +588,7 @@ export default function CheckInDeskClient({
         stored !== null &&
         (stored.entityId === ""
           ? Date.parse(stored.until) > now.getTime()
-          : doorChoiceStillValid(stored, doorEvents, now));
+          : doorChoiceStillValid(stored, doorEvents, now, timeZone));
       if (stillGood) setDoorChoice(stored);
       else if (doorEventsOpenNow(doorEvents, now, timeZone).length > 0) setDoorPicker("auto");
       // A refused read leaves the desk usable but every PIN prompt will fail
@@ -1660,14 +1665,14 @@ export default function CheckInDeskClient({
         <div className="absolute inset-x-0 top-0 z-20 bg-amber-500 px-3 py-2 text-center text-sm font-bold text-black">
           TEST MODE — check-ins are tagged and can be reset. Nothing here counts.
           {asOf ? <span className="ml-2 font-semibold">Pretending it is {asOf}.</span> : null}
-          {testCounts && testCounts.people > 0 ? (
+          {testCheckIns > 0 ? (
             <button
               type="button"
               disabled={resetBusy}
               onClick={() => void resetTestRun()}
               className="min-h-12 ml-3 rounded-lg bg-black px-4 font-bold text-amber-300 disabled:opacity-60"
             >
-              {resetBusy ? "Clearing…" : `Reset ${testCounts.people} test check-in${testCounts.people === 1 ? "" : "s"}`}
+              {resetBusy ? "Clearing…" : `Reset ${testCheckIns} test check-in${testCheckIns === 1 ? "" : "s"}`}
             </button>
           ) : null}
           <a
@@ -1682,12 +1687,12 @@ export default function CheckInDeskClient({
       {/* The leftovers warning, shown on the LIVE desk. This is the whole
           safety story for a test mode that writes: a rehearsal that was never
           reset announces itself here instead of quietly inflating day one. */}
-      {!testMode && testCounts && testCounts.people + testCounts.events > 0 ? (
+      {!testMode && testCheckIns > 0 ? (
         <div className="absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-center gap-3 bg-red-600 px-3 py-2 text-center text-sm font-bold text-white">
           <span>
-            {testCounts.people === 1
+            {testCheckIns === 1
               ? "1 test check-in from a rehearsal is still counted as real."
-              : `${testCounts.people} test check-ins from a rehearsal are still counted as real.`}
+              : `${testCheckIns} test check-ins from a rehearsal are still counted as real.`}
           </span>
           <button
             type="button"

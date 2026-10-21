@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   doorChoiceStillValid,
   doorChoiceUntil,
+  doorCookieName,
   doorEventsOpenNow,
   parseDoorChoice,
   serializeDoorChoice,
@@ -60,12 +61,29 @@ describe("how long a device remembers its pick", () => {
 
   it("lapses once its time is up, so it cannot leak into the next morning", () => {
     const choice = { entityId: "mg", until: new Date(at("2027-02-01T22:00:00")).toISOString() };
-    expect(doorChoiceStillValid(choice, events, at("2027-02-01T21:59:00"))).toBe(true);
-    expect(doorChoiceStillValid(choice, events, at("2027-02-02T08:00:00"))).toBe(false);
+    expect(doorChoiceStillValid(choice, events, at("2027-02-01T21:59:00"), TZ)).toBe(true);
+    expect(doorChoiceStillValid(choice, events, at("2027-02-02T08:00:00"), TZ)).toBe(false);
+  });
+
+  it("a pick made far ahead lasts two hours, not until the event", () => {
+    const october = new Date("2026-10-21T18:00:00-04:00");
+    expect(doorChoiceUntil(meetAndGreet, october, TZ)).toBe(new Date(october.getTime() + 2 * 3600_000).toISOString());
+  });
+
+  it("a rehearsal's pick for February does not hold on the real desk in October", () => {
+    // Picked while pretending it was the reception: until = the window's close.
+    const rehearsalPick = { entityId: "mg", until: new Date(at("2027-02-01T22:00:00")).toISOString() };
+    expect(doorChoiceStillValid(rehearsalPick, events, new Date("2026-10-21T18:00:00-04:00"), TZ)).toBe(false);
+    // Near the event it is the ordinary pick it always was.
+    expect(doorChoiceStillValid(rehearsalPick, events, at("2027-02-01T16:00:00"), TZ)).toBe(true);
+  });
+
+  it("keeps a rehearsal's door apart from the real desk's", () => {
+    expect(doorCookieName("c1", true)).not.toBe(doorCookieName("c1"));
   });
 
   it("forgets a pick for an event this conference no longer has", () => {
-    expect(doorChoiceStillValid({ entityId: "gone", until: "2099-01-01T00:00:00Z" }, events, at("2027-02-01T18:00:00"))).toBe(false);
+    expect(doorChoiceStillValid({ entityId: "gone", until: "2099-01-01T00:00:00Z" }, events, at("2027-02-01T18:00:00"), TZ)).toBe(false);
   });
 
   it("round-trips through the cookie, and ignores junk", () => {

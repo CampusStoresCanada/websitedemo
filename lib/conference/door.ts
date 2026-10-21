@@ -64,21 +64,41 @@ export function doorEventsOpenNow(events: DoorEvent[], now: Date, timeZone: stri
  * now — long enough to work through a paper list, short enough not to linger.
  */
 export function doorChoiceUntil(event: DoorEvent, now: Date, timeZone: string): string {
-  const { closes } = doorWindow(event, timeZone);
-  const fallback = now.getTime() + 2 * 60 * 60 * 1000;
+  const { opens, closes } = doorWindow(event, timeZone);
+  const fallback = now.getTime() + PICK_LEAD_MS;
+  // ⛔ Only a pick made near the event lasts until its window closes. One made
+  // far ahead (a rehearsal pretending it is February, or a mis-tap in October)
+  // used to last until that window closed too: months of a real desk checking
+  // people in to the reception (2026-10-21).
+  if (now.getTime() < opens - PICK_LEAD_MS) return new Date(fallback).toISOString();
   return new Date(Math.max(closes, fallback)).toISOString();
 }
 
+/** How far ahead of a door's window a pick still counts as "for this event". */
+const PICK_LEAD_MS = 2 * 60 * 60 * 1000;
+
 /** Is a remembered pick still good, and still one of this conference's events? */
-export function doorChoiceStillValid(choice: DoorChoice | null, events: DoorEvent[], now: Date): boolean {
+export function doorChoiceStillValid(
+  choice: DoorChoice | null,
+  events: DoorEvent[],
+  now: Date,
+  timeZone: string
+): boolean {
   if (!choice) return false;
-  if (!events.some((event) => event.id === choice.entityId)) return false;
+  const event = events.find((e) => e.id === choice.entityId);
+  if (!event) return false;
   const until = Date.parse(choice.until);
-  return Number.isFinite(until) && now.getTime() < until;
+  if (!Number.isFinite(until) || now.getTime() >= until) return false;
+  // A pick stored before this rule (or by a clock that was pretending) can
+  // carry a far-off `until`: away from its event it holds two hours at most.
+  const { opens } = doorWindow(event, timeZone);
+  return now.getTime() >= opens - PICK_LEAD_MS || until - now.getTime() <= PICK_LEAD_MS;
 }
 
 /** The device's memory of the pick: a cookie, read and written in the browser. */
-export const doorCookieName = (conferenceId: string) => `desk-door-${conferenceId}`;
+export const doorCookieName = (conferenceId: string, rehearsal = false) =>
+  // ⛔ A rehearsal remembers its door apart from the real desk's.
+  `desk-door-${conferenceId}${rehearsal ? "-rehearsal" : ""}`;
 
 export function parseDoorChoice(raw: string | null | undefined): DoorChoice | null {
   if (!raw) return null;
