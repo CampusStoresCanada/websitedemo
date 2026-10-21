@@ -924,8 +924,10 @@ export default function CheckInDeskClient({
     return rows
       .filter(
         (row) =>
-          (row.display_name ?? "").toLowerCase().includes(q) ||
-          (row.contact_email ?? "").toLowerCase().includes(q)
+          // ⛔ Nobody holds a seat for them: not coming, no badge.
+          row.person_kind !== "unassigned" &&
+          ((row.display_name ?? "").toLowerCase().includes(q) ||
+            (row.contact_email ?? "").toLowerCase().includes(q))
       )
       .slice(0, 8);
   }, [nameLookup, rows]);

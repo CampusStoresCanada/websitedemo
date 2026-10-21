@@ -1121,11 +1121,15 @@ export async function reprintConferenceBadge(
   const db = createAdminClient();
   const { data: person, error: personError } = await db
     .from("conference_people")
-    .select("id, conference_id, badge_reprint_count, badge_print_status")
+    .select("id, conference_id, badge_reprint_count, badge_print_status, person_kind")
     .eq("id", personId)
     .maybeSingle();
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
+  }
+  // ⛔ No seat, no badge: their company released it (deallocateSeat).
+  if (person.person_kind === "unassigned") {
+    return { success: false, error: "Nobody holds a seat for them now, so there is no badge to print." };
   }
   // ⛔ The desk's FIRST print for someone (a desk sale, or named to a seat at
   // the desk) goes through this same path as ops_override. It is not a

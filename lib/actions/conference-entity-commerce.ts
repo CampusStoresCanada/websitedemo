@@ -258,13 +258,71 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   if (error) return { success: false, error: error.message };
 
   if (seat.holder_person_id) {
-    await db
-      .from("conference_people")
-      .update({ person_kind: "unassigned", registration_tier: null })
-      .eq("id", seat.holder_person_id);
+    await releaseRosterEntry(db, seat.holder_person_id, seat.organization_id, auth.ctx.userId ?? null);
   }
 
   return { success: true, data: null };
+}
+
+/**
+ * Somebody whose last seat was just released is not coming.
+ *
+ * ⛔ Their roster entry used to stay, marked "unassigned", and the desk's Find
+ * lists every roster entry: a person nobody is sending could still be found,
+ * checked in and printed a badge (Stephen, 2026-10-21: "otherwise we're
+ * printing badges for people who don't exist"). So the entry goes.
+ *
+ * ⛔ Except when it carries history. Deleting a roster entry cascades to the
+ * badge scans of that person and the exhibitor leads made from them; a check-in
+ * is a record that they came. Those stay "unassigned", and the desk refuses
+ * them (Find hides them, a badge will not print).
+ */
+async function releaseRosterEntry(
+  db: ReturnType<typeof createAdminClient>,
+  personId: string,
+  organizationId: string,
+  actorId: string | null
+): Promise<void> {
+  const [{ count: stillHeld }, { data: person }, { count: scans }, { count: leads }] = await Promise.all([
+    db.from("entity_balance_seats").select("id", { count: "exact", head: true }).eq("holder_person_id", personId),
+    db.from("conference_people").select("id, checked_in_at, source_type").eq("id", personId).maybeSingle(),
+    db
+      .from("conference_badge_scans")
+      .select("id", { count: "exact", head: true })
+      .eq("scanned_person_id", personId),
+    db
+      .from("conference_lead_disclosures")
+      .select("id", { count: "exact", head: true })
+      .eq("member_person_id", personId),
+  ]);
+  if ((stillHeld ?? 0) > 0 || !person) return;
+
+  const hasHistory = Boolean(person.checked_in_at) || (scans ?? 0) > 0 || (leads ?? 0) > 0;
+  if (hasHistory || person.source_type !== "manual") {
+    await db
+      .from("conference_people")
+      .update({ person_kind: "unassigned", registration_tier: null })
+      .eq("id", personId);
+    return;
+  }
+
+  const { error } = await db.from("conference_people").delete().eq("id", personId);
+  if (error) {
+    // Better a stray unassigned entry than a seat release that failed.
+    await db
+      .from("conference_people")
+      .update({ person_kind: "unassigned", registration_tier: null })
+      .eq("id", personId);
+    return;
+  }
+  await logAuditEventSafe({
+    action: "conference_attendee_removed",
+    entityType: "conference_people",
+    entityId: personId,
+    actorId,
+    actorType: "user",
+    details: { organizationId, reason: "Their last seat was released." },
+  });
 }
 
 /**
