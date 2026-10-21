@@ -28,7 +28,7 @@ import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
-import { planReprint, stickersFor, type BadgeStock, type StickerSide } from "@/lib/conference/badges/reprint-plan";
+import { planReprint, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
 import { personReachesEntity, personVerdictToday } from "@/lib/conference/badges/checkin";
 import { conferenceToday } from "@/lib/conference/desk-staff";
 
@@ -1113,8 +1113,6 @@ export async function reprintConferenceBadge(
      * badge, which the QL cannot print.
      */
     labelPrintable: boolean;
-    /** The stickers to print, in order (stickersFor). */
-    stickers: StickerSide[];
   };
 }> {
   const signedIn = await requireAuthenticated();
@@ -1198,7 +1196,6 @@ export async function reprintConferenceBadge(
       badgePrintJobId: reprintJob.data.jobId,
       qrPayload: reprintJob.data.qrPayload,
       labelPrintable: plan.transport === "ql_label",
-      stickers: stickersFor(plan),
     },
   };
 }

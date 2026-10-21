@@ -80,10 +80,10 @@ type ScanPulseCard = {
   /** What the server actually said, under a "Something went wrong". */
   detail?: string | null;
   /**
-   * A reprint's job: the card offers "Print now" (the stickers on this device)
-   * and "Send to print queue" (the print station beside the QL).
+   * A reprint's job: the card offers "Send to printer" (the print station
+   * beside the QL, which prints each sticker at its exact length).
    */
-  printJob?: { jobId: string; labelPrintable: boolean; queued: boolean; stickers: Array<"front" | "schedule" | "back"> } | null;
+  printJob?: { jobId: string; labelPrintable: boolean; queued: boolean } | null;
 };
 
 const POLL_MS = 30_000;
@@ -159,7 +159,7 @@ const SCAN_STATUS_COPY: Record<
   },
   badge_reprinted: {
     title: "Ready to print",
-    description: "Print the stickers on this device, or send them to the print station.",
+    description: "Send the stickers to the printer beside the desk.",
     className: "text-cyan-700",
   },
   // A desk sale landed: they hold a registration now. The card prints it.
@@ -1080,7 +1080,6 @@ export default function CheckInDeskClient({
           error?: string;
           badgePrintJobId?: string;
           labelPrintable?: boolean;
-          stickers?: Array<"front" | "schedule" | "back">;
         };
         if (!response.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
@@ -1091,7 +1090,6 @@ export default function CheckInDeskClient({
             jobId: payload.badgePrintJobId,
             labelPrintable: true,
             queued: false,
-            stickers: payload.stickers?.length ? payload.stickers : ["front", "back"],
           });
         } else {
           pushScanCard(
@@ -1127,7 +1125,7 @@ export default function CheckInDeskClient({
                 // Nothing will print it until a station is running.
                 detail: res.data.stationOnline
                   ? card.detail
-                  : "Queued, but no print station is online. Start CSC Print Station on the laptop by the printer.",
+                  : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.",
               }
             : card
         )
@@ -1531,44 +1529,18 @@ export default function CheckInDeskClient({
                   {reprintBusy === card.personId ? "…" : "Print badge"}
                 </button>
               ) : null}
+              {/* ⛔ One way to print: the print station beside the QL. A
+                  browser's print dialog lets the printer driver override each
+                  sticker's size (Stephen removed "Print now", 2026-10-21). */}
               {card.printJob?.labelPrintable ? (
-                <div className="mt-3 space-y-2">
-                  {/* ⛔ One print job, every sticker at its own length (named
-                      pages, combineStickerDocuments). iPad Safari's page sizing
-                      is unreliable, so one-at-a-time stays as the fallback. */}
-                  <a
-                    href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob.jobId}/pdf?side=all&print=1`}
-                    target="_blank"
-                    rel="noopener"
-                    className="flex min-h-12 w-full items-center justify-center rounded-lg bg-white px-3 text-base font-semibold text-black"
-                  >
-                    Print now: all {card.printJob.stickers.length} stickers
-                  </a>
-                  <p className="text-center text-sm text-gray-300">
-                    Or one at a time:{" "}
-                    {card.printJob.stickers.map((side, idx) => (
-                      <span key={side}>
-                        {idx > 0 ? " · " : ""}
-                        <a
-                          href={`/api/admin/conference/${conferenceId}/badges/jobs/${card.printJob?.jobId}/pdf?side=${side}&print=1`}
-                          target="_blank"
-                          rel="noopener"
-                          className="underline"
-                        >
-                          {side === "back" ? "Back" : side === "front" ? "Front" : "Schedule"}
-                        </a>
-                      </span>
-                    ))}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={card.printJob.queued}
-                    onClick={() => void sendToPrintQueue(card.id, card.printJob?.jobId as string)}
-                    className="min-h-12 w-full rounded-lg border border-white/50 px-4 text-base font-semibold text-white disabled:opacity-60"
-                  >
-                    {card.printJob.queued ? "Sent to the print station ✓" : "Send to print queue"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={card.printJob.queued}
+                  onClick={() => void sendToPrintQueue(card.id, card.printJob?.jobId as string)}
+                  className="mt-3 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-60"
+                >
+                  {card.printJob.queued ? "Sent to the printer ✓" : "Send to printer"}
+                </button>
               ) : null}
               {card.state === "not_on_ticket" && card.personId ? (
                 <button

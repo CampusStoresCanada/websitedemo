@@ -88,14 +88,3 @@ describe("sending a sticker to the print station", () => {
     expect(updates).toHaveLength(0);
   });
 });
-
-describe("the print station marking a sticker printed", () => {
-  it("only moves a job that is actually waiting at the station", async () => {
-    const { markLabelPrinted } = await actions();
-    const res = await markLabelPrinted({ conferenceId: "conf-1", jobId: "job-1" });
-    expect(res.success).toBe(true);
-    const update = updates.find((u) => u.table === "badge_print_jobs");
-    expect(update?.patch).toMatchObject({ status: "printed" });
-    expect(update?.filters).toMatchObject({ id: "job-1", status: "sent_to_printer" });
-  });
-});

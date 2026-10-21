@@ -249,17 +249,6 @@ export async function loadSpareBasis(
   };
 }
 
-/** Spare counts for one job, from the conference's configured policy. */
-export async function spareCountsForJob(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
-  db: any,
-  conferenceId: string,
-  run: BadgeRun,
-  stock: BadgePrintStock
-): Promise<SpareCounts> {
-  return computeSpareCounts({ stock, ...(await loadSpareBasis(db, conferenceId, run)) });
-}
-
 /**
  * The spare stacks: one per BADGE LOOK, never per registration type.
  *

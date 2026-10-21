@@ -1174,34 +1174,6 @@ export async function listQueuedLabels(conferenceId: string): Promise<QueueResul
   };
 }
 
-/** The station printed it (front and back). */
-export async function markLabelPrinted(params: {
-  conferenceId: string;
-  jobId: string;
-}): Promise<QueueResult<null>> {
-  const auth = await requireConferenceDeskAccess(params.conferenceId);
-  if (!auth.ok) return { success: false, error: auth.error };
-  const found = await deskReprintJob(params.conferenceId, params.jobId);
-  if ("error" in found) return { success: false, error: found.error ?? "That print job was not found." };
-  const now = new Date().toISOString();
-  const { error } = await createAdminClient()
-    .from("badge_print_jobs")
-    .update({ status: "printed", completed_at: now, updated_at: now })
-    .eq("id", params.jobId)
-    .eq("status", "sent_to_printer");
-  if (error) return { success: false, error: error.message };
-  await insertBadgeEvent({
-    jobId: params.jobId,
-    conferenceId: params.conferenceId,
-    personId: found.job.person_id as string | null,
-    eventType: "printed",
-    eventStatus: "success",
-    message: "Printed at the print station.",
-    actorId: auth.ctx.userId,
-  });
-  return { success: true, data: null };
-}
-
 // ── Print stations: the laptops that print the queue ────────────────────────
 
 export type PrintStationRow = {

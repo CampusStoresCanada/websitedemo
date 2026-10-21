@@ -172,110 +172,80 @@ stale end date.
 - **`requireConferenceOpsAccess` is a misleading name** now that it means global
   admin; renaming touches ~30 files.
 
-## 3c. Printing: the last mile (built 2026-10-20)
+## 3c. Printing reprints: one way, the print station (2026-10-21)
 
-Until now the desk queued reprint jobs that nothing at the desk could print:
-the job's page served only the full colour badge (the QL cannot print it), it
-was admin-only, and `requestBadgeReprint` refused every non-admin. The label
-renderer for the QL-1110NWBc on DK-2113 62 mm was written and never served.
+**How it works.** At the desk, Reprint → "Which card are you holding?" → a
+reason → **Send to printer**. The job goes to the queue; **CSC Print Station**
+on the laptop beside the Brother QL picks it up and prints each sticker straight
+to the printer at its exact length, cut between stickers. Proven on the Mac
+Studio: stickers line up with the card to fractions of a millimetre.
 
-- **Printer:** Brother QL-1110NWBc, AirPrint over Wi-Fi (same network as the
-  device), DK-2113 frosted clear continuous 62 mm. Stickers go on a company
-  blank or a spare card: front (name, title; company too on a spare) and back
-  (the QR).
-- **One job per reprint** (`?side=all`, `combineStickerDocuments`): every
-  sticker in one document, each its own named page at its own length, so the
-  auto-cut separates them with no padding. The print station always uses it.
-- **Print now** (any device): the reprint card has "Print now: all stickers",
-  plus one-at-a-time links as the fallback →
-  `…/badges/jobs/[jobId]/pdf?side=front|back&print=1`, the sticker at its own
-  `@page` size, print dialog opens itself. iPad/iPhone: AirPrint → the QL.
-- **Send to print queue**: the job becomes `printer_bridge` / `sent_to_printer`
-  (columns that existed with no consumer). The **print station**
-  (`/admin/conference/[id]/check-in/print-station`, toolkit → "Open the print
-  station") runs on the laptop beside the QL and prints each sticker, front then
-  back, then marks it printed. QL = the laptop's default printer; Chrome started
-  with `--kiosk-printing` prints with no dialog.
-- Desk staff may now reprint, queue, and open their conference's reprint
-  stickers. The full badge document stays admin-only.
-- **Print stock for CSC 2027 set 2026-10-20** (Stephen): spares on, 20% for
-  exhibitors and members, member minimum 35. On today's numbers: 48 exhibitor +
-  35 member = 83 spares (20% overtakes the 35 minimum at 175 named members).
-  Change it on the conference's Badges page → print stock. Company blanks are
-  separate: one per unnamed seat, automatically.
-- ⛔ **Spares are generic, one stack per badge LOOK** (Stephen, 2026-10-20: "the
-  guessing was fun, but it was never gonna work"). A spare prints with its
-  schedule area EMPTY; when the desk uses one it prints TWO stickers: the front,
-  and one back sticker carrying the person's schedule above the QR, each at its
-  place on the card (Stephen: two stickers, not three). CSC 2027 has two looks → two stacks:
-  exhibitor (navy, 48) and delegate (red, 35). `spareStacks` groups types by
-  `badgeLookKey` (front design + colour theme), so a new look gets its own
-  stack. The print run and the desk read the same `loadSpareStacks`.
-- **Schedule sticker** (`renderScheduleLabel`): the badge back's own schedule
-  column, 62 mm wide. 📏 Thursday-only 17 mm; Full Conference 104 mm of text,
-  more than the ~95 mm between the schedule area and the QR, so a long schedule
-  scales down to fit (90% for Full Conference, measured in a browser: 91 mm of
-  text on a 96 mm sticker). On a spare it is the top of the one back sticker
-  (`stackStickerParts`).
-- **Badge scan rules changed 2026-10-20** (Stephen): the BACK QR across types
-  is a contact share in BOTH directions — "attendee scans company" went from
-  the company page to `capture` (exhibitor scans attendee already was).
-  Attendee↔attendee stays the Circle profile; exhibitor↔exhibitor the company
-  page; your own badge, your page. The FRONT QR (exhibitor badges) is a direct
-  company-page link, outside these rules. Badges page → badge scan rules.
-- **QR caption wording is still the built-in default** ("This code identifies
-  your badge for check-in and scanning on site"), which undersells it: the code
-  checks in at the desk, opens your page when you scan it, opens your Circle
-  profile for another attendee, and asks your permission when an exhibitor
-  scans it. Set it on the Badges page → badge design → back → QR caption →
-  "Caption wording", BEFORE the print run (it prints on every card).
-- Reprint asks "Which card are you holding?" and offers only cards that exist
-  for that person: a blank for their company AND type, a spare of their type,
-  or No card. Test mode offers every card. Front and back print as two jobs
-  (one shared page height would waste 27–46 mm of film per reprint).
-- ⚠️ **Hotel Wi-Fi usually isolates devices**, which breaks AirPrint. Bring a
-  travel router or hotspot that the printer and every desk device join. The
-  printer's own direct Wi-Fi takes the device off the internet.
+⛔ **There is no browser printing.** A print dialog lets the printer driver
+override each sticker's size with its own paper (a 120 mm back came out as two
+100 mm pieces; a short front printed sideways). "Print now" was removed
+(Stephen, 2026-10-21). The admin badge-job page still serves the full colour
+badge, admins only.
 
-**Test 2026-10-21 (Stephen's mom's iPad):**
-- [ ] Reprint someone whose company has an unnamed seat (company blank) → card shows "Print now: front/back"
-- [ ] Print now: front → the dialog opens itself → AirPrint finds the QL → prints 62 mm at full size, not scaled
-- [ ] Print now: back → the QR sticker scans at the desk
-- [ ] A spare reprint prints front + one back sticker (~120 mm); placed at the top-left of the schedule area, the QR lands on the card's QR spot (measured in Chrome: QR at 100 mm down / 4 mm in, 8.9 mm below the last schedule line); the schedule reads at its size
-- [ ] **"Print now: all stickers" on the iPad**: one job, each sticker its own length (CSS named pages). iPad Safari's page sizing is reported unreliable — if lengths come out wrong, use one-at-a-time, or send to the print station (Chrome honours named pages: verified 67/96/21 mm in Chrome)
-- [ ] A laptop opens the print station; "Send to print queue" on the iPad → the laptop prints both, marks it printed
+**The printer and stickers**
+- Brother QL-1110NWBc, DK-2113 clear 62 mm continuous. brother_ql drives it as
+  model `QL-1060N` (last year's `csc-name-badges/printer.py`), USB `04f9:20a8`.
+- Every reprint is TWO stickers: front, and back. Company blank: front = name +
+  title; back = the QR. Spare: front adds the company and logo; back carries
+  the person's schedule above the QR in ONE piece (`stackStickerParts`), each at
+  its place on the card.
+- Each sticker at its natural length (company blank: front 42 mm, QR 21 mm; spare
+  back ~120 mm). Nothing is padded.
+- Names and titles use the badge's own rule (`badgeNames`, `badgeRoleTitle` in
+  document.ts) — the sticker once split names its own way and printed "DESK TEST
+  THURSDAY / Only".
+- A long schedule scales down to fit above the QR (Full Conference: 90%).
 
-## 3d. Print station: printing straight to the QL (built 2026-10-21)
+**Cards and spares**
+- "Which card are you holding?" offers only cards that exist for that person: a
+  blank for their company AND type (`blankCardKey`), a spare of their badge's
+  look, or No card (a full badge, which the QL cannot print). Test mode offers
+  every card.
+- ⛔ Spares are generic, one stack per badge LOOK (Stephen: "the guessing was
+  fun, but it was never gonna work"): printed with the schedule area EMPTY, so
+  one stack fits anyone whose badge looks the same. CSC 2027: exhibitor (navy,
+  48) and delegate (red, 35). `spareStacks` / `loadSpareStacks`, shared by the
+  print run and the desk.
+- Print stock for CSC 2027 (set 2026-10-20): spares on, 20% exhibitors and
+  members, member minimum 35. Badges page → print stock.
 
-⛔ Browser printing cannot do this: the printer driver overrides every page's size
-with its own paper (a 120 mm back came out as two 100 mm pieces; a short front
-printed sideways). Proven 2026-10-21 on the Mac Studio: sending to the QL directly
-(brother_ql, last year's `csc-name-badges/printer.py`, model id QL-1060N, USB
-04f9:20a8) prints each sticker at its exact length and lines up with the card to
-fractions of a millimetre.
-
-- **CSC Print Station** (`print-station/`): a Python program on the laptop beside
-  the printer. Heartbeat → claim the oldest queued job → fetch each sticker page →
-  picture it with headless Chrome at 300 dpi, TRIM to 696 dots (never scale) →
-  print all of a job's stickers in one job, cut after each → report.
-- **Keys** (`print_stations`, migration `20261021000000`): one per laptop per
-  conference, shown once, SHA-256 only, revocable. Made on the desk: toolkit →
-  Open the print station → Get a key. Desk staff may make one.
-- **Endpoints** `/api/print-station/{heartbeat,claim,jobs/[id]/sticker,jobs/[id]/result}`,
-  key-only (never a session). A printer problem returns the job to the queue; a
+**The print station**
+- `print-station/` (Python): heartbeat → claim the oldest queued job (atomic;
+  a claim nobody reports on returns after two minutes) → fetch each sticker page
+  → picture it with headless Chrome at 300 dpi, TRIM to the QL's 696 printable
+  dots (never scale) → print the job's stickers in one print, cut after each →
+  report. A printer problem (wrong roll, no film) leaves the job queued; a
   sticker that cannot be drawn fails it.
-- The desk's "Send to print queue" says when no station is online. The print
-  station page is now management (stations, printer status, queue) — it no longer
-  prints through the dialog.
-- ✅ End to end 2026-10-21: two queued reprints printed through the queue; one a
-  stalled run had claimed came back after two minutes and printed.
-- ⚠️ Windows untested: use `tcp://PRINTER-IP:9100` (no USB driver needed).
-- ⛔ The station gets each sticker at its NATURAL length (front 42 mm, QR 21 mm
-  on a company blank). The "never shorter than wide" padding is for browser
-  printing only (`forBrowserPrint`): on the station it just added film below the
-  sticker that ran past the bottom of the card (Stephen, 2026-10-21).
-- ⚠️ Chrome must run with its own profile and a mock keychain, or macOS pops a
+- Keys (`print_stations`): one per laptop per conference, shown once, hashed,
+  revocable. Desk toolkit → **Open the print station** → Get a key. That page also
+  shows each station online/offline, what the printer last said, and the queue.
+- Endpoints `/api/print-station/{heartbeat,claim,jobs/[id]/sticker,jobs/[id]/result}`,
+  key-only, never a session.
+- "Send to printer" says so when no station is online.
+- ✅ End to end 2026-10-21: queued reprints printed; a stalled claim recovered.
+- ⚠️ Windows untested: use `tcp://PRINTER-IP:9100` at setup (no USB driver).
+- ⚠️ Chrome runs with its own profile and a mock keychain, or macOS pops a
   keychain dialog and the draw hangs (hit in testing).
+- Next: package it as a double-click app (last year's PyInstaller setup).
+
+**Badge QR (decided 2026-10-20)**
+- Scan rules: the BACK QR across types is a contact share both ways (exhibitor
+  scans attendee, attendee scans exhibitor); attendee↔attendee = Circle profile;
+  exhibitor↔exhibitor = company page; your own badge = your page. The FRONT QR on
+  exhibitor badges is a direct company-page link. Badges page → badge scan rules.
+- QR caption: Stephen is writing it (Badges page → badge design → back → QR
+  caption → "Caption wording"). It prints on every card, so settle it before the
+  print run.
+
+**To test on the printer**
+- [ ] Company-blank reprint: front 42 mm + QR 21 mm, nothing past the card's edge
+- [ ] Spare reprint: front + one ~120 mm back; QR lands on the card's QR spot
+- [ ] A Full Conference schedule (90%) reads at its size
+- [ ] Wrong roll loaded → the print station page shows the printer's error; reloading the roll prints it
 
 ## 3b. Next: the alternate versions (agreed with Stephen, 2026-10-20)
 
@@ -474,6 +444,7 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - `20261020010000_conference_walkup_without_email_template.sql` — the heads-up email.
 - `20261020020000_check_in_not_on_ticket.sql` — the door's "not on their ticket" result.
 - `20261021000000_print_stations.sql` — print station keys (hashed), heartbeat, printer status.
+  Test data cleared 2026-10-21: the test station, 13 Desk Test reprint jobs and their 29 events.
 
 ## 5. Why the first plan was cut
 

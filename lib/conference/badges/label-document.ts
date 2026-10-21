@@ -29,22 +29,6 @@ import { DEFAULT_REPRINT_STOCK, type ReprintPlan } from "@/lib/conference/badges
 export class LabelDocumentError extends Error {}
 
 /**
- * For BROWSER printing only: never let a sticker be shorter than it is wide.
- * A browser reads a page wider than it is tall as LANDSCAPE and rotates it onto
- * the printer's paper — a 62 × 53 mm front came out sideways (2026-10-21).
- * ⛔ Never for the print station: it sends the raster straight to the QL, so
- * there is nothing to rotate, and the padding only adds film below the sticker
- * that runs past the bottom of the card.
- */
-export function portraitLengthMm(widthMm: number, heightMm: number): number {
-  return Math.max(heightMm, Math.ceil(widthMm) + 2);
-}
-
-function withPageLength(html: string, widthMm: number, heightMm: number): string {
-  return html.replace(/@page\s*\{\s*size:[^;]*;/, `@page { size: ${widthMm}mm ${heightMm}mm;`);
-}
-
-/**
  * ⚠️ The overlay a variant prints on decides which plates are reserved, and the
  * two overlays differ: the exhibitor one has a QR plate, the delegate one does
  * not. Choosing by `front_qr` in the layer order rather than by a name keeps
@@ -102,13 +86,11 @@ export async function buildReprintLabelDocument(params: {
   conferenceId: string;
   jobId: string;
   /**
-   * Which sticker. A reprint onto a blank needs front and back (the QR); onto a
-   * spare also the schedule, because a spare prints its schedule area empty.
+   * Which sticker: the front, or the back (the QR; on a spare also the
+   * schedule above it, in one piece, because a spare's schedule area is empty).
    */
-  side?: "front" | "back" | "schedule";
-  /** Through a browser's print dialog: pad short stickers so they print upright. */
-  forBrowserPrint?: boolean;
-}): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" | "schedule" }> {
+  side?: "front" | "back";
+}): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" }> {
   const { db, conferenceId, jobId } = params;
 
   const { data: job } = await db
@@ -178,27 +160,6 @@ export async function buildReprintLabelDocument(params: {
 
   const side = params.side ?? "front";
 
-  // ── The schedule sticker (spares only) ─────────────────────────────────────
-  if (side === "schedule") {
-    if (!plan.delta.includes("schedule")) {
-      throw new LabelDocumentError("This card already carries its schedule; there is no schedule sticker.");
-    }
-    // ⛔ The person's OWN access and schedule, as their badge would print them:
-    // the badge run's entitlement, not their type's (add-ons count).
-    const entitlement = run.entitlements.find((e) => e.personId === job.person_id);
-    if (!entitlement) throw new LabelDocumentError("Nothing on this person's registration to put on a schedule.");
-    const { back } = resolveBadgeVariant(template, { variantKey: badgeTypeId });
-    const out = renderScheduleLabel({
-      template: { ...template, back },
-      person: { access: entitlement.access, agenda: entitlement.agenda, qrPayload: "" } as unknown as BadgePersonRecord,
-      widthMm: stock.widthMm,
-    });
-    if (!out.html) throw new LabelDocumentError("There is nothing to print on this schedule.");
-    if (!params.forBrowserPrint) return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
-    const length = portraitLengthMm(out.widthMm, out.heightMm);
-    return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
-  }
-
   const qrDataUri = side === "back"
     ? await personQrDataUri(db, conferenceId, job.person_id as string)
     : null;
@@ -267,27 +228,12 @@ export async function buildReprintLabelDocument(params: {
     }
   }
 
-  if (!params.forBrowserPrint) return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
-  const length = portraitLengthMm(out.widthMm, out.heightMm);
-  return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
+  return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
 }
 
 /** So the print stock policy stays one normalizer. */
 export { normalizeBadgePrintStock };
 
-/**
- * Every sticker of one reprint as ONE print job (Stephen, 2026-10-20).
- *
- * ⛔ Each sticker keeps its OWN length: a CSS named page per sticker
- * (`page: pN` + `@page pN { size }`), so the QL's auto-cut separates them and
- * no sticker is padded to another's height — sharing one page height wasted
- * 27–46 mm of film per reprint, and a schedule runs to ~96 mm. Chrome honours
- * named pages (the print station); iPad Safari's page sizing is unreliable, so
- * the desk keeps one-sticker-at-a-time as the fallback.
- *
- * Pure: takes the finished sticker documents, so each is still rendered by its
- * own renderer and nothing about a sticker's layout changes.
- */
 /** One finished sticker document, split so it can share a page with others. */
 function stickerPart(html: string, name: string) {
   const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
@@ -341,36 +287,4 @@ ${typekit ? `<link rel="stylesheet" href="${typekit}" />` : ""}
   .label { position:relative; width:${params.widthMm}mm; height:${params.heightMm}mm; overflow:hidden; }
   ${styles.join("\n")}
 </style></head><body><div class="label">${bodies.join("")}</div></body></html>`;
-}
-
-export function combineStickerDocuments(
-  stickers: ReadonlyArray<{ html: string; widthMm: number; heightMm: number }>
-): string {
-  const pages = stickers.filter((s) => s.html && s.heightMm > 0);
-  if (pages.length === 0) return "";
-  const styles: string[] = [];
-  const bodies: string[] = [];
-  let rootVars = "";
-  pages.forEach((sticker, i) => {
-    const name = `p${i + 1}`;
-    const one = stickerPart(sticker.html, name);
-    if (one.root.length > rootVars.length) rootVars = one.root;
-    styles.push(
-      `@page ${name} { size: ${sticker.widthMm}mm ${sticker.heightMm}mm; margin: 0; }\n` +
-        `.page-${name} { page: ${name}; break-after: page; width: ${sticker.widthMm}mm; height: ${sticker.heightMm}mm; overflow: hidden; }\n` +
-        one.css
-    );
-    bodies.push(`<section class="page-${name}">${one.body}</section>`);
-  });
-  const first = pages[0];
-  const typekit = /<link rel="stylesheet" href="([^"]+)"/.exec(first.html)?.[1];
-  return `<!doctype html><html><head><meta charset="utf-8">
-${typekit ? `<link rel="stylesheet" href="${typekit}" />` : ""}
-<style>
-  @page { size: ${first.widthMm}mm ${first.heightMm}mm; margin: 0; }
-  ${rootVars}
-  html,body { margin:0; padding:0; background:transparent; }
-  section:last-of-type { break-after: auto; }
-  ${styles.join("\n")}
-</style></head><body>${bodies.join("")}</body></html>`;
 }

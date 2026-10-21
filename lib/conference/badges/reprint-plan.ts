@@ -305,7 +305,7 @@ export function suggestStock(params: {
  * then the back (the QR; on a spare, the schedule above it in the same piece).
  * Empty when the reprint is a full badge, which the QL cannot print.
  */
-export type StickerSide = "front" | "schedule" | "back";
+export type StickerSide = "front" | "back";
 export function stickersFor(plan: Pick<ReprintPlan, "transport" | "delta"> | null | undefined): StickerSide[] {
   if (!plan || plan.transport !== "ql_label") return [];
   // ⛔ Two stickers either way: on a spare the back carries the schedule AND
