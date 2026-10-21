@@ -455,7 +455,10 @@ export async function updateField({
     }
 
     // 7. Bust Next.js server cache so router.refresh() sees the new value
-    if (pageHref) {
+    if (deskConferenceId) {
+      // The desk reads its own data back; rebuilding every page on the site
+      // cost each correction ~10s at the front of a queue (2026-10-21).
+    } else if (pageHref) {
       revalidatePath(pageHref);
     } else {
       // No specific path — revalidate everything (edits are infrequent admin ops)

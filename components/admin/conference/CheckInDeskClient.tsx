@@ -750,11 +750,15 @@ export default function CheckInDeskClient({
     submitTokenRef.current = submitToken;
   }, [submitToken]);
 
-  // Which start is current: a start overtaken while the camera was still
-  // opening must close its own stream, or it holds the webcam.
-  const cameraStartRef = useRef(0);
+  // ⛔ Camera starts run ONE AT A TIME. Two starts overlapping on one <video>
+  // (page load does this) left the loser tearing down the winner's picture:
+  // the desk showed nothing and said nothing (2026-10-21). Each start waits
+  // for the last; one already superseded is skipped, and one superseded while
+  // opening closes its own stream before the next is allowed to begin.
+  const cameraGenRef = useRef(0);
+  const cameraChainRef = useRef<Promise<void>>(Promise.resolve());
   const stopCameraScanner = useCallback(() => {
-    cameraStartRef.current += 1;
+    cameraGenRef.current += 1;
     try {
       scannerControlsRef.current?.stop();
       scannerReaderRef.current?.reset?.();
@@ -786,9 +790,19 @@ export default function CheckInDeskClient({
     }
 
     setCameraError(null);
-    setCameraState("requesting");
     stopCameraScanner();
-    const thisStart = cameraStartRef.current;
+    setCameraState("requesting");
+    const thisStart = cameraGenRef.current;
+    const previous = cameraChainRef.current;
+    let done: () => void = () => undefined;
+    cameraChainRef.current = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    await previous;
+    if (thisStart !== cameraGenRef.current) {
+      done();
+      return;
+    }
 
     try {
       const zxing = await import("@zxing/browser");
@@ -812,7 +826,7 @@ export default function CheckInDeskClient({
           await submitTokenRef.current(raw);
         }
       );
-      if (thisStart !== cameraStartRef.current) {
+      if (thisStart !== cameraGenRef.current) {
         controls.stop();
         return;
       }
@@ -832,6 +846,8 @@ export default function CheckInDeskClient({
         setCameraState("error");
         setCameraError(message || "Unable to start camera scanner.");
       }
+    } finally {
+      done();
     }
   }, [refreshCameraDevices, selectedCameraId, stopCameraScanner]);
 
@@ -1090,7 +1106,7 @@ export default function CheckInDeskClient({
   const reprintBadge = useCallback(
     // ops_override is the desk's FIRST print for someone it just sold to — not
     // one of the operator's reprint reasons, so it carries a note saying so.
-    async (personId: string, reason: BadgeReprintReason, note?: string) => {
+    async (personId: string, reason: BadgeReprintReason, note?: string): Promise<boolean> => {
       setReprintBusy(personId);
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
@@ -1113,7 +1129,7 @@ export default function CheckInDeskClient({
         };
         if (!response.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
-          return;
+          return false;
         }
         if (payload.labelPrintable === true && payload.badgePrintJobId) {
           // ⛔ One tap prints (Stephen, 2026-10-21): the reprint goes straight
@@ -1130,6 +1146,7 @@ export default function CheckInDeskClient({
             { jobId: payload.badgePrintJobId, labelPrintable: true, queued: sent.success }
           );
           setReprintOpenId(null);
+          if (!sent.success) return false;
         } else {
           pushScanCard(
             "reprint_needs_full_badge",
@@ -1138,8 +1155,10 @@ export default function CheckInDeskClient({
           );
         }
         await loadRows();
+        return true;
       } catch {
         pushScanCard("scan_failed", personId, "The reprint could not be sent.");
+        return false;
       } finally {
         setReprintBusy(null);
       }
@@ -1171,8 +1190,16 @@ export default function CheckInDeskClient({
     [conferenceId]
   );
 
+  // ⛔ A card being corrected must not time out under the operator's fingers:
+  // touching the reprint panel keeps it until Print or Dismiss.
+  const pinCard = useCallback((cardId: string) => {
+    setScanCards((prev) =>
+      prev.map((card) => (card.id === cardId ? { ...card, expiresAt: Number.POSITIVE_INFINITY } : card))
+    );
+  }, []);
+
   const printReprint = useCallback(
-    async (personId: string) => {
+    async (personId: string, cardId: string) => {
       const draft = reprintDrafts[personId];
       const preview = draft?.preview;
       if (!draft || !preview) return;
@@ -1205,16 +1232,18 @@ export default function CheckInDeskClient({
       }
       // ⛔ No reason to pick: an edit IS the reason, and otherwise the desk
       // cannot tell damaged from lost without asking, so it does not ask.
-      await reprintBadge(
+      const printed = await reprintBadge(
         personId,
         changes.length > 0 ? "name_change" : "ops_override",
         changes.length > 0 ? undefined : "Reprint at the desk"
       );
+      // The new "Sent to the printer" card replaces the one it was printed from.
+      if (printed) setScanCards((prev) => prev.filter((card) => card.id !== cardId));
     },
     [conferenceId, ensureReprintDraft, pushScanCard, reprintBadge, reprintDrafts]
   );
 
-  const reprintPanel = (personId: string) => {
+  const reprintPanel = (personId: string, cardId: string) => {
     const draft = reprintDrafts[personId];
     if (!draft) return <p className="mt-2 text-sm text-gray-300">Loading their badge…</p>;
     if (draft.error || !draft.preview) {
@@ -1227,7 +1256,7 @@ export default function CheckInDeskClient({
     };
     const field = "w-full rounded bg-transparent px-1 text-black focus:bg-amber-50 focus:outline-none";
     return (
-      <div className="mt-2">
+      <div className="mt-2" onFocusCapture={() => pinCard(cardId)} onPointerDownCapture={() => pinCard(cardId)}>
         {/* What prints, as it prints. Tap a line to correct it. */}
         <div className="rounded-lg bg-white p-3 text-center text-black">
           <input
@@ -1265,7 +1294,7 @@ export default function CheckInDeskClient({
         <button
           type="button"
           disabled={reprintBusy === personId}
-          onClick={() => void printReprint(personId)}
+          onClick={() => void printReprint(personId, cardId)}
           className="mt-2 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
         >
           {reprintBusy === personId ? "…" : "Print"}
@@ -1626,7 +1655,7 @@ export default function CheckInDeskClient({
                         : " Check the pile first; print in full if it is empty."}
                     </p>
                   ) : null}
-                  {reprintPanel(card.personId)}
+                  {reprintPanel(card.personId, card.id)}
                 </div>
               ) : null}
 
@@ -1646,7 +1675,10 @@ export default function CheckInDeskClient({
                   <button
                     type="button"
                     onClick={() =>
-                      setReprintOpenId((prev) => (prev === card.id ? null : card.id))
+                      {
+                        setReprintOpenId((prev) => (prev === card.id ? null : card.id));
+                        pinCard(card.id);
+                      }
                     }
                     className="min-h-12 rounded-lg border border-white/40 px-4 text-sm font-medium text-white"
                   >
@@ -1654,7 +1686,7 @@ export default function CheckInDeskClient({
                   </button>
                 ) : null}
               </div>
-              {reprintOpenId === card.id && card.personId ? reprintPanel(card.personId) : null}
+              {reprintOpenId === card.id && card.personId ? reprintPanel(card.personId, card.id) : null}
               {expandedCardId === card.id ? (
                 <div className="mt-2 rounded border border-white/20 bg-black/50 p-2 text-sm text-gray-200">
                   <p>Email: {rows.find((r) => r.id === card.personId)?.contact_email ?? "n/a"}</p>
@@ -1704,7 +1736,7 @@ export default function CheckInDeskClient({
                   Sell them a day pass →
                 </button>
               ) : null}
-              {staysUntilTapped(card.state, card) ? (
+              {staysUntilTapped(card.state, card) || card.expiresAt === Number.POSITIVE_INFINITY ? (
                 <button
                   type="button"
                   onClick={() => setScanCards((prev) => prev.filter((entry) => entry.id !== card.id))}
@@ -1972,8 +2004,21 @@ export default function CheckInDeskClient({
                     >
                       Sell
                     </button>
+                    {/* ⛔ Already in: Find is the only way back to them when the
+                        badge is LOST (nothing to scan), so it opens the same
+                        reprint card a second scan would. */}
                     {row.checked_in_at ? (
-                      <span className="shrink-0 text-sm text-gray-400">Checked in</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLookupOpen(false);
+                          setNameLookup("");
+                          pushScanCard("already_checked_in", row.id);
+                        }}
+                        className="min-h-12 shrink-0 rounded-lg bg-white px-4 text-sm font-semibold text-black"
+                      >
+                        Reprint
+                      </button>
                     ) : (
                       <button
                         type="button"
