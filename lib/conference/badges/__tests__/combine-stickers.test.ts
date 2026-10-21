@@ -80,3 +80,14 @@ describe("a spare's back: schedule and QR on one sticker", () => {
     expect(stickersFor({ transport: "full_badge_pdf", delta: [] })).toEqual([]);
   });
 });
+
+import { portraitLengthMm } from "../label-document";
+
+describe("every sticker prints upright", () => {
+  // ⛔ A 62 × 53 mm front came out sideways: a browser reads wider-than-tall as landscape.
+  it("is never shorter than it is wide", () => {
+    expect(portraitLengthMm(62, 53)).toBe(64);
+    expect(portraitLengthMm(62, 21)).toBe(64);
+    expect(portraitLengthMm(62, 120)).toBe(120);
+  });
+});

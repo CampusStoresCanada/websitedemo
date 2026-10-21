@@ -29,6 +29,20 @@ import { DEFAULT_REPRINT_STOCK, type ReprintPlan } from "@/lib/conference/badges
 export class LabelDocumentError extends Error {}
 
 /**
+ * Never let a sticker be shorter than it is wide. ⛔ A browser reads a page
+ * wider than it is tall as LANDSCAPE and rotates it onto the printer's paper —
+ * a 62 × 53 mm front came out sideways (2026-10-21). A few millimetres of
+ * clear film is the price of printing upright.
+ */
+export function portraitLengthMm(widthMm: number, heightMm: number): number {
+  return Math.max(heightMm, Math.ceil(widthMm) + 2);
+}
+
+function withPageLength(html: string, widthMm: number, heightMm: number): string {
+  return html.replace(/@page\s*\{\s*size:[^;]*;/, `@page { size: ${widthMm}mm ${heightMm}mm;`);
+}
+
+/**
  * ⚠️ The overlay a variant prints on decides which plates are reserved, and the
  * two overlays differ: the exhibitor one has a QR plate, the delegate one does
  * not. Choosing by `front_qr` in the layer order rather than by a name keeps
@@ -176,7 +190,8 @@ export async function buildReprintLabelDocument(params: {
       widthMm: stock.widthMm,
     });
     if (!out.html) throw new LabelDocumentError("There is nothing to print on this schedule.");
-    return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
+    const length = portraitLengthMm(out.widthMm, out.heightMm);
+    return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
   }
 
   const qrDataUri = side === "back"
@@ -247,7 +262,8 @@ export async function buildReprintLabelDocument(params: {
     }
   }
 
-  return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
+  const length = portraitLengthMm(out.widthMm, out.heightMm);
+  return { html: withPageLength(out.html, out.widthMm, length), widthMm: out.widthMm, heightMm: length, side };
 }
 
 /** So the print stock policy stays one normalizer. */
