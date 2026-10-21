@@ -3,8 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
-import { recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
-import { sendReprintToQueue } from "@/lib/actions/conference-badges";
+import { listDeskCompanyContacts, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
+import {
+  loadReprintPreview,
+  sendReprintToQueue,
+  type BadgeReprintReason,
+  type ReprintPreview,
+} from "@/lib/actions/conference-badges";
+import { updateField } from "@/lib/actions/update-field";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
@@ -158,8 +164,8 @@ const SCAN_STATUS_COPY: Record<
     className: "text-amber-700",
   },
   badge_reprinted: {
-    title: "Ready to print",
-    description: "Send the stickers to the printer beside the desk.",
+    title: "Sent to the printer",
+    description: "The stickers print at the laptop beside the printer.",
     className: "text-cyan-700",
   },
   // A desk sale landed: they hold a registration now. The card prints it.
@@ -294,21 +300,6 @@ const FAILED_SCAN_STATES = new Set([
 ]);
 
 
-/**
- * Why a badge is being reprinted, in the operator's words.
- *
- * ⛔ `ops_override` is deliberately absent from the desk's quick buttons. It is
- * the reason that means "none of the above", and offering it as a one-tap
- * option next to three real reasons makes it the one people press when they are
- * in a hurry — which turns the reprint log into noise exactly when it would be
- * most useful to know why 40 badges were reprinted.
- */
-const REPRINT_REASONS = [
-  ["damaged", "Damaged"],
-  ["lost", "Lost"],
-  ["name_change", "Name change"],
-] as const;
-type ReprintReason = (typeof REPRINT_REASONS)[number][0];
 
 interface CheckInDeskClientProps {
   conferenceId: string;
@@ -750,8 +741,20 @@ export default function CheckInDeskClient({
     },
     [loadRows, pushScanCard, selectedCameraId, submitScan]
   );
+  // ⛔ The camera reads the LATEST submitToken through this ref. It used to be
+  // a dependency of startCameraScanner, and submitToken changes whenever the
+  // roster refreshes (every 30s) or a scan lands, so the camera was torn down
+  // and reopened each time: the webcam froze and went blank (2026-10-21).
+  const submitTokenRef = useRef(submitToken);
+  useEffect(() => {
+    submitTokenRef.current = submitToken;
+  }, [submitToken]);
 
+  // Which start is current: a start overtaken while the camera was still
+  // opening must close its own stream, or it holds the webcam.
+  const cameraStartRef = useRef(0);
   const stopCameraScanner = useCallback(() => {
+    cameraStartRef.current += 1;
     try {
       scannerControlsRef.current?.stop();
       scannerReaderRef.current?.reset?.();
@@ -785,6 +788,7 @@ export default function CheckInDeskClient({
     setCameraError(null);
     setCameraState("requesting");
     stopCameraScanner();
+    const thisStart = cameraStartRef.current;
 
     try {
       const zxing = await import("@zxing/browser");
@@ -805,9 +809,13 @@ export default function CheckInDeskClient({
           const last = lastDecodedRef.current;
           if (last && last.value === raw && now - last.at < 3000) return;
           lastDecodedRef.current = { value: raw, at: now };
-          await submitToken(raw);
+          await submitTokenRef.current(raw);
         }
       );
+      if (thisStart !== cameraStartRef.current) {
+        controls.stop();
+        return;
+      }
       scannerControlsRef.current = controls as unknown as { stop: () => void };
       setCameraState("active");
       await refreshCameraDevices();
@@ -825,7 +833,7 @@ export default function CheckInDeskClient({
         setCameraError(message || "Unable to start camera scanner.");
       }
     }
-  }, [refreshCameraDevices, selectedCameraId, stopCameraScanner, submitToken]);
+  }, [refreshCameraDevices, selectedCameraId, stopCameraScanner]);
 
   /** A badge code put into Find: check in exactly as a camera scan would. */
   const checkInByCode = async () => {
@@ -937,6 +945,25 @@ export default function CheckInDeskClient({
   const [walkUpTypeId, setWalkUpTypeId] = useState<string>("");
   const [namingBusy, setNamingBusy] = useState(false);
   const [namingError, setNamingError] = useState<string | null>(null);
+  // The known person picked from the company's own contacts, if any.
+  const [walkUpContactId, setWalkUpContactId] = useState<string | null>(null);
+  const [companyContacts, setCompanyContacts] = useState<
+    Record<string, Array<{ id: string; name: string; email: string | null; title: string | null }>>
+  >({});
+  useEffect(() => {
+    if (!namingOrgId || companyContacts[namingOrgId]) return;
+    const orgId = namingOrgId;
+    void listDeskCompanyContacts({ conferenceId, organizationId: orgId }).then((res) => {
+      setCompanyContacts((prev) => ({ ...prev, [orgId]: res.success ? res.data : [] }));
+    });
+  }, [companyContacts, conferenceId, namingOrgId]);
+  const contactSuggestions = useMemo(() => {
+    if (!namingOrgId || walkUpContactId) return [];
+    const typed = walkUpName.trim().toLowerCase();
+    return (companyContacts[namingOrgId] ?? [])
+      .filter((c) => !typed || c.name.toLowerCase().includes(typed))
+      .slice(0, 6);
+  }, [companyContacts, namingOrgId, walkUpContactId, walkUpName]);
 
   /**
    * Name a walk-up to one of their company's open seats.
@@ -957,6 +984,8 @@ export default function CheckInDeskClient({
         const added = await addConferenceAttendee(conferenceId, org.organizationId, {
           displayName: walkUpName.trim(),
           contactEmail: walkUpEmail.trim() || null,
+          // A known contact is seated as themselves, never re-found by email.
+          contactId: walkUpContactId,
         });
         if (!added.success) {
           setNamingError(added.error);
@@ -972,13 +1001,14 @@ export default function CheckInDeskClient({
         // The seat is already theirs, so a failure here must not send the
         // operator round again (a name-only retry would add a second person).
         let recordProblem: string | null = null;
-        if (!walkUpEmail.trim()) {
+        if (!walkUpEmail.trim() && !walkUpContactId) {
           const recorded = await recordNameOnlyWalkUp({ conferenceId, conferencePersonId: added.data.id });
           if (!recorded.success) recordProblem = `Their badge may not print yet: ${recorded.error}`;
         }
         setNamingOrgId(null);
         setWalkUpName("");
         setWalkUpEmail("");
+        setWalkUpContactId(null);
         setNameLookup("");
         setLookupOpen(false);
         // An unknown person on a card makes the desk refetch roster, facts and
@@ -990,7 +1020,7 @@ export default function CheckInDeskClient({
         setNamingBusy(false);
       }
     },
-    [conferenceId, pushScanCard, walkUpEmail, walkUpName, walkUpTypeId]
+    [conferenceId, pushScanCard, walkUpContactId, walkUpEmail, walkUpName, walkUpTypeId]
   );
 
   /**
@@ -1060,7 +1090,7 @@ export default function CheckInDeskClient({
   const reprintBadge = useCallback(
     // ops_override is the desk's FIRST print for someone it just sold to — not
     // one of the operator's reprint reasons, so it carries a note saying so.
-    async (personId: string, reason: ReprintReason | "ops_override") => {
+    async (personId: string, reason: BadgeReprintReason, note?: string) => {
       setReprintBusy(personId);
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
@@ -1071,7 +1101,7 @@ export default function CheckInDeskClient({
           body: JSON.stringify({
             op: "reprint_badge",
             reprintReason: reason,
-            ...(reason === "ops_override" ? { reprintNote: "First badge for a desk sale" } : {}),
+            ...(note ? { reprintNote: note } : {}),
             // What the operator says they are holding, else the desk's guess.
             stockInHand: cardInHandRef.current[personId] ?? facts[personId]?.reprintStock,
           }),
@@ -1086,11 +1116,20 @@ export default function CheckInDeskClient({
           return;
         }
         if (payload.labelPrintable === true && payload.badgePrintJobId) {
-          pushScanCard("badge_reprinted", personId, null, {
-            jobId: payload.badgePrintJobId,
-            labelPrintable: true,
-            queued: false,
-          });
+          // ⛔ One tap prints (Stephen, 2026-10-21): the reprint goes straight
+          // to the print station, no second "Send to printer".
+          const sent = await sendReprintToQueue({ conferenceId, jobId: payload.badgePrintJobId });
+          pushScanCard(
+            sent.success ? "badge_reprinted" : "scan_failed",
+            personId,
+            !sent.success
+              ? sent.error
+              : sent.data.stationOnline
+                ? null
+                : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.",
+            { jobId: payload.badgePrintJobId, labelPrintable: true, queued: sent.success }
+          );
+          setReprintOpenId(null);
         } else {
           pushScanCard(
             "reprint_needs_full_badge",
@@ -1107,6 +1146,133 @@ export default function CheckInDeskClient({
     },
     [conferenceId, facts, loadRows, pushScanCard]
   );
+
+  /**
+   * The reprint preview: what will print, editable in place (Stephen,
+   * 2026-10-21). A corrected name or title saves to the person's contact
+   * record through updateField, with the desk's permission and no Circle push.
+   */
+  const [reprintDrafts, setReprintDrafts] = useState<
+    Record<string, { preview: ReprintPreview | null; error: string | null; first: string; last: string; title: string }>
+  >({});
+  const loadingDraftsRef = useRef(new Set<string>());
+  const ensureReprintDraft = useCallback(
+    async (personId: string) => {
+      if (loadingDraftsRef.current.has(personId)) return;
+      loadingDraftsRef.current.add(personId);
+      const res = await loadReprintPreview({ conferenceId, personId });
+      setReprintDrafts((prev) => ({
+        ...prev,
+        [personId]: res.success
+          ? { preview: res.data, error: null, first: res.data.firstName, last: res.data.lastName, title: res.data.roleTitle }
+          : { preview: null, error: res.error, first: "", last: "", title: "" },
+      }));
+    },
+    [conferenceId]
+  );
+
+  const printReprint = useCallback(
+    async (personId: string) => {
+      const draft = reprintDrafts[personId];
+      const preview = draft?.preview;
+      if (!draft || !preview) return;
+      const changes = (
+        [
+          ["first_name", draft.first.trim(), preview.firstName],
+          ["last_name", draft.last.trim(), preview.lastName],
+          ["role_title", draft.title.trim(), preview.roleTitle],
+        ] as const
+      ).filter(([, next, before]) => next !== before.trim());
+      if (changes.length > 0 && preview.contactId) {
+        setReprintBusy(personId);
+        for (const [column, next] of changes) {
+          const saved = await updateField({
+            table: "contacts",
+            column,
+            entityId: preview.contactId,
+            newValue: next || null,
+            deskConferenceId: conferenceId,
+          });
+          if (!saved.success) {
+            setReprintBusy(null);
+            pushScanCard("scan_failed", personId, saved.error ?? "The name could not be saved.");
+            return;
+          }
+        }
+        // Read back what was saved, so a second reprint starts from it.
+        loadingDraftsRef.current.delete(personId);
+        void ensureReprintDraft(personId);
+      }
+      // ⛔ No reason to pick: an edit IS the reason, and otherwise the desk
+      // cannot tell damaged from lost without asking, so it does not ask.
+      await reprintBadge(
+        personId,
+        changes.length > 0 ? "name_change" : "ops_override",
+        changes.length > 0 ? undefined : "Reprint at the desk"
+      );
+    },
+    [conferenceId, ensureReprintDraft, pushScanCard, reprintBadge, reprintDrafts]
+  );
+
+  const reprintPanel = (personId: string) => {
+    const draft = reprintDrafts[personId];
+    if (!draft) return <p className="mt-2 text-sm text-gray-300">Loading their badge…</p>;
+    if (draft.error || !draft.preview) {
+      return <p className="mt-2 text-sm text-amber-200">{draft.error ?? "Their badge could not be loaded."}</p>;
+    }
+    const editable = Boolean(draft.preview.contactId);
+    const set = (field: "first" | "last" | "title") => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setReprintDrafts((prev) => ({ ...prev, [personId]: { ...prev[personId], [field]: value } }));
+    };
+    const field = "w-full rounded bg-transparent px-1 text-black focus:bg-amber-50 focus:outline-none";
+    return (
+      <div className="mt-2">
+        {/* What prints, as it prints. Tap a line to correct it. */}
+        <div className="rounded-lg bg-white p-3 text-center text-black">
+          <input
+            aria-label="First name"
+            value={draft.first}
+            onChange={set("first")}
+            disabled={!editable}
+            className={`${field} text-center text-2xl font-bold uppercase`}
+          />
+          <input
+            aria-label="Last name"
+            value={draft.last}
+            onChange={set("last")}
+            disabled={!editable}
+            className={`${field} text-center text-lg`}
+          />
+          <input
+            aria-label="Title"
+            value={draft.title}
+            onChange={set("title")}
+            disabled={!editable}
+            placeholder="No title"
+            className={`${field} text-center text-sm`}
+          />
+          {draft.preview.organizationName ? (
+            <p className="mt-1 text-sm font-semibold">{draft.preview.organizationName}</p>
+          ) : null}
+        </div>
+        <p className="mt-1 text-xs text-gray-400">
+          {editable
+            ? "Tap a line to correct it. A correction saves to their record."
+            : "This badge has no contact record to correct."}
+        </p>
+        {cardInHandPicker(personId)}
+        <button
+          type="button"
+          disabled={reprintBusy === personId}
+          onClick={() => void printReprint(personId)}
+          className="mt-2 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
+        >
+          {reprintBusy === personId ? "…" : "Print"}
+        </button>
+      </div>
+    );
+  };
 
   // "Send to print queue": the laptop beside the QL prints it (print station).
   const sendToPrintQueue = useCallback(
@@ -1138,6 +1304,15 @@ export default function CheckInDeskClient({
     () => scanCards.filter((card) => card.expiresAt > nowMs),
     [nowMs, scanCards]
   );
+
+  // Load the preview for every open reprint: an already-checked-in scan opens
+  // one on its own, any other card when Reprint Badge is tapped.
+  useEffect(() => {
+    for (const card of activeCards) {
+      if (!card.personId) continue;
+      if (card.state === "already_checked_in" || reprintOpenId === card.id) void ensureReprintDraft(card.personId);
+    }
+  }, [activeCards, ensureReprintDraft, reprintOpenId]);
 
   useEffect(() => {
     void refreshCameraDevices();
@@ -1451,23 +1626,7 @@ export default function CheckInDeskClient({
                         : " Check the pile first; print in full if it is empty."}
                     </p>
                   ) : null}
-                  {cardInHandPicker(card.personId)}
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {REPRINT_REASONS.map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        disabled={reprintBusy === card.personId}
-                        onClick={() => void reprintBadge(card.personId as string, value)}
-                        className="min-h-12 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50"
-                      >
-                        {reprintBusy === card.personId ? "…" : label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="mt-1 text-xs text-gray-400">
-                    Nothing prints until you pick a reason.
-                  </p>
+                  {reprintPanel(card.personId)}
                 </div>
               ) : null}
 
@@ -1495,22 +1654,7 @@ export default function CheckInDeskClient({
                   </button>
                 ) : null}
               </div>
-              {reprintOpenId === card.id && card.personId ? cardInHandPicker(card.personId) : null}
-              {reprintOpenId === card.id && card.personId ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {REPRINT_REASONS.map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      disabled={reprintBusy === card.personId}
-                      onClick={() => void reprintBadge(card.personId as string, value)}
-                      className="min-h-12 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              {reprintOpenId === card.id && card.personId ? reprintPanel(card.personId) : null}
               {expandedCardId === card.id ? (
                 <div className="mt-2 rounded border border-white/20 bg-black/50 p-2 text-sm text-gray-200">
                   <p>Email: {rows.find((r) => r.id === card.personId)?.contact_email ?? "n/a"}</p>
@@ -1523,7 +1667,7 @@ export default function CheckInDeskClient({
                 <button
                   type="button"
                   disabled={reprintBusy === card.personId}
-                  onClick={() => void reprintBadge(card.personId as string, "ops_override")}
+                  onClick={() => void reprintBadge(card.personId as string, "ops_override", "First badge for a desk sale")}
                   className="mt-3 min-h-12 w-full rounded-lg bg-white px-4 text-base font-semibold text-black disabled:opacity-50"
                 >
                   {reprintBusy === card.personId ? "…" : "Print badge"}
@@ -1668,6 +1812,7 @@ export default function CheckInDeskClient({
                           type="button"
                           onClick={() => {
                             setNamingOrgId(org.organizationId);
+                            setWalkUpContactId(null);
                             setWalkUpTypeId(org.types[0]?.typeId ?? "");
                             setNamingError(null);
                           }}
@@ -1681,17 +1826,48 @@ export default function CheckInDeskClient({
                       <div className="mt-1.5 space-y-1">
                         <input
                           value={walkUpName}
-                          onChange={(event) => setWalkUpName(event.target.value)}
+                          onChange={(event) => {
+                            setWalkUpName(event.target.value);
+                            // Typing again means somebody new, not the person picked.
+                            if (walkUpContactId) {
+                              setWalkUpContactId(null);
+                              setWalkUpEmail("");
+                            }
+                          }}
                           placeholder="Their name"
                           className="min-h-12 w-full rounded-lg border border-white/40 bg-black px-4 text-sm text-white placeholder:text-gray-400"
                         />
-                        <input
-                          value={walkUpEmail}
-                          onChange={(event) => setWalkUpEmail(event.target.value)}
-                          placeholder="Email (optional)"
-                          className="min-h-12 w-full rounded-lg border border-white/40 bg-black px-4 text-sm text-white placeholder:text-gray-400"
-                        />
-                        {walkUpEmail.trim() ? null : (
+                        {/* ⛔ Only this company's contacts (Stephen, 2026-10-21). */}
+                        {contactSuggestions.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {contactSuggestions.map((c) => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setWalkUpContactId(c.id);
+                                  setWalkUpName(c.name);
+                                  setWalkUpEmail(c.email ?? "");
+                                }}
+                                className="min-h-12 rounded-lg border border-white/40 px-3 text-left text-sm text-white"
+                              >
+                                {c.name}
+                                {c.title ? <span className="block text-xs text-gray-400">{c.title}</span> : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        {walkUpContactId ? (
+                          <p className="text-xs text-emerald-200">Already one of their contacts: seated as themselves.</p>
+                        ) : (
+                          <input
+                            value={walkUpEmail}
+                            onChange={(event) => setWalkUpEmail(event.target.value)}
+                            placeholder="Email (optional)"
+                            className="min-h-12 w-full rounded-lg border border-white/40 bg-black px-4 text-sm text-white placeholder:text-gray-400"
+                          />
+                        )}
+                        {walkUpEmail.trim() || walkUpContactId ? null : (
                           <p className="text-xs text-gray-300">
                             No email: they get a badge but no login, and their company&apos;s admin is told.
                           </p>

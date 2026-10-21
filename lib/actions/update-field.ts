@@ -4,9 +4,9 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
+  requireConferenceDeskAccess,
 } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle";
 import {
   EDITABLE_COLUMNS,
   isTier2,
@@ -36,6 +36,27 @@ interface UpdateFieldParams {
   entityDisplayName?: string;
   /** Page path for deep-link in emails, e.g. "/org/lakeland-college". */
   pageHref?: string;
+  /**
+   * The check-in desk correcting a name or title before a reprint (Stephen,
+   * 2026-10-21). Desk staff are not org admins, so this is their permission:
+   * desk access to THIS conference, for a contact registered at it, and only
+   * the name and title.
+   *
+   * ⛔ A desk edit never reaches Circle. Two Circle accounts are shared by
+   * contacts with different names (2026-10-21); a desk rename of either would
+   * rename the other person's Circle profile. Circle is corrected on purpose,
+   * from the org page.
+   */
+  deskConferenceId?: string;
+}
+
+/** What the desk may correct: the words printed on the badge. */
+const DESK_EDITABLE_CONTACT_COLUMNS = new Set(["first_name", "last_name", "role_title"]);
+
+/** "Mary Ann Smith" → Mary / Ann Smith; one word is a first name alone. */
+function splitName(name: string): { first_name: string | null; last_name: string | null } {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return { first_name: parts[0] ?? null, last_name: parts.slice(1).join(" ") || null };
 }
 
 export interface UpdateFieldResult {
@@ -45,54 +66,6 @@ export interface UpdateFieldResult {
   /** Set when the change was queued for second-signer approval (Tier 2, no orgId). */
   pendingChangeId?: string;
   requiresApproval?: boolean;
-}
-
-type ContactIdentityRow = {
-  id: string;
-  organization_id: string | null;
-  name: string;
-  work_email: string | null;
-  email: string | null;
-  role_title: string | null;
-  work_phone_number: string | null;
-  phone: string | null;
-  archived_at: string | null;
-};
-
-async function syncContactIdentity(contact: ContactIdentityRow): Promise<void> {
-  if (!contact.organization_id || contact.archived_at) return;
-
-  const person = await ensureKnownPerson({
-    organizationId: contact.organization_id,
-    name: contact.name,
-    email: contact.work_email ?? contact.email ?? null,
-    title: contact.role_title,
-    workPhone: contact.work_phone_number,
-    mobilePhone: contact.phone,
-  });
-
-  if (person.error || !person.personId) {
-    console.warn(
-      "[update-field] contact identity sync skipped:",
-      person.error ?? "no person resolved"
-    );
-    return;
-  }
-
-  const contactSync = await upsertPersonContact({
-    organizationId: contact.organization_id,
-    personId: person.personId,
-    name: contact.name,
-    email: contact.work_email ?? contact.email ?? null,
-    roleTitle: contact.role_title,
-    phone: contact.phone,
-    workPhone: contact.work_phone_number,
-    contactType: ["directory"],
-  });
-
-  if (contactSync.error) {
-    console.warn("[update-field] contact projection sync failed:", contactSync.error);
-  }
 }
 
 /**
@@ -118,6 +91,7 @@ export async function updateField({
   orgId,
   entityDisplayName,
   pageHref,
+  deskConferenceId,
 }: UpdateFieldParams): Promise<UpdateFieldResult> {
   try {
     const auth = await requireAuthenticated();
@@ -141,6 +115,8 @@ export async function updateField({
     // Set only on the benchmarking path; carries the amendment facts from the
     // permission check down to the write and the audit row.
     let benchmarkingEdit: BenchmarkingEditDecision | null = null;
+    // The contact's split name, so a name edit keeps name and first/last in step.
+    let contactNameParts: { first_name: string | null; last_name: string | null } | null = null;
 
     if (table === "organizations") {
       const { data: org } = await supabase
@@ -163,11 +139,12 @@ export async function updateField({
       const adminClient = createAdminClient();
       const { data: contact } = await adminClient
         .from("contacts")
-        .select("id, name, organization_id, " + column)
+        .select("id, name, first_name, last_name, work_email, email, organization_id, " + column)
         .eq("id", entityId)
         .single();
 
       if (!contact) return { success: false, error: "Contact not found" };
+      contactNameParts = contact as unknown as { first_name: string | null; last_name: string | null };
       const contactData = contact as unknown as Record<string, unknown>;
       previousValue = contactData[column] as string | number | null;
       const cOrgId = contactData.organization_id as string | null;
@@ -179,6 +156,24 @@ export async function updateField({
       const isOwnContact = !!auth.ctx.userEmail && !!contactEmail &&
         contactEmail.toLowerCase() === auth.ctx.userEmail.toLowerCase();
       canEdit = isOrgAdmin || isOwnContact;
+
+      if (!canEdit && deskConferenceId) {
+        if (!DESK_EDITABLE_CONTACT_COLUMNS.has(column)) {
+          return { success: false, error: "The desk can only correct a name or title." };
+        }
+        const desk = await requireConferenceDeskAccess(deskConferenceId);
+        if (!desk.ok) return { success: false, error: desk.error };
+        // Only somebody registered at this conference: desk access is not a
+        // licence to edit any contact on the site.
+        const { data: registered } = await adminClient
+          .from("conference_people")
+          .select("id")
+          .eq("conference_id", deskConferenceId)
+          .eq("canonical_person_id", entityId)
+          .limit(1)
+          .maybeSingle();
+        canEdit = Boolean(registered);
+      }
     } else if (table === "brand_colors") {
       const { data: color } = await supabase
         .from("brand_colors")
@@ -293,11 +288,28 @@ export async function updateField({
     // amended_at is what stops it from reading, a year later, as what the store
     // originally filed — the same column the survey's own amend flow sets.
     const isBenchmarkingAmendment = table === "benchmarking";
+    // ⛔ A contact's name lives twice: `name` (the directory, Circle) and
+    // first_name/last_name (the badge reads these). An edit to one used to leave
+    // the other stale, so a corrected name never reached a printed badge.
+    const nameInStep: Record<string, string | null> = {};
+    if (table === "contacts" && contactNameParts) {
+      const text = typeof newValue === "string" ? newValue.trim() : "";
+      if (column === "name" && text) {
+        Object.assign(nameInStep, splitName(text));
+      } else if (column === "first_name" || column === "last_name") {
+        const parts = { ...contactNameParts, [column]: text || null };
+        const full = [parts.first_name, parts.last_name].filter(Boolean).join(" ").trim();
+        if (!full) return { success: false, error: "A name can't be empty." };
+        nameInStep.name = full;
+      }
+    }
+    const fullNameAfter = (nameInStep.name ?? (column === "name" ? newValue : null)) as string | null;
     const adminClient = createAdminClient();
     const { error: updateError } = await adminClient
       .from(table)
       .update({
         [column]: newValue,
+        ...nameInStep,
         ...(isManualFteEdit ? { fte_is_manual_override: true } : {}),
         ...(isPublicContactEdit ? { public_contact_confirmed_at: new Date().toISOString() } : {}),
         ...(isBenchmarkingAmendment ? { amended_at: new Date().toISOString() } : {}),
@@ -350,45 +362,34 @@ export async function updateField({
     }
 
     // 5. Post-write side effects
-    if (table === "contacts") {
-      const { data: updatedContact, error: updatedContactError } = await adminClient
-        .from("contacts")
-        .select("id, organization_id, name, work_email, email, role_title, work_phone_number, phone, archived_at")
-        .eq("id", entityId)
-        .maybeSingle();
+    // ⛔ This used to re-match the contact BY EMAIL (ensureKnownPerson) and
+    // write it back: on a shared inbox that picked whichever row came first, so
+    // renaming one person could put their name on the other's record, and every
+    // edit reset contact_type to ["directory"]. A contact row IS the person now;
+    // the write above is the whole edit.
+    //
+    // Push profile edits outward. The database is the source of truth: a
+    // change made here has to reach the other endpoints, not sit locally.
+    // Circle accepts name and custom profile fields. It has no field for
+    // phone, and member email is an identity change rather than a profile
+    // edit, so neither is pushed. ⛔ Never from the desk (deskConferenceId).
+    if (table === "contacts" && !deskConferenceId) {
+      const payload =
+        fullNameAfter
+          ? { name: fullNameAfter }
+          : column === "role_title" && typeof newValue === "string" && newValue
+            ? { jobTitle: newValue }
+            : null;
 
-      if (updatedContactError) {
-        console.warn("[update-field] unable to load contact after update:", updatedContactError.message);
-      } else if (updatedContact) {
-        await syncContactIdentity(updatedContact as ContactIdentityRow);
-      }
-
-      // Push profile edits outward. The database is the source of truth: a
-      // change made here has to reach the other endpoints, not sit locally.
-      // This used to fire for `name` only, so editing someone's job title on
-      // the website never reached Circle at all.
-      //
-      // Circle accepts name and custom profile fields. It has no field for
-      // phone, and member email is an identity change rather than a profile
-      // edit, so neither is pushed.
-      if (typeof newValue === "string" && newValue) {
-        const payload =
-          column === "name"
-            ? { name: newValue }
-            : column === "role_title"
-              ? { jobTitle: newValue }
-              : null;
-
-        if (payload) {
-          void enqueueCircleSync({
-            operation: "update_profile",
-            entityType: "contact",
-            entityId,
-            payload,
-            orgId: resolvedOrgId ?? undefined,
-            idempotencyKey: `update-profile-${column}-${entityId}-${newValue}`,
-          });
-        }
+      if (payload) {
+        void enqueueCircleSync({
+          operation: "update_profile",
+          entityType: "contact",
+          entityId,
+          payload,
+          orgId: resolvedOrgId ?? undefined,
+          idempotencyKey: `update-profile-${column}-${entityId}-${fullNameAfter ?? newValue}`,
+        });
       }
     }
 
@@ -414,6 +415,9 @@ export async function updateField({
           organization_id: resolvedOrgId,
           entity_name: resolvedDisplayName,
           changed_by_email: userEmail ?? null,
+          // The desk's corrections, told apart from an org admin's.
+          via_check_in_desk: deskConferenceId || undefined,
+          name_kept_in_step: Object.keys(nameInStep).length ? nameInStep : undefined,
           // The two writes that reach beyond this row, recorded so the effect
           // is legible without re-deriving it from the column name.
           set_manual_override: isManualFteEdit || undefined,

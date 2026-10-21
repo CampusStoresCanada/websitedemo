@@ -80,6 +80,47 @@ async function personQrDataUri(
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
 
+/**
+ * The name and title a reprint prints, for one roster row.
+ *
+ * ⛔ The badge's own identity rule (badgeNames / badgeRoleTitle): the contact
+ * record first, then the roster row, never a split of our own. One reader for
+ * the sticker AND the desk's preview, so what the operator checks is what prints.
+ */
+export async function loadBadgeIdentity(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any,
+  person: Record<string, unknown>
+): Promise<{
+  contactId: string | null;
+  names: { firstName: string | null; lastName: string | null; displayName: string | null };
+  roleTitle: string | null;
+}> {
+  const canonicalId = typeof person.canonical_person_id === "string" ? person.canonical_person_id : null;
+  const { data: canonical } = canonicalId
+    ? await db.from("contacts").select("first_name, last_name, title:role_title").eq("id", canonicalId).maybeSingle()
+    : { data: null };
+  const rowEmail =
+    (typeof person.contact_email === "string" && person.contact_email.trim().toLowerCase()) ||
+    (typeof person.assigned_email_snapshot === "string" && person.assigned_email_snapshot.trim().toLowerCase()) ||
+    null;
+  const { data: emailContact } =
+    rowEmail && person.organization_id
+      ? await db
+          .from("contacts")
+          .select("role_title")
+          .eq("organization_id", person.organization_id)
+          .or(`work_email.eq.${rowEmail},email.eq.${rowEmail}`)
+          .limit(1)
+          .maybeSingle()
+      : { data: null };
+  return {
+    contactId: canonical ? canonicalId : null,
+    names: badgeNames(person, canonical ?? null),
+    roleTitle: badgeRoleTitle(person, canonical ?? null, emailContact ?? null),
+  };
+}
+
 export async function buildReprintLabelDocument(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
   db: any;
@@ -120,28 +161,7 @@ export async function buildReprintLabelDocument(params: {
     .maybeSingle();
   if (!person) throw new LabelDocumentError("That person is no longer on this conference.");
 
-  // ⛔ The badge's own identity rule (badgeNames / badgeRoleTitle): the contact
-  // record first, then the roster row — never a split of our own.
-  const canonicalId = typeof person.canonical_person_id === "string" ? person.canonical_person_id : null;
-  const { data: canonical } = canonicalId
-    ? await db.from("contacts").select("first_name, last_name, title:role_title").eq("id", canonicalId).maybeSingle()
-    : { data: null };
-  const rowEmail =
-    (typeof person.contact_email === "string" && person.contact_email.trim().toLowerCase()) ||
-    (typeof person.assigned_email_snapshot === "string" && person.assigned_email_snapshot.trim().toLowerCase()) ||
-    null;
-  const { data: emailContact } =
-    rowEmail && person.organization_id
-      ? await db
-          .from("contacts")
-          .select("role_title")
-          .eq("organization_id", person.organization_id)
-          .or(`work_email.eq.${rowEmail},email.eq.${rowEmail}`)
-          .limit(1)
-          .maybeSingle()
-      : { data: null };
-  const names = badgeNames(person as Record<string, unknown>, canonical ?? null);
-  const roleTitle = badgeRoleTitle(person as Record<string, unknown>, canonical ?? null, emailContact ?? null);
+  const { names, roleTitle } = await loadBadgeIdentity(db, person as Record<string, unknown>);
 
   // ⛔ Which badge this person's card is: the badge run's own answer
   // (badgeTypeForPerson), not "any seat they hold" — an event seat would pick

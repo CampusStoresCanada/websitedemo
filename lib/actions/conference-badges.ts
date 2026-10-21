@@ -1141,6 +1141,48 @@ export async function sendReprintToQueue(params: {
   };
 }
 
+export type ReprintPreview = {
+  /** The contact the edit saves to; null = nothing to edit, the roster row prints. */
+  contactId: string | null;
+  firstName: string;
+  lastName: string;
+  roleTitle: string;
+  organizationName: string | null;
+};
+
+/**
+ * What a reprint will print, for the desk to check and correct before it does.
+ * The sticker's own reader (loadBadgeIdentity), so the preview is the print.
+ */
+export async function loadReprintPreview(params: {
+  conferenceId: string;
+  personId: string;
+}): Promise<QueueResult<ReprintPreview>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: person } = await db
+    .from("conference_people")
+    .select("*, organizations(name)")
+    .eq("id", params.personId)
+    .eq("conference_id", params.conferenceId)
+    .maybeSingle();
+  if (!person) return { success: false, error: "That person is not on this conference." };
+  const { loadBadgeIdentity } = await import("@/lib/conference/badges/label-document");
+  const identity = await loadBadgeIdentity(db, person as Record<string, unknown>);
+  const org = (person as { organizations?: { name?: string | null } | null }).organizations;
+  return {
+    success: true,
+    data: {
+      contactId: identity.contactId,
+      firstName: identity.names.firstName ?? "",
+      lastName: identity.names.lastName ?? "",
+      roleTitle: identity.roleTitle ?? "",
+      organizationName: org?.name ?? null,
+    },
+  };
+}
+
 export type QueuedLabel = { jobId: string; personName: string; queuedAt: string; stickers: StickerSide[] };
 
 /** What the print station has to print, oldest first. */

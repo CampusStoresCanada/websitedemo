@@ -33,6 +33,9 @@ export const EDITABLE_COLUMNS = {
   ],
   contacts: [
     "name",
+    // The badge prints these; updateField keeps `name` in step with them.
+    "first_name",
+    "last_name",
     "work_email",
     "email",
     "role_title",

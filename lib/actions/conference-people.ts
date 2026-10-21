@@ -1863,6 +1863,53 @@ export async function scanConferenceCheckInToken(params: {
 
 
 /**
+ * The company's own people, for the desk's "Name someone" (Stephen, 2026-10-21):
+ * it suggests contacts AT THAT COMPANY only, so a known person is seated as
+ * themselves instead of being typed in again as a second record.
+ *
+ * Leaves out anyone already registered here: they are on the roster, and Find
+ * already reaches them.
+ */
+export async function listDeskCompanyContacts(params: {
+  conferenceId: string;
+  organizationId: string;
+}): Promise<
+  | { success: true; data: Array<{ id: string; name: string; email: string | null; title: string | null }> }
+  | { success: false; error: string }
+> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const [{ data: contacts, error }, { data: registered }] = await Promise.all([
+    db
+      .from("contacts")
+      .select("id, name, work_email, email, role_title")
+      .eq("organization_id", params.organizationId)
+      .is("archived_at", null)
+      .order("name"),
+    db
+      .from("conference_people")
+      .select("canonical_person_id")
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .not("canonical_person_id", "is", null),
+  ]);
+  if (error) return { success: false, error: error.message };
+  const here = new Set((registered ?? []).map((row) => row.canonical_person_id as string));
+  return {
+    success: true,
+    data: (contacts ?? [])
+      .filter((c) => !here.has(c.id as string) && String(c.name ?? "").trim())
+      .map((c) => ({
+        id: c.id as string,
+        name: String(c.name).trim(),
+        email: ((c.work_email ?? c.email) as string | null) ?? null,
+        title: (c.role_title as string | null) ?? null,
+      })),
+  };
+}
+
+/**
  * A walk-up named at the desk with NO email: give them a person record so
  * their badge can print, and tell their company's admins.
  *
