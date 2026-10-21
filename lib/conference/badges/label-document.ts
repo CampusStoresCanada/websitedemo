@@ -15,7 +15,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveBadgeVariant, type BadgePersonRecord } from "@/lib/conference/badges/template";
 import { renderScheduleLabel } from "@/lib/conference/badges/render-html";
-import { loadActiveBadgeTemplate } from "@/lib/conference/badges/document";
+import { badgeNames, badgeRoleTitle, loadActiveBadgeTemplate } from "@/lib/conference/badges/document";
 import { badgeTypeForPerson, resolveBadgeRun } from "@/lib/conference/badges/run";
 import { renderReprintLabel } from "@/lib/conference/badges/label-html";
 import { reservedPlatesFromOverlay } from "@/lib/conference/badges/label-placement";
@@ -115,10 +115,33 @@ export async function buildReprintLabelDocument(params: {
 
   const { data: person } = await db
     .from("conference_people")
-    .select("id, display_name, role_title, organization_id, organizations(name, logo_url)")
+    .select("*, organizations(name, logo_url)")
     .eq("id", job.person_id)
     .maybeSingle();
   if (!person) throw new LabelDocumentError("That person is no longer on this conference.");
+
+  // ⛔ The badge's own identity rule (badgeNames / badgeRoleTitle): the contact
+  // record first, then the roster row — never a split of our own.
+  const canonicalId = typeof person.canonical_person_id === "string" ? person.canonical_person_id : null;
+  const { data: canonical } = canonicalId
+    ? await db.from("contacts").select("first_name, last_name, title:role_title").eq("id", canonicalId).maybeSingle()
+    : { data: null };
+  const rowEmail =
+    (typeof person.contact_email === "string" && person.contact_email.trim().toLowerCase()) ||
+    (typeof person.assigned_email_snapshot === "string" && person.assigned_email_snapshot.trim().toLowerCase()) ||
+    null;
+  const { data: emailContact } =
+    rowEmail && person.organization_id
+      ? await db
+          .from("contacts")
+          .select("role_title")
+          .eq("organization_id", person.organization_id)
+          .or(`work_email.eq.${rowEmail},email.eq.${rowEmail}`)
+          .limit(1)
+          .maybeSingle()
+      : { data: null };
+  const names = badgeNames(person as Record<string, unknown>, canonical ?? null);
+  const roleTitle = badgeRoleTitle(person as Record<string, unknown>, canonical ?? null, emailContact ?? null);
 
   // ⛔ Which badge this person's card is: the badge run's own answer
   // (badgeTypeForPerson), not "any seat they hold" — an event seat would pick
@@ -133,8 +156,6 @@ export async function buildReprintLabelDocument(params: {
   // second answer to "what does this person's badge look like".
   const { front } = resolveBadgeVariant(template, { variantKey: badgeTypeId });
 
-  const display = String(person.display_name ?? "").trim();
-  const gap = display.lastIndexOf(" ");
   const stock = plan.stockSpec ?? DEFAULT_REPRINT_STOCK;
 
   const side = params.side ?? "front";
@@ -171,9 +192,9 @@ export async function buildReprintLabelDocument(params: {
     side,
     qrDataUri,
     person: {
-      firstName: gap > 0 ? display.slice(0, gap) : display,
-      lastName: gap > 0 ? display.slice(gap + 1) : "",
-      roleTitle: String(person.role_title ?? ""),
+      firstName: names.firstName ?? "",
+      lastName: names.lastName ?? "",
+      roleTitle: roleTitle ?? "",
       organizationName: (person.organizations as { name?: string } | null)?.name ?? "",
       // ⛔ A spare carries no branding, so the sticker supplies the mark.
       logoUrl: (person.organizations as { logo_url?: string } | null)?.logo_url ?? null,

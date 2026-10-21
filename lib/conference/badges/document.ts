@@ -244,6 +244,41 @@ function orgLogoUrl(org: Record<string, unknown> | undefined): string | null {
   return org?.organization_type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
 }
 
+/**
+ * The name on a badge. ⛔ ONE rule for the printed badge and the desk's reprint
+ * sticker: the person's contact record (first / last name) when they have one,
+ * otherwise the roster row (deriveNames: the FIRST word is the given name). The
+ * sticker once split at the LAST word instead, and printed "DESK TEST
+ * THURSDAY / Only" for a badge that reads "DESK / Test Thursday Only".
+ */
+export function badgeNames(
+  row: Record<string, unknown>,
+  canonicalPerson: { first_name: string | null; last_name: string | null } | null
+): { firstName: string | null; lastName: string | null; displayName: string | null } {
+  return canonicalPerson
+    ? {
+        firstName: canonicalPerson.first_name?.trim() || null,
+        lastName: canonicalPerson.last_name?.trim() || null,
+        displayName: `${canonicalPerson.first_name ?? ""} ${canonicalPerson.last_name ?? ""}`.trim() || null,
+      }
+    : deriveNames(row);
+}
+
+/** The title on a badge — same order for the badge and the sticker. */
+export function badgeRoleTitle(
+  row: Record<string, unknown>,
+  canonicalPerson: { title: string | null } | null,
+  canonicalContact: { role_title: string | null } | null
+): string | null {
+  return (
+    (canonicalPerson?.title?.trim() || null) ||
+    (typeof row.role_title === "string" && row.role_title.trim()) ||
+    (typeof row.delegate_title === "string" && row.delegate_title.trim()) ||
+    (canonicalContact?.role_title?.trim() || null) ||
+    null
+  );
+}
+
 function toBadgePerson(
   row: Record<string, unknown>,
   qrPayloadByPersonId: Map<string, string>,
@@ -263,14 +298,7 @@ function toBadgePerson(
     (typeof row.badge_organization_id === "string" && row.badge_organization_id) ||
     null;
   const org = organizationId ? orgById.get(organizationId) : null;
-  const names = canonicalPerson
-    ? {
-        firstName: canonicalPerson.first_name?.trim() || null,
-        lastName: canonicalPerson.last_name?.trim() || null,
-        displayName:
-          `${canonicalPerson.first_name ?? ""} ${canonicalPerson.last_name ?? ""}`.trim() || null,
-      }
-    : deriveNames(row);
+  const names = badgeNames(row, canonicalPerson);
   const displayName = names.displayName;
   const rowContactEmail =
     (canonicalPerson?.primary_email?.trim().toLowerCase() || null) ||
@@ -321,12 +349,7 @@ function toBadgePerson(
     displayName,
     firstName: names.firstName,
     lastName: names.lastName,
-    roleTitle:
-      (canonicalPerson?.title?.trim() || null) ||
-      (typeof row.role_title === "string" && row.role_title.trim()) ||
-      (typeof row.delegate_title === "string" && row.delegate_title.trim()) ||
-      (canonicalContact?.role_title?.trim() || null) ||
-      null,
+    roleTitle: badgeRoleTitle(row, canonicalPerson, canonicalContact),
     organizationName: orgName,
     logoUrl,
     qrPayload,
