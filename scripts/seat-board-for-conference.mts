@@ -29,6 +29,7 @@
  */
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { insertSeat, loadSeatHoldings } from "../lib/conference/seats";
 
 for (const line of readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n")) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
@@ -81,8 +82,12 @@ const { data: assignments, error: gErr } = await db
   .lte("term_start", conf.end_date);
 if (gErr) throw new Error(gErr.message);
 
+// ⛔ term_end is EXCLUSIVE. A term that ends the day it starts never ran: an
+// appointment entered and undone (Jackie Nguyen, 2026-09-28) is not a director.
 const inWindow = (assignments ?? []).filter(
-  (a) => !a.term_end || new Date(a.term_end) >= windowStart
+  (a) =>
+    (!a.term_end || new Date(a.term_end) > windowStart) &&
+    (!a.term_end || !a.term_start || new Date(a.term_end) > new Date(a.term_start))
 );
 const contactIds = [...new Set(inWindow.map((a) => a.person_contact_id).filter(Boolean))];
 
@@ -105,12 +110,10 @@ const { data: existingPeople } = await db
   .eq("conference_id", conferenceId);
 const personByContact = new Map((existingPeople ?? []).map((p) => [p.contact_id, p.id]));
 
-const { data: heldSeats } = await db
-  .from("entity_balance_seats")
-  .select("holder_person_id")
-  .eq("conference_id", conferenceId)
-  .eq("entity_id", boardType.id);
-const alreadySeated = new Set((heldSeats ?? []).map((s) => s.holder_person_id));
+const { seats: conferenceSeats } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+const alreadySeated = new Set(
+  conferenceSeats.filter((s) => s.entityId === boardType.id).map((s) => s.holderPersonId)
+);
 
 let toSeat = 0;
 let skipped = 0;
@@ -135,6 +138,27 @@ for (const c of contacts ?? []) {
 console.log(
   `\n${toSeat} to seat, ${skipped} skipped as staff.${APPLY ? "" : " Re-run with --apply to commit."}`
 );
+const { data: includeRefs, error: refErr } = await db
+  .from("conference_entity_refs")
+  .select("to_entity_id, conference_entities!conference_entity_refs_to_entity_id_fkey(kind, name)")
+  .eq("conference_id", conferenceId)
+  .eq("from_entity_id", boardType.id)
+  .eq("role", "includes");
+if (refErr) throw new Error(refErr.message);
+const includedEvents = (includeRefs ?? [])
+  .map((r) => ({ id: r.to_entity_id as string, ...(r.conference_entities as unknown as { kind: string; name: string }) }))
+  .filter((e) => e.kind === "event");
+
+// Dry run: say which included events each already-seated member is missing.
+{
+  const missing: string[] = [];
+  for (const seat of conferenceSeats.filter((s) => s.entityId === boardType.id)) {
+    const held = new Set(conferenceSeats.filter((s) => s.holderPersonId === seat.holderPersonId).map((s) => s.entityId));
+    const lacks = includedEvents.filter((e) => !held.has(e.id)).map((e) => e.name);
+    if (lacks.length) missing.push(`${seat.holderName ?? seat.holderPersonId}: ${lacks.join(", ")}`);
+  }
+  console.log(missing.length ? `\nIncluded events to give:\n  ${missing.join("\n  ")}` : "\nEvery seated member holds what the registration includes.");
+}
 if (!APPLY) process.exit(0);
 
 // ── Seat them. entity_balances.purchase_id is NOT NULL, so a zero-price
@@ -230,16 +254,16 @@ for (const c of contacts ?? []) {
     balance = ins.data;
   }
 
-  const seat = await db.from("entity_balance_seats").insert({
-    conference_id: conferenceId,
-    organization_id: c.organization_id,
-    balance_id: balance!.id,
-    entity_id: boardType.id,
-    seat_index: 1,
-    holder_person_id: personId,
+  const seat = await insertSeat(db, {
+    conferenceId,
+    organizationId: c.organization_id,
+    balanceId: balance!.id,
+    entityId: boardType.id,
+    seatIndex: 1,
+    holderPersonId: personId,
   });
   if (seat.error) {
-    console.log(`   ${name}: ${seat.error.message}`);
+    console.log(`   ${name}: ${seat.error}`);
     continue;
   }
   seated += 1;
@@ -247,3 +271,46 @@ for (const c of contacts ?? []) {
 }
 
 console.log(`\n${seated} board members seated.`);
+
+// ── What the registration includes, for every board member seated on it.
+//    A Board Registration includes the Meet & Greet and Wednesday Offsite, and
+//    a bought registration mints those seats alongside it (mint_v3_for_order).
+//    This comp path used to mint only the registration, so the whole board was
+//    missing from both lists (found 2026-10-21). Idempotent: an event seat is
+//    created only where the member does not already hold that event.
+
+const { seats: seatsNow } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+const boardSeats = seatsNow.filter((s) => s.entityId === boardType.id);
+
+let eventsSeated = 0;
+for (const boardSeat of boardSeats) {
+  const personId = boardSeat.holderPersonId as string;
+  const orgId = boardSeat.organizationId;
+  const heldIds = new Set(seatsNow.filter((s) => s.holderPersonId === personId).map((s) => s.entityId));
+  for (const event of includedEvents) {
+    if (heldIds.has(event.id)) continue;
+    const ins = await db
+      .from("entity_balances")
+      .insert({ conference_id: conferenceId, purchase_id: purchase!.id, entity_id: event.id, quantity: 1, organization_id: orgId })
+      .select("id")
+      .single();
+    if (ins.error) {
+      console.log(`   ${event.name} for ${personId}: ${ins.error.message}`);
+      continue;
+    }
+    const seat = await insertSeat(db, {
+      conferenceId,
+      organizationId: orgId,
+      balanceId: ins.data.id,
+      entityId: event.id,
+      seatIndex: 1,
+      holderPersonId: personId,
+    });
+    if (seat.error) {
+      console.log(`   ${event.name} for ${personId}: ${seat.error}`);
+      continue;
+    }
+    eventsSeated += 1;
+  }
+}
+console.log(`${eventsSeated} included event seats given to the board (${includedEvents.map((e) => e.name).join(", ")}).`);

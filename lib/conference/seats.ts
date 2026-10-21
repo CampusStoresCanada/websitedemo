@@ -247,6 +247,33 @@ export async function setSeatHolder(
   return { changed: Array.isArray(data) && data.length > 0, error: null };
 }
 
+/**
+ * Create one seat on a balance. The SQL mint (mint_v3_for_order) creates paid
+ * seats; this is for the comp paths that have no order (the board's).
+ */
+export async function insertSeat(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin client
+  db: any,
+  seat: {
+    conferenceId: string;
+    organizationId: string | null;
+    balanceId: string;
+    entityId: string;
+    seatIndex: number;
+    holderPersonId: string | null;
+  }
+): Promise<{ error: string | null }> {
+  const { error } = await db.from("entity_balance_seats").insert({
+    conference_id: seat.conferenceId,
+    organization_id: seat.organizationId,
+    balance_id: seat.balanceId,
+    entity_id: seat.entityId,
+    seat_index: seat.seatIndex,
+    holder_person_id: seat.holderPersonId,
+  });
+  return { error: error?.message ?? null };
+}
+
 /** The catalogue graph, for callers that also need to walk it (access, obligations). */
 export { buildEntityGraph, ENTITY_SELECT };
 

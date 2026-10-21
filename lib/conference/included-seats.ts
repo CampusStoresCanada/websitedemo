@@ -40,7 +40,14 @@ async function siblingEventSeats(
     .eq("purchase_id", balance.purchase_id as string);
   const balanceIds = (balances ?? []).map((b) => b.id as string);
   if (balanceIds.length === 0) return [];
-  const { seats } = await loadSeatHoldings(db, { conferenceId, balanceIds, entityKinds: ["event"] });
+  // Same org as the registration too: a comp purchase (the board's) spans
+  // several orgs, and a director's reception seat is recorded against theirs.
+  const { seats } = await loadSeatHoldings(db, {
+    conferenceId,
+    balanceIds,
+    entityKinds: ["event"],
+    ...(registration.organizationId ? { organizationId: registration.organizationId } : {}),
+  });
   return seats
     .filter((seat) => seat.entityId !== registration.entityId)
     .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0) || a.seatId.localeCompare(b.seatId));
