@@ -3928,6 +3928,7 @@ export type Database = {
           checked_in_at: string
           checked_in_by: string | null
           conference_id: string
+          confirmed_by: string | null
           created_at: string
           device_id: string | null
           entity_id: string | null
@@ -3937,13 +3938,13 @@ export type Database = {
           result_state: string
           scan_token_id: string | null
           schedule_id: string | null
-          confirmed_by: string | null
         }
         Insert: {
           check_in_source: string
           checked_in_at?: string
           checked_in_by?: string | null
           conference_id: string
+          confirmed_by?: string | null
           created_at?: string
           device_id?: string | null
           entity_id?: string | null
@@ -3953,13 +3954,13 @@ export type Database = {
           result_state: string
           scan_token_id?: string | null
           schedule_id?: string | null
-          confirmed_by?: string | null
         }
         Update: {
           check_in_source?: string
           checked_in_at?: string
           checked_in_by?: string | null
           conference_id?: string
+          confirmed_by?: string | null
           created_at?: string
           device_id?: string | null
           entity_id?: string | null
@@ -3969,7 +3970,6 @@ export type Database = {
           result_state?: string
           scan_token_id?: string | null
           schedule_id?: string | null
-          confirmed_by?: string | null
         }
         Relationships: [
           {
@@ -4005,6 +4005,13 @@ export type Database = {
             columns: ["scan_token_id"]
             isOneToOne: false
             referencedRelation: "conference_badge_tokens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_check_in_events_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "schedules"
             referencedColumns: ["id"]
           },
         ]
@@ -6449,45 +6456,6 @@ export type Database = {
           },
         ]
       }
-      print_stations: {
-        Row: {
-          conference_id: string
-          created_at: string
-          created_by: string | null
-          id: string
-          key_hash: string
-          label: string
-          last_seen_at: string | null
-          printer_media: string | null
-          printer_status: string | null
-          revoked_at: string | null
-        }
-        Insert: {
-          conference_id: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          key_hash: string
-          label: string
-          last_seen_at?: string | null
-          printer_media?: string | null
-          printer_status?: string | null
-          revoked_at?: string | null
-        }
-        Update: {
-          conference_id?: string
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          key_hash?: string
-          label?: string
-          last_seen_at?: string | null
-          printer_media?: string | null
-          printer_status?: string | null
-          revoked_at?: string | null
-        }
-        Relationships: []
-      }
       desk_pins: {
         Row: {
           failed_attempts: number
@@ -6507,7 +6475,15 @@ export type Database = {
           profile_id?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "desk_pins_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       directory_scan_events: {
         Row: {
@@ -7101,6 +7077,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      email_log: {
+        Row: {
+          email: string
+          id: string
+          priority: number | null
+          sent_at: string
+        }
+        Insert: {
+          email: string
+          id?: string
+          priority?: number | null
+          sent_at?: string
+        }
+        Update: {
+          email?: string
+          id?: string
+          priority?: number | null
+          sent_at?: string
+        }
+        Relationships: []
       }
       entity_balance_seats: {
         Row: {
@@ -7904,6 +7901,13 @@ export type Database = {
             columns: ["body_id"]
             isOneToOne: false
             referencedRelation: "governance_bodies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
           {
@@ -10531,6 +10535,79 @@ export type Database = {
           },
         ]
       }
+      page_views: {
+        Row: {
+          contact_id: string
+          facet: string | null
+          id: string
+          occurred_at: string
+          organization_id: string | null
+          path: string
+          referrer_path: string | null
+        }
+        Insert: {
+          contact_id: string
+          facet?: string | null
+          id?: string
+          occurred_at?: string
+          organization_id?: string | null
+          path: string
+          referrer_path?: string | null
+        }
+        Update: {
+          contact_id?: string
+          facet?: string | null
+          id?: string
+          occurred_at?: string
+          organization_id?: string | null
+          path?: string
+          referrer_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "page_views_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "page_views_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_methods: {
         Row: {
           card_brand: string | null
@@ -11249,6 +11326,60 @@ export type Database = {
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      print_stations: {
+        Row: {
+          conference_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          key_hash: string
+          label: string
+          last_seen_at: string | null
+          printer_media: string | null
+          printer_status: string | null
+          revoked_at: string | null
+        }
+        Insert: {
+          conference_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key_hash: string
+          label: string
+          last_seen_at?: string | null
+          printer_media?: string | null
+          printer_status?: string | null
+          revoked_at?: string | null
+        }
+        Update: {
+          conference_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          key_hash?: string
+          label?: string
+          last_seen_at?: string | null
+          printer_media?: string | null
+          printer_status?: string | null
+          revoked_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "print_stations_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "print_stations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -14584,6 +14715,13 @@ export type Database = {
           term_start: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "governance_role_assignments_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "governance_role_assignments_person_profile_id_fkey"
             columns: ["subject_id"]
