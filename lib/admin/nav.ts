@@ -308,9 +308,10 @@ export function conferenceDeskPathId(pathname: string): string | null {
 /**
  * The check-in desk itself: a full-screen kiosk with no site header, footer,
  * admin sidebar, conference tabs or toolkit. Everything that frames a page
- * steps aside for it. Also the door's printed list (`check-in/door-list`): a
- * sheet of paper, which the admin frame would only print over.
+ * steps aside for it. Also the door's printed list (`check-in/door-list`) and
+ * the check-in cards (`check-in/cards`): sheets of paper, which the admin frame
+ * would only print over.
  */
 export function isCheckInDeskPath(pathname: string): boolean {
-  return /^\/admin\/conference\/[^/]+\/check-in(\/door-list)?\/?$/.test(pathname);
+  return /^\/admin\/conference\/[^/]+\/check-in(\/door-list|\/cards)?\/?$/.test(pathname);
 }

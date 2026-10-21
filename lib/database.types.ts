@@ -3936,6 +3936,8 @@ export type Database = {
           person_id: string | null
           result_state: string
           scan_token_id: string | null
+          schedule_id: string | null
+          confirmed_by: string | null
         }
         Insert: {
           check_in_source: string
@@ -3950,6 +3952,8 @@ export type Database = {
           person_id?: string | null
           result_state: string
           scan_token_id?: string | null
+          schedule_id?: string | null
+          confirmed_by?: string | null
         }
         Update: {
           check_in_source?: string
@@ -3964,6 +3968,8 @@ export type Database = {
           person_id?: string | null
           result_state?: string
           scan_token_id?: string | null
+          schedule_id?: string | null
+          confirmed_by?: string | null
         }
         Relationships: [
           {

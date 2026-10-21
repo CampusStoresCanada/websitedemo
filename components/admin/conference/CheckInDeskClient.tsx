@@ -2383,6 +2383,16 @@ export default function CheckInDeskClient({
                 window.open(`/admin/conference/${conferenceId}/check-in/print-station`, "_blank", "noopener");
               }}
             />
+            <ToolButton
+              size="lg"
+              showLabel
+              icon={<PrintIcon />}
+              label="Print check-in cards (booths and events)"
+              onClick={() => {
+                setDeskMenuOpen(false);
+                window.open(`/admin/conference/${conferenceId}/check-in/cards`, "_blank", "noopener");
+              }}
+            />
             {activeDoorEvent ? (
               <ToolButton
                 size="lg"

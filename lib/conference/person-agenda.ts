@@ -111,6 +111,12 @@ export type PersonAgenda = {
   conflicts: Array<{ a: string; b: string }>;
   /** Outstanding only — a deadline you have met is not a deadline. */
   deadlines: AgendaDeadline[];
+  /**
+   * Agenda items she is counted at (Stephen, 2026-10-21: bursary travellers
+   * want to see their meetings were recorded). Keyed by item id. A meeting
+   * says who confirmed it: her, the exhibitor, or both.
+   */
+  counted: Record<string, { attendee: boolean; exhibitor: boolean }>;
 };
 
 /**
@@ -346,10 +352,52 @@ export async function loadPersonAgenda(
     return a.label.localeCompare(b.label);
   });
 
+  // ✓ Counted: her check-ins, from the same rows the door and the cards write.
+  // Test (rehearsal) rows never count. As the exhibitor, a meeting is counted
+  // when any delegate in it was confirmed, by either side.
+  const counted: PersonAgenda["counted"] = {};
+  const programIds = items.filter((i) => i.source === "program").map((i) => i.id);
+  const meetingItems = items.filter((i) => i.meetingAssignment);
+  const scheduleIds = meetingItems.map((i) => i.meetingAssignment!.scheduleId);
+  const isExhibitor = meetingItems.some((i) => i.meetingAssignment!.exhibitorSeatId === meetingSeat?.seatId);
+  const [eventRows, meetingRows] = await Promise.all([
+    programIds.length
+      ? db
+          .from("conference_check_in_events")
+          .select("entity_id")
+          .eq("person_id", personId)
+          .eq("is_test", false)
+          .in("result_state", ["valid", "not_on_ticket"])
+          .in("entity_id", programIds)
+      : Promise.resolve({ data: [] as Array<{ entity_id: string | null }> }),
+    scheduleIds.length
+      ? (() => {
+          const q = db
+            .from("conference_check_in_events")
+            .select("schedule_id, confirmed_by, person_id")
+            .eq("is_test", false)
+            .in("schedule_id", scheduleIds);
+          return isExhibitor ? q : q.eq("person_id", personId);
+        })()
+      : Promise.resolve({ data: [] as Array<{ schedule_id: string | null; confirmed_by: string | null }> }),
+  ]);
+  for (const row of eventRows.data ?? []) {
+    if (row.entity_id) counted[row.entity_id] = { attendee: true, exhibitor: false };
+  }
+  for (const item of meetingItems) {
+    const rows = (meetingRows.data ?? []).filter((r) => r.schedule_id === item.meetingAssignment!.scheduleId);
+    if (rows.length === 0) continue;
+    counted[item.id] = {
+      attendee: rows.some((r) => r.confirmed_by === "attendee"),
+      exhibitor: rows.some((r) => r.confirmed_by === "exhibitor"),
+    };
+  }
+
   return {
     success: true,
     data: {
       personId,
+      counted,
       deadlines,
       displayName: person.display_name,
       timeZone: timeline.timeZone,
