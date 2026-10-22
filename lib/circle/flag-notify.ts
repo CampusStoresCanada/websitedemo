@@ -274,16 +274,20 @@ export async function sendFlagNotification(
     else console.warn("[flag-notify] Circle group DM failed:", result.error);
 
     /*
-      An Ask CSC room has the asker in it, so its message carries no War Room
-      link (Stephen, 2026-10-22: "We need that information, they don't"). The
-      link goes to CSC staff on their own, in the room without the asker.
+      An Ask CSC room has the asker in it, so it carries only their question
+      (Stephen, 2026-10-22: "We need that information, they don't"). The rest —
+      priority, their details, the War Room link — goes to CSC staff alone.
+
+      Sent whether or not the room went: if the asker's address is not on
+      Circle and the room failed, this is how staff still hear in Circle.
     */
-    if (anyDm && conferenceAsk && responders.length > 0) {
+    if (conferenceAsk && responders.length > 0) {
       const staffRoom = intercept ? [intercept] : responders;
-      const note = buildAskStaffNote({ who, reviewLink });
+      const note = buildAskStaffNote({ priorityLabel, who, note: params.note, details: elementContent, reviewLink });
       const staffText = intercept ? `[DEV — would have gone to: ${responders.join(", ")}]\n\n${note}` : note;
       const staff = await ghostClient.sendGroupDirectMessage(staffRoom, staffText);
-      if (!staff.success) console.warn("[flag-notify] Circle staff note failed:", staff.error);
+      if (staff.success) anyDm = true;
+      else console.warn("[flag-notify] Circle staff note failed:", staff.error);
     }
   }
 

@@ -74,17 +74,23 @@ describe("the message a flag sends", () => {
     expect(buildFlagDm(base)).toContain(base.reviewLink);
   });
 
-  it("prints an Ask CSC's details whole: who, booth, now and next", () => {
-    const details = "Karin Stonehouse · McMaster University\nBooth 412\nNow: Meeting with Roots, Suite 12, until 10:45\nNext: Lunch at 12:00";
+  it("puts only their question in the Ask CSC room the asker is in", () => {
+    const details = "Karin Stonehouse · McMaster University\nBooth 412\nNow: Meeting with Roots, Suite 12, until 10:45";
     const dm = buildFlagDm({ ...base, note: "My 10:30 didn't show", elementContent: details, conferenceAsk: true });
-    expect(dm).toContain("asked CSC");
-    expect(dm).toContain("My 10:30 didn't show");
-    expect(dm).toContain("Next: Lunch at 12:00");
+    expect(dm).toBe('"My 10:30 didn\'t show"');
   });
 
-  it("keeps the War Room link out of an Ask CSC room the asker is in, and gives it to staff", () => {
-    const dm = buildFlagDm({ ...base, conferenceAsk: true });
-    expect(dm).not.toContain(base.reviewLink);
-    expect(buildAskStaffNote({ who: "Karin Stonehouse", reviewLink: base.reviewLink })).toContain(base.reviewLink);
+  it("gives staff alone the priority, who and where, and the War Room link", () => {
+    const note = buildAskStaffNote({
+      priorityLabel: base.priorityLabel,
+      who: "Karin Stonehouse",
+      note: "My 10:30 didn't show",
+      details: "Booth 412\nNext: Lunch at 12:00",
+      reviewLink: base.reviewLink,
+    });
+    expect(note).toContain(base.priorityLabel);
+    expect(note).toContain("My 10:30 didn't show");
+    expect(note).toContain("Next: Lunch at 12:00");
+    expect(note).toContain(base.reviewLink);
   });
 });
