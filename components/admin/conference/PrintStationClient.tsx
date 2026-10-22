@@ -25,9 +25,12 @@ const POLL_MS = 5000;
 export default function PrintStationClient({
   conferenceId,
   conferenceName,
+  macAppUrl,
 }: {
   conferenceId: string;
   conferenceName: string;
+  /** A short-lived download link for the Mac app, or null when it isn't uploaded. */
+  macAppUrl: string | null;
 }) {
   const [stations, setStations] = useState<PrintStationRow[] | null>(null);
   const [queue, setQueue] = useState<QueuedLabel[]>([]);
@@ -155,6 +158,17 @@ export default function PrintStationClient({
           </div>
         )}
         <ol className="mt-4 list-decimal space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            {macAppUrl ? (
+              <a href={macAppUrl} className="font-semibold text-[#163D6D] underline">
+                Download CSC Print Station for Mac
+              </a>
+            ) : (
+              <>Get <strong>CSC Print Station</strong> for Mac from CSC</>
+            )}
+            , unzip it and put it in Applications. It needs Google Chrome. The first time, right-click it and choose
+            Open.
+          </li>
           <li>Plug the Brother QL into the laptop by USB, with the 62 mm continuous roll loaded.</li>
           <li>Open <strong>CSC Print Station</strong> and paste the key.</li>
           <li>Leave it running, plugged in and awake. It shows online here within a few seconds.</li>

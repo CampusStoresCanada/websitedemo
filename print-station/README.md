@@ -10,8 +10,9 @@ ours, and stickers line up with the card to fractions of a millimetre.
 
 ## On the conference laptop (Mac): the app
 
-1. Copy **CSC Print Station.app** to the laptop (AirDrop the zip from `dist/`)
-   and put it in Applications. Nothing else to install except Google Chrome
+1. On the laptop: desk toolkit → **Open the print station** → **Download CSC
+   Print Station for Mac** (or AirDrop the zip from `dist/`). Unzip it and put
+   it in Applications. Nothing else to install except Google Chrome
    (it draws each sticker with it): Python, the printer libraries and libusb
    are inside the app.
 2. **First launch:** the app is not signed with an Apple developer ID, so macOS
@@ -33,6 +34,10 @@ queue; it prints once fixed. A revoked key brings the app back to setup.
 On a Mac with Homebrew: `brew install python-tk@3.14 libusb`, then
 `./build_app.sh`. The app lands in `dist/` (about 40 MB, Apple Silicon). Zip it
 to move it: `ditto -c -k --keepParent "dist/CSC Print Station.app" "dist/CSC Print Station.zip"`.
+
+**Publish it** so the print station page's "Download CSC Print Station for Mac"
+link serves the new build (private storage, a link made per visit):
+`npx tsx scripts/upload-print-station-app.mts` from the repo root.
 
 ## Terminal version (still works)
 
