@@ -76,7 +76,9 @@ export default async function ConferenceDirectoryPage({
           <div>
             <h1 className="text-xl font-bold text-gray-900">{isMapSheet ? "Map preview" : "Directory preview"}</h1>
             <p className="mt-1 text-sm text-gray-500">
-              {saved
+              {isMapSheet
+              ? "The floor plan, every booth by number and every exhibitor A to Z. Print it straight from your browser."
+              : saved
               ? "From the saved definition. Print or save as PDF straight from your browser."
               : "No saved definition yet — showing the default layout. Print or save as PDF straight from your browser."}
             </p>
@@ -128,6 +130,8 @@ export default async function ConferenceDirectoryPage({
           </div>
         ) : null}
 
+        {/* The print-run question is about the book, not the door map. */}
+        {isMapSheet ? null : (
         <section className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="text-sm font-semibold text-gray-900">Did the book get used?</h2>
           {usage.totalScans === 0 ? (
@@ -170,6 +174,7 @@ export default async function ConferenceDirectoryPage({
             </>
           )}
         </section>
+        )}
 
         <p className="mt-3 text-xs text-gray-400">
           {notes.totalCandidates} candidate{notes.totalCandidates === 1 ? "" : "s"} ·{" "}

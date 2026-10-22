@@ -511,7 +511,8 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
         detail: `${plural(booths, "booth card")} and ${plural(cards.length - booths, "event card")}.`,
         actions,
       };
-    } catch {
+    } catch (error) {
+      console.error("[war-room] check-in card count failed:", error);
       return { verdict: "tick", detail: "Couldn't count the cards; the sheet will show them.", actions };
     }
   },
@@ -584,7 +585,8 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
     const base = `/admin/conference/${conferenceId}/check-in/schedules`;
     return {
       verdict: "tick",
-      detail: "One page per person, and one sheet per suite door.",
+      // The two buttons say what there is; the task's own text says why.
+      detail: null,
       actions: [
         { label: "Individual schedules", href: `${base}?view=people`, print: true },
         { label: "Suite door sheets", href: `${base}?view=suites`, print: true },
@@ -641,10 +643,12 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
     };
   },
 
-  async attendee_list_printed({ conferenceId }) {
+  async attendee_list_printed({ db, conferenceId }) {
+    const { loadDoorRoster } = await import("./attendance");
+    const people = await loadDoorRoster(db, conferenceId, null);
     return {
       verdict: "tick",
-      detail: "Everyone registered, in your own name order.",
+      detail: `${plural(people.length, "person", "people")} registered.`,
       actions: [
         { label: "Print the attendee list", href: `/admin/conference/${conferenceId}/check-in/door-list`, print: true },
       ],
