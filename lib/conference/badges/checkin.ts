@@ -407,6 +407,21 @@ export async function personReachesEntity(conferenceId: string, personId: string
   return resolveAccess(heldIds, entitiesById).has(entityId);
 }
 
+/**
+ * Does this person hold anything their registration does not include? Their
+ * seats' access, minus what the registration seats alone reach. The same
+ * resolveAccess walk as personReachesEntity.
+ */
+export async function personHoldsExtras(conferenceId: string, personId: string): Promise<boolean> {
+  const { seats, entitiesById } = await loadSeatHoldings(createAdminClient(), {
+    conferenceId,
+    holderPersonId: personId,
+  });
+  const registrations = seats.filter((seat) => seat.entityKind === "registration").map((seat) => seat.entityId);
+  const covered = resolveAccess([...new Set(registrations)], entitiesById);
+  return seats.some((seat) => seat.entityKind !== "registration" && !covered.has(seat.entityId));
+}
+
 /** Day entity name → ISO date, for this conference. */
 async function loadDayDates(
   db: ReturnType<typeof createAdminClient>,

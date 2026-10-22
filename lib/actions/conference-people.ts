@@ -29,7 +29,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
 import { planReprint, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
-import { personReachesEntity, personVerdictToday } from "@/lib/conference/badges/checkin";
+import { personHoldsExtras, personReachesEntity, personVerdictToday } from "@/lib/conference/badges/checkin";
 import { conferenceToday } from "@/lib/conference/desk-staff";
 
 type ConferencePersonRow = {
@@ -1152,9 +1152,16 @@ export async function reprintConferenceBadge(
   //
   // The plan is still computed and recorded, so the job carries what the label
   // should say the moment there is something to print it.
+  // On a company blank, extras the type doesn't include need their schedule
+  // printed too (planReprint). Only asked when it can matter.
+  const holdsExtras =
+    stockInHand === "company_blank"
+      ? await personHoldsExtras(person.conference_id, personId).catch(() => false)
+      : false;
   const plan = planReprint({
     stock: stockInHand ?? "none",
     personIsSeated: true, // a reprint is for somebody already seated; walk-ups take the assignment path
+    holdsExtras,
   });
   const reprintJob = await requestBadgeReprint({
     conferenceId: person.conference_id,
