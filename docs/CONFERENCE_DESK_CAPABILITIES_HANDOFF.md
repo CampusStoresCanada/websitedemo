@@ -12,8 +12,15 @@ share one database (§4). Since 2026-10-19 the branch also carries the merged
 `ship/cart-shared-email` (online cart and Add contact on the same shared-address
 rules).
 
-**Preview:** https://websitedemo-f9ao3k4gj-steve-thomas-projects-70bd4294.vercel.app
-(commit `d60222e`; each push to the branch builds a new one).
+**Preview:** https://websitedemo-git-ship-desk-4886f7-steve-thomas-projects-70bd4294.vercel.app
+(the branch's own alias: every push rebuilds it; behind a Vercel login). Desk in
+rehearsal: `/admin/conference/7e650b08-51d1-4573-a332-7d6b6fbc50bd/check-in?test=1`,
+and `&as_of=2027-02-01T18:00` to stand at the Meet & Greet door.
+
+**Status 2026-10-21:** ✅ Stephen tested on the iPad: everything he could test
+works. **A PR to `main` is open; not merged.** The War Room "What's next"
+(every print job, with status and a button, moved off the desk) is a separate
+project in its own session, branched from this one (§2b).
 
 **Status 2026-10-19:** ✅ scanning proven on a real device — three test-mode
 scans at 3:58–4:00 pm MT (Full Conference and Thursday Only checked in; a
@@ -151,7 +158,53 @@ The org user table's Deactivate button sets status `inactive`, which the
 succeeded since 2026-08-17. Constraint widened (live). Re-inviting also clears a
 stale end date.
 
+## 2b. Built 2026-10-21
+
+- **Reprint preview.** Reprint shows the badge as it prints, the name and
+  title editable in place, the card in hand pre-picked, one Print that goes
+  straight to the print station. No reason to pick: an edit is a name change,
+  otherwise "Reprint at the desk". A correction saves through `updateField`
+  with `deskConferenceId` (desk permission, registered-here only, name/title
+  only, **never a Circle push**). Find's "Checked in" is a Reprint button (a
+  lost badge has nothing to scan); touching the panel pins the card.
+- **Name to seat prints.** Seat → check in (the hand check-in Find uses) →
+  first badge to the print station, one tap. Filed as printed, not reprinted.
+  Name someone suggests only that company's contacts.
+- **Door: a company's spare ticket.** At an event door, Find offers a
+  company's spare tickets to THAT event; a Not on their ticket card offers one
+  before the sale. A spare excludes the event seat an unnamed registration of
+  the same purchase is waiting for (`openEventSeats`).
+- **A registration carries what it includes** (`lib/conference/included-seats.ts`):
+  whoever holds it holds the event seats minted by the same purchase (Meet &
+  Greet, Offsite), on every seating path; releasing it frees them. The board
+  comp script now mints them too.
+- **Releasing a seat** (`lib/conference/release-seat.ts`) is one path for
+  Unassign and contact deletion: a seatless person leaves the roster unless
+  they carry history (check-in, scans, leads), which keeps them `unassigned`
+  and hidden from the desk.
+- **Check-in cards** (`lib/conference/check-in-cards.ts`, `/scan/place/...`):
+  a booth card confirms the meeting there now (delegate checks in, exhibitor
+  confirms), an event card checks you in to an event marked "Check-in card:
+  yes" in the Build tab. /me shows ✓ Counted. Toolkit → Print check-in cards.
+  Not yet seen end to end: CSC 2027 has no meetings scheduled and no marked
+  event.
+- **Camera:** starts queue (overlapping starts blanked the picture); the desk
+  watches the stream and restarts it, and restarts after a hand-over.
+- **Rehearsal:** door check-ins count toward the reset; a rehearsal's door pick
+  is stored apart and a pick made far from its event holds 2 hours, not until
+  the event.
+
 ## 3. Still open
+
+- **War Room "What's next"** — separate project (own session, branch
+  `war-room-whats-next` off this one). Open question for Stephen there: does
+  the door's printed list stay on the desk.
+- **Test data still in place:** Test Org's free test seats (one Full
+  Conference with its Meet & Greet and Offsite, one standalone Meet & Greet;
+  buyer "Test Org comp (desk testing, 2026-10-21)"); Desk Test Full
+  Conference's title "Desk Tester"; any rehearsal check-ins (reset button).
+- **Print station packaged as a Mac app**, then Windows. Sticker name prints
+  ~1 mm small.
 
 - **Name-only walk-ups: built 2026-10-19.** The desk may skip the email. The
   person gets a NEW record (never matched by name), so their badge prints, but
@@ -290,7 +343,13 @@ Phase 2 — that was written before the desk became full-screen and phone-first.
 - **Sell:** the event at this door goes first, pre-filled with the person.
   Default on a missing ticket stays "admit and invoice" (enforcement off).
 
-### Meetings = a booth card, for CANCOLL's bursary
+### Meetings = a booth card, for CANCOLL's bursary — BUILT 2026-10-21 (§2b)
+
+As built: every meeting counts, not only bursary ones (the bursary is recorded
+per organisation, `conference_bursary_applications`, so CANCOLL's report filters
+confirmed meetings by bursary org). Rows: `conference_check_in_events` with
+`schedule_id` and `confirmed_by`. The design notes below are the brief it was
+built from.
 
 CANCOLL's sponsorship needs proof that bursary meetings happened, without
 staff walking the room.
@@ -445,6 +504,16 @@ older than 15 minutes is asked to sign in again before choosing a PIN):
 - `20261020020000_check_in_not_on_ticket.sql` — the door's "not on their ticket" result.
 - `20261021000000_print_stations.sql` — print station keys (hashed), heartbeat, printer status.
   Test data cleared 2026-10-21: the test station, 13 Desk Test reprint jobs and their 29 events.
+- `20261021220503_check_in_meeting_confirmations.sql` — `conference_check_in_events.schedule_id`
+  and `confirmed_by` (check-in cards). Applied 2026-10-21; types regenerated.
+
+**Data repaired by hand on 2026-10-21 (each with an audit row, on Stephen's word):**
+six seatless roster entries removed and Neil Raymond's (deleted contact; his
+offsite seat moved to Steve Thompson); 12 missing included-event seats filled
+for 7 delegates, April Burns' second offsite moved to Lisa Jackman; the board's
+18 Meet & Greet / Offsite seats minted (board script); 6 `registration_tier`
+labels an event seat had overwritten restored; Karen Mathieu seated for Mount
+Saint Vincent.
 
 ## 5. Why the first plan was cut
 
@@ -478,6 +547,17 @@ query returns need a fake that honours `.eq/.in/.is/.order`.
 exports (`requireOrgCommerceAccess`, `requireConferenceDeskAccess`,
 `isConferenceDeskStaff`).
 
+⛔ **Only eslint enforces the canonical readers** (`loadSeatHoldings`, and
+seat writes via `setSeatHolder`/`insertSeat` in `seats.ts`). tsc, vitest and
+the build all pass with a violation; two were pushed before lint was a gate.
+
+⛔ **`term_end` is exclusive.** A term whose end equals its start never ran
+(Jackie Nguyen, 2026-09-28): the board script skips it.
+
+⛔ **Only a registration sets `person_kind` / `registration_tier`.** An event
+seat used to overwrite both (6 labels relabelled; an exhibitor given a
+reception ticket would have become a delegate).
+
 ⚠️ **`.env.local` holds live Stripe keys**, and prod and local share one
 database. Nothing here is a sandbox. To test as a non-admin, use the DevPanel
 (Ctrl+Shift+D) personas, and never Add Staff with a new email — it creates a
@@ -487,6 +567,7 @@ real Circle account.
 
 ```bash
 npx tsc --noEmit && npx vitest run && npm run build
+npx eslint <every changed file>
 ```
 
 `next build` is the only one that catches `"use server"` export violations.
