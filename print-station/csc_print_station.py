@@ -52,8 +52,25 @@ DPI = 300
 POLL_SECONDS = 3
 
 
+_log_sink = None
+
+
+def set_log_sink(sink) -> None:
+    """Where log lines go: the app's window, or (default) the terminal."""
+    global _log_sink
+    _log_sink = sink
+
+
 def log(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+    line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
+    if _log_sink:
+        _log_sink(line)
+    else:
+        print(line, flush=True)
+
+
+class KeyRejected(Exception):
+    """The website does not know this print station key (unknown or revoked)."""
 
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -90,10 +107,29 @@ def setup(config: dict) -> dict:
 
 # ── The printer ───────────────────────────────────────────────────────────────
 
+def use_bundled_libusb() -> None:
+    """In the packaged app, load the libusb that ships inside it.
+
+    pyusb caches the library it loads first, so loading the bundled copy once
+    here also serves brother_ql's own USB calls later.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle:
+        return
+    import usb.backend.libusb1
+
+    for name in ("libusb-1.0.0.dylib", "libusb-1.0.dylib", "libusb-1.0.dll"):
+        path = Path(bundle) / name
+        if path.exists():
+            usb.backend.libusb1.get_backend(find_library=lambda _name, p=str(path): p)
+            return
+
+
 def find_printer(config: dict) -> str:
     """The printer to send to: as configured, or the first Brother on USB."""
     if config.get("printer"):
         return config["printer"]
+    use_bundled_libusb()
     import usb.core  # pyusb
 
     device = usb.core.find(idVendor=BROTHER_USB_VENDOR)
@@ -199,7 +235,7 @@ class Station:
                               json={"printerStatus": self.printer_status, "printerMedia": self.printer_media},
                               timeout=15)
         if r.status_code == 401:
-            sys.exit("This print station key is unknown or was revoked. Make a new one on the desk.")
+            raise KeyRejected("This print station key is unknown or was revoked. Make a new one on the desk.")
         r.raise_for_status()
         return r.json()
 
@@ -262,18 +298,16 @@ def run_job(station: Station, browser: str, printer: str, job: dict) -> None:
         station.report(job["jobId"], ok=False, retry=True, error=station.printer_status)
 
 
-def main() -> None:
-    config = load_config()
-    if "--setup" in sys.argv or not config.get("key"):
-        config = setup(config)
+def run(config: dict, stop=None) -> None:
+    """The print station's loop. Runs until `stop` (a threading.Event) is set."""
     browser = find_browser(config)
     printer = find_printer(config)
     station = Station(config)
     hello = station.heartbeat()
     log(f"CSC Print Station \"{hello['station']}\" for {hello['conference']}")
-    log(f"Printer: {printer} · Drawing with: {Path(browser).name} · Ctrl+C to stop")
+    log(f"Printer: {printer} · Drawing with: {Path(browser).name}")
 
-    while True:
+    while not (stop and stop.is_set()):
         try:
             station.heartbeat()
             job = station.claim()
@@ -282,7 +316,20 @@ def main() -> None:
                 continue  # straight on to the next one
         except requests.RequestException as error:
             log(f"Website not reachable ({error}); trying again.")
-        time.sleep(POLL_SECONDS)
+        if stop:
+            stop.wait(POLL_SECONDS)
+        else:
+            time.sleep(POLL_SECONDS)
+
+
+def main() -> None:
+    config = load_config()
+    if "--setup" in sys.argv or not config.get("key"):
+        config = setup(config)
+    try:
+        run(config)
+    except KeyRejected as error:
+        sys.exit(str(error))
 
 
 if __name__ == "__main__":
