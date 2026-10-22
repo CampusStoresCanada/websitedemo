@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildFlagDm } from "../flag-message";
+import { buildAskStaffNote, buildFlagDm } from "../flag-message";
 
 /*
   What a flag notification has to carry.
@@ -80,6 +80,11 @@ describe("the message a flag sends", () => {
     expect(dm).toContain("asked CSC");
     expect(dm).toContain("My 10:30 didn't show");
     expect(dm).toContain("Next: Lunch at 12:00");
-    expect(dm).toContain(base.reviewLink);
+  });
+
+  it("keeps the War Room link out of an Ask CSC room the asker is in, and gives it to staff", () => {
+    const dm = buildFlagDm({ ...base, conferenceAsk: true });
+    expect(dm).not.toContain(base.reviewLink);
+    expect(buildAskStaffNote({ who: "Karin Stonehouse", reviewLink: base.reviewLink })).toContain(base.reviewLink);
   });
 });

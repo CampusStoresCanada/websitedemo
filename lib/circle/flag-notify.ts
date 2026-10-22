@@ -15,7 +15,7 @@ import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isBenchmarkingSurveyFlag, isConferenceAskFlag } from "@/lib/circle/flag-routing";
-import { buildFlagDm, oneLine } from "@/lib/circle/flag-message";
+import { buildAskStaffNote, buildFlagDm, oneLine } from "@/lib/circle/flag-message";
 import { createClient } from "@/lib/supabase/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -272,6 +272,19 @@ export async function sendFlagNotification(
     const result = await ghostClient.sendGroupDirectMessage(room, sentText);
     if (result.success) anyDm = true;
     else console.warn("[flag-notify] Circle group DM failed:", result.error);
+
+    /*
+      An Ask CSC room has the asker in it, so its message carries no War Room
+      link (Stephen, 2026-10-22: "We need that information, they don't"). The
+      link goes to CSC staff on their own, in the room without the asker.
+    */
+    if (anyDm && conferenceAsk && responders.length > 0) {
+      const staffRoom = intercept ? [intercept] : responders;
+      const note = buildAskStaffNote({ who, reviewLink });
+      const staffText = intercept ? `[DEV — would have gone to: ${responders.join(", ")}]\n\n${note}` : note;
+      const staff = await ghostClient.sendGroupDirectMessage(staffRoom, staffText);
+      if (!staff.success) console.warn("[flag-notify] Circle staff note failed:", staff.error);
+    }
   }
 
   /*

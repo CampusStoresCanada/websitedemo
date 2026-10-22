@@ -9,6 +9,14 @@
  * it by mocking four modules instead of reading the warning sitting next to me.
  */
 
+/**
+ * The staff-only note beside an Ask CSC room: where the record is kept and
+ * resolved. Sent to CSC staff without the asker, because the War Room is ours.
+ */
+export function buildAskStaffNote(input: { who: string; reviewLink: string }): string {
+  return `Ask CSC from ${input.who}: the record is in the War Room, mark it Done there once it's sorted. ${input.reviewLink}`;
+}
+
 /** One line, collapsed and clipped. Page text arrives with layout whitespace in it. */
 export function oneLine(text: string, max: number): string {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
@@ -45,11 +53,10 @@ export function buildFlagDm(input: {
   reviewLink: string;
 }): string {
   if (input.conferenceAsk) {
+    // ⛔ No War Room link: the asker is in this room, and the record is ours
+    // (Stephen, 2026-10-22). Staff get it separately — buildAskStaffNote.
     const details = input.elementContent?.trim() ? `\n\n${input.elementContent.trim().slice(0, 600)}` : "";
-    return (
-      `${input.priorityLabel} — ${input.who} asked CSC.${quoted(input.note, 600)}${details}\n\n` +
-      `Reply here and we can sort it out. In the War Room: ${input.reviewLink}`
-    );
+    return `${input.priorityLabel} — ${input.who} asked CSC.${quoted(input.note, 600)}${details}\n\nReply here and we can sort it out.`;
   }
   /*
     ⛔ Written to a ROOM that contains the person who raised it, not to a
