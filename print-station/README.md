@@ -25,6 +25,20 @@ Any desk device then taps **Send to print queue** on a reprint, and it prints he
 - A printer problem (wrong roll, out of film, lid open) leaves the job in the queue;
   it prints once fixed. The desk's print station page shows what the printer said.
 
+## Documents (speeches, run-sheets)
+
+A document attached to a War Room task has **Send to printer**. It goes on the same
+queue; this laptop fetches it as a PDF and prints it on its ordinary paper printer
+(`lp`, so any printer the Mac can already print to). Setup asks which one; blank
+means the Mac's default printer. Already set up? It uses the default printer until
+you run `--setup` again.
+
+- A Google Doc must be shared as **anyone with the link can view**, or Google
+  answers with a sign-in page and the job fails saying so. An uploaded file must be
+  a PDF.
+- An older copy of this app never receives documents; update it to print them.
+- Mac and Linux only for now.
+
 ## Windows (not yet tested)
 
 Use the network instead of USB (Windows needs a special USB driver for Python):

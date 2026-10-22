@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { stickersFor, type ReprintPlan, type StickerSide } from "@/lib/conference/badges/reprint-plan";
 import { hashPrintStationKey, newPrintStationKey, stationOnline } from "@/lib/conference/badges/print-station";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
+import { parseConferenceDocuments } from "@/lib/conference-documents";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
 import { normalizeArrangement, type BadgeArrangement } from "@/lib/conference/badges/arrangement";
@@ -468,6 +469,8 @@ export async function listBadgePrintJobs(conferenceId: string): Promise<{
     .from("badge_print_jobs")
     .select("*")
     .eq("conference_id", conferenceId)
+    // A speech sent to the paper printer shares the queue, not the badge history.
+    .neq("pipeline_type", "document")
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -1128,17 +1131,71 @@ export async function sendReprintToQueue(params: {
     message: "Sent to the print station.",
     actorId: auth.ctx.userId,
   });
-  // Say so when nothing will pick it up: a queued sticker with no station
-  // online is a sticker nobody is printing.
+  return { success: true, data: { stationOnline: await anyStationOnline(params.conferenceId) } };
+}
+
+/**
+ * Say so when nothing will pick it up: a queued job with no station online is
+ * a job nobody is printing.
+ */
+async function anyStationOnline(conferenceId: string): Promise<boolean> {
   const { data: stations } = await createAdminClient()
     .from("print_stations")
     .select("last_seen_at")
-    .eq("conference_id", params.conferenceId)
+    .eq("conference_id", conferenceId)
     .is("revoked_at", null);
-  return {
-    success: true,
-    data: { stationOnline: (stations ?? []).some((row) => stationOnline(row.last_seen_at as string | null)) },
-  };
+  return (stations ?? []).some((row) => stationOnline(row.last_seen_at as string | null));
+}
+
+/**
+ * War Room → "Send to printer": a document attached to a checklist task, onto
+ * the same queue the station beside the printer already claims from. The
+ * station fetches it as a PDF and prints it on paper, not on the QL.
+ *
+ * Stephen, 2026-10-22: a board member asks "do you have a copy of my speech?"
+ * — tap it on the phone and it is printing while you walk over to get it.
+ *
+ * ⛔ Only a document on the conference's Documents page can be queued, named
+ * by its id: the station never fetches an address anybody typed at it.
+ */
+export async function sendDocumentToPrinter(params: {
+  conferenceId: string;
+  documentId: string;
+}): Promise<QueueResult<{ stationOnline: boolean }>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: conference } = await db
+    .from("conference_instances")
+    .select("documents")
+    .eq("id", params.conferenceId)
+    .maybeSingle();
+  const doc = parseConferenceDocuments(conference?.documents).find((d) => d.id === params.documentId);
+  if (!doc) return { success: false, error: "That document is no longer on the conference's Documents page." };
+
+  const { data: job, error } = await db
+    .from("badge_print_jobs")
+    .insert({
+      conference_id: params.conferenceId,
+      pipeline_type: "document",
+      transport_method: "printer_bridge",
+      status: "sent_to_printer",
+      initiated_by: auth.ctx.userId,
+      metadata: { document_id: doc.id, label: doc.label },
+    })
+    .select("id")
+    .single();
+  if (error || !job) return { success: false, error: error?.message ?? "Could not queue it." };
+  await insertBadgeEvent({
+    jobId: job.id as string,
+    conferenceId: params.conferenceId,
+    personId: null,
+    eventType: "sent_to_printer",
+    eventStatus: "success",
+    message: `"${doc.label}" sent to the print station.`,
+    actorId: auth.ctx.userId,
+  });
+  return { success: true, data: { stationOnline: await anyStationOnline(params.conferenceId) } };
 }
 
 export type ReprintPreview = {
@@ -1183,7 +1240,14 @@ export async function loadReprintPreview(params: {
   };
 }
 
-export type QueuedLabel = { jobId: string; personName: string; queuedAt: string; stickers: StickerSide[] };
+export type QueuedLabel = {
+  jobId: string;
+  personName: string;
+  queuedAt: string;
+  stickers: StickerSide[];
+  /** Set for a document sent from the War Room: it prints on paper, not the QL. */
+  documentTitle: string | null;
+};
 
 /** What the print station has to print, oldest first. */
 export async function listQueuedLabels(conferenceId: string): Promise<QueueResult<QueuedLabel[]>> {
@@ -1192,9 +1256,9 @@ export async function listQueuedLabels(conferenceId: string): Promise<QueueResul
   const db = createAdminClient();
   const { data: jobs, error } = await db
     .from("badge_print_jobs")
-    .select("id, person_id, updated_at, metadata")
+    .select("id, person_id, updated_at, metadata, pipeline_type")
     .eq("conference_id", conferenceId)
-    .eq("pipeline_type", "onsite_reprint")
+    .in("pipeline_type", ["onsite_reprint", "document"])
     .eq("status", "sent_to_printer")
     .order("updated_at", { ascending: true })
     .limit(20);
@@ -1211,7 +1275,12 @@ export async function listQueuedLabels(conferenceId: string): Promise<QueueResul
       jobId: j.id as string,
       personName: nameById.get(j.person_id as string) ?? "",
       queuedAt: j.updated_at as string,
-      stickers: stickersFor((j.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan),
+      stickers:
+        j.pipeline_type === "document"
+          ? []
+          : stickersFor((j.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan),
+      documentTitle:
+        j.pipeline_type === "document" ? ((j.metadata as { label?: string } | null)?.label ?? "Document") : null,
     })),
   };
 }

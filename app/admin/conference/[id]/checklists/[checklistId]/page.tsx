@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import ChecklistDetail from "@/components/admin/conference/ChecklistDetail";
+import { parseConferenceDocuments } from "@/lib/conference-documents";
 
 export const metadata = { title: "Checklist | Conference | Admin" };
 export const dynamic = "force-dynamic";
@@ -16,7 +17,14 @@ export default async function ChecklistDetailPage({
   const { id, checklistId } = await params;
   const db = createAdminClient();
 
-  const [{ data: checklist }, { data: tasks }, { data: checkpoints }, { data: entities }, { data: log }] =
+  const [
+    { data: checklist },
+    { data: tasks },
+    { data: checkpoints },
+    { data: entities },
+    { data: log },
+    { data: conference },
+  ] =
     await Promise.all([
       db.from("conference_checklists").select("*").eq("id", checklistId).single(),
       db
@@ -42,6 +50,7 @@ export default async function ChecklistDetailPage({
         .eq("checklist_id", checklistId)
         .order("sent_at", { ascending: false })
         .limit(30),
+      db.from("conference_instances").select("documents").eq("id", id).maybeSingle(),
     ]);
 
   if (!checklist) notFound();
@@ -58,6 +67,7 @@ export default async function ChecklistDetailPage({
         tasks={tasks ?? []}
         checkpoints={checkpoints ?? []}
         entities={entities ?? []}
+        documents={parseConferenceDocuments(conference?.documents).map((d) => ({ id: d.id, label: d.label }))}
         log={log ?? []}
       />
     </main>

@@ -5,12 +5,14 @@ import "server-only";
  *
  * ⛔ Authenticated by its OWN key (print-station.ts), never a session: a laptop
  * left at a desk for four days must not hold somebody's login. The key reaches
- * exactly one conference's on-site reprint stickers and nothing else.
+ * exactly one conference's queued print jobs — reprint stickers, and documents
+ * an admin sent from the War Room — and nothing else.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { claimExpired, hashPrintStationKey, keyFromAuthorization } from "@/lib/conference/badges/print-station";
 import { stickersFor, type ReprintPlan, type StickerSide } from "@/lib/conference/badges/reprint-plan";
+import { parseConferenceDocuments, pdfSourceUrl } from "@/lib/conference-documents";
 
 export type PrintStation = {
   id: string;
@@ -55,22 +57,38 @@ export async function recordHeartbeat(
   return { conferenceName: (data?.name as string | null) ?? "Conference" };
 }
 
-export type ClaimedJob = { jobId: string; personName: string; stickers: StickerSide[] };
+/**
+ * A claimed job. `kind` is new with documents: a station that predates it reads
+ * only `stickers`, and is never handed a document (see `acceptsDocuments`).
+ */
+export type ClaimedJob =
+  | { jobId: string; kind: "stickers"; personName: string; stickers: StickerSide[] }
+  | { jobId: string; kind: "document"; title: string };
+
+/** The queue's two kinds of job: a reprint's stickers, and a document to print on paper. */
+const STATION_PIPELINES = ["onsite_reprint", "document"] as const;
 
 /**
- * Take the oldest queued sticker job for this station's conference.
+ * Take the oldest queued job for this station's conference.
  *
  * ⛔ ATOMIC: the claim is an update guarded on the status and timestamp just
  * read, so two stations polling at once can never both print one job. A claim
  * nobody reported back on goes back to the queue after CLAIM_EXPIRES_SECONDS.
+ *
+ * Documents (War Room → Send to printer) go only to a station that says it can
+ * print them: one running the older app would read a document as a sticker job
+ * with no stickers and fail it.
  */
-export async function claimNextJob(station: PrintStation): Promise<ClaimedJob | null> {
+export async function claimNextJob(
+  station: PrintStation,
+  options: { acceptsDocuments?: boolean } = {}
+): Promise<ClaimedJob | null> {
   const db = createAdminClient();
   const { data: candidates, error } = await db
     .from("badge_print_jobs")
-    .select("id, person_id, status, updated_at, metadata")
+    .select("id, person_id, status, updated_at, metadata, pipeline_type")
     .eq("conference_id", station.conferenceId)
-    .eq("pipeline_type", "onsite_reprint")
+    .in("pipeline_type", options.acceptsDocuments ? [...STATION_PIPELINES] : ["onsite_reprint"])
     .eq("transport_method", "printer_bridge")
     .in("status", ["sent_to_printer", "rendering"])
     .order("updated_at", { ascending: true })
@@ -79,7 +97,10 @@ export async function claimNextJob(station: PrintStation): Promise<ClaimedJob | 
 
   for (const job of candidates ?? []) {
     if (job.status === "rendering" && !claimExpired(job.updated_at as string)) continue;
-    const stickers = stickersFor((job.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan);
+    const isDocument = job.pipeline_type === "document";
+    const stickers = isDocument
+      ? []
+      : stickersFor((job.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan);
     const { data: claimed } = await db
       .from("badge_print_jobs")
       .update({ status: "rendering", printer_bridge_state: "healthy", updated_at: new Date().toISOString() })
@@ -89,6 +110,11 @@ export async function claimNextJob(station: PrintStation): Promise<ClaimedJob | 
       .select("id")
       .maybeSingle();
     if (!claimed) continue; // another station got it first
+
+    if (isDocument) {
+      const title = (job.metadata as { label?: string } | null)?.label ?? "Document";
+      return { jobId: job.id as string, kind: "document", title };
+    }
 
     if (stickers.length === 0) {
       // A full colour badge is not a QL job: nothing this station can print.
@@ -106,6 +132,7 @@ export async function claimNextJob(station: PrintStation): Promise<ClaimedJob | 
       .maybeSingle();
     return {
       jobId: job.id as string,
+      kind: "stickers",
       personName: (person?.display_name as string | null) ?? "",
       stickers,
     };
@@ -113,16 +140,71 @@ export async function claimNextJob(station: PrintStation): Promise<ClaimedJob | 
   return null;
 }
 
-/** Is this one of the station's conference's on-site reprints it may read? */
+/** Is this one of the station's conference's queued jobs it may read? */
 export async function stationMayReadJob(station: PrintStation, jobId: string): Promise<boolean> {
   const { data } = await createAdminClient()
     .from("badge_print_jobs")
     .select("id")
     .eq("id", jobId)
     .eq("conference_id", station.conferenceId)
-    .eq("pipeline_type", "onsite_reprint")
+    .in("pipeline_type", [...STATION_PIPELINES])
     .maybeSingle();
   return Boolean(data);
+}
+
+/** A document job's file could not become a PDF — retrying will not help. */
+export class DocumentNotPrintable extends Error {}
+
+const PDF_MAGIC = "%PDF";
+
+/**
+ * A queued document, as the PDF the station sends to the paper printer.
+ *
+ * Fetched HERE, not by the laptop: the station's key reaches this site and
+ * nothing else, and a stored file needs signing that only the server can do.
+ * Only the documents admins attached on the conference's Documents page can be
+ * queued, so this reads no address a station chose.
+ */
+export async function documentPdfForJob(station: PrintStation, jobId: string): Promise<{ bytes: ArrayBuffer; title: string }> {
+  const db = createAdminClient();
+  const [{ data: job }, { data: conference }] = await Promise.all([
+    db
+      .from("badge_print_jobs")
+      .select("metadata")
+      .eq("id", jobId)
+      .eq("conference_id", station.conferenceId)
+      .eq("pipeline_type", "document")
+      .maybeSingle(),
+    db.from("conference_instances").select("documents").eq("id", station.conferenceId).maybeSingle(),
+  ]);
+  const documentId = (job?.metadata as { document_id?: string } | null)?.document_id;
+  if (!documentId) throw new DocumentNotPrintable("This print job names no document.");
+  const doc = parseConferenceDocuments(conference?.documents).find((d) => d.id === documentId);
+  if (!doc) throw new DocumentNotPrintable("That document is no longer on the conference's Documents page.");
+
+  let bytes: ArrayBuffer;
+  if (doc.storage_path) {
+    const { data, error } = await db.storage.from("conference-documents").download(doc.storage_path);
+    if (error || !data) throw new Error(`Could not read the stored file: ${error?.message ?? "missing"}`);
+    bytes = await data.arrayBuffer();
+  } else if (doc.url) {
+    const response = await fetch(pdfSourceUrl(doc.url), { redirect: "follow", cache: "no-store" });
+    if (!response.ok) throw new Error(`The document's address answered ${response.status}.`);
+    bytes = await response.arrayBuffer();
+  } else {
+    throw new DocumentNotPrintable("This document has neither a file nor a link.");
+  }
+
+  // A Google Doc nobody shared publicly answers with a sign-in PAGE, not an
+  // error, so the bytes are the only honest test.
+  if (new TextDecoder().decode(bytes.slice(0, 4)) !== PDF_MAGIC) {
+    throw new DocumentNotPrintable(
+      doc.url
+        ? `"${doc.label}" didn't come back as a PDF. If it's a Google Doc, share it as "anyone with the link can view".`
+        : `"${doc.label}" isn't a PDF. Upload it as a PDF to print it.`
+    );
+  }
+  return { bytes, title: doc.label };
 }
 
 /**

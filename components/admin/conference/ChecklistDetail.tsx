@@ -32,6 +32,11 @@ interface EntityOption {
   kind: string;
 }
 
+interface DocumentOption {
+  id: string;
+  label: string;
+}
+
 interface LogRow {
   id: string;
   sent_at: string;
@@ -89,6 +94,7 @@ export default function ChecklistDetail({
   tasks,
   checkpoints,
   entities,
+  documents,
   log,
 }: {
   conferenceId: string;
@@ -96,6 +102,8 @@ export default function ChecklistDetail({
   tasks: Task[];
   checkpoints: Checkpoint[];
   entities: EntityOption[];
+  /** The conference's Documents page — what a task can carry. */
+  documents: DocumentOption[];
   log: LogRow[];
 }) {
   const router = useRouter();
@@ -128,6 +136,7 @@ export default function ChecklistDetail({
                 checklistId={checklist.id}
                 task={null}
                 entities={entities}
+                documents={documents}
                 nextSortOrder={tasks.length}
                 onClose={() => setTaskForm(null)}
                 onSaved={() => {
@@ -149,6 +158,7 @@ export default function ChecklistDetail({
                   checklistId={checklist.id}
                   task={task}
                   entities={entities}
+                  documents={documents}
                   nextSortOrder={task.sort_order}
                   onClose={() => setTaskForm(null)}
                   onSaved={() => {
@@ -435,6 +445,7 @@ function TaskForm({
   checklistId,
   task,
   entities,
+  documents,
   nextSortOrder,
   onClose,
   onSaved,
@@ -442,11 +453,13 @@ function TaskForm({
   checklistId: string;
   task: Task | null;
   entities: EntityOption[];
+  documents: DocumentOption[];
   nextSortOrder: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(task?.name ?? "");
+  const [documentIds, setDocumentIds] = useState<string[]>(task?.document_ids ?? []);
   const [description, setDescription] = useState(task?.description ?? "");
   const [audience, setAudience] = useState<TaskAudience>((task?.audience as TaskAudience | undefined) ?? "org");
   const [checkType, setCheckType] = useState<CheckType | StaffCheckType>(
@@ -489,6 +502,7 @@ function TaskForm({
       name,
       description,
       audience,
+      documentIds,
       checkType,
       checkEntityId: checkEntityId || null,
       scopeEntityKind: scopeKind || null,
@@ -598,6 +612,33 @@ function TaskForm({
           </select>
         </div>
         </>) : null}
+      </div>
+      {/* What belongs to this task: a speech, a run-sheet. Picked from the
+          conference's Documents page — one place to keep a file. */}
+      <div>
+        <p className="mb-1 block text-xs font-medium text-gray-700">Documents</p>
+        {documents.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            None yet. Add them on the conference&apos;s Documents page, then attach them here.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {documents.map((doc) => (
+              <label key={doc.id} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={documentIds.includes(doc.id)}
+                  onChange={(e) =>
+                    setDocumentIds((ids) =>
+                      e.target.checked ? [...ids, doc.id] : ids.filter((id) => id !== doc.id)
+                    )
+                  }
+                />
+                {doc.label}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />

@@ -6,6 +6,7 @@ import {
   newPrintStationKey,
   stationOnline,
 } from "../print-station";
+import { pdfSourceUrl } from "@/lib/conference-documents";
 
 /**
  * ⛔ The print station prints the desk's queue straight to the QL (the print
@@ -52,5 +53,23 @@ describe("a job claimed and never reported", () => {
     expect(claimExpired("2026-10-21T15:39:00Z", now)).toBe(false);
     expect(claimExpired("2026-10-21T15:37:30Z", now)).toBe(true);
     expect(claimExpired(null, now)).toBe(true);
+  });
+});
+
+describe("where the station's document comes from (War Room → Send to printer)", () => {
+  it("turns a Google Doc, Sheet or Slides link into its PDF export", () => {
+    expect(pdfSourceUrl("https://docs.google.com/document/d/abc_123-X/edit?usp=sharing")).toBe(
+      "https://docs.google.com/document/d/abc_123-X/export?format=pdf"
+    );
+    expect(pdfSourceUrl("https://docs.google.com/spreadsheets/d/S1/edit#gid=0")).toBe(
+      "https://docs.google.com/spreadsheets/d/S1/export?format=pdf"
+    );
+    expect(pdfSourceUrl("https://docs.google.com/presentation/d/P1/edit")).toBe(
+      "https://docs.google.com/presentation/d/P1/export/pdf"
+    );
+  });
+
+  it("leaves any other address alone", () => {
+    expect(pdfSourceUrl(" https://example.com/speech.pdf ")).toBe("https://example.com/speech.pdf");
   });
 });

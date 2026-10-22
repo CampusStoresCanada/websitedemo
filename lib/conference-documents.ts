@@ -24,6 +24,23 @@ export interface ConferenceDocument {
   storage_path?: string;
 }
 
+/**
+ * Where to fetch a linked document as a PDF, for the print station.
+ *
+ * Stephen keeps speeches in Google Docs. Google serves any Doc, Sheet or Slides
+ * deck as a PDF at its export address — but only to someone allowed to see it,
+ * so the file must be shared as "anyone with the link can view". Anything else
+ * is fetched as it is and must already be a PDF.
+ */
+export function pdfSourceUrl(url: string): string {
+  const match = /^https:\/\/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([A-Za-z0-9_-]+)/.exec(url.trim());
+  if (!match) return url.trim();
+  const [, kind, id] = match;
+  return kind === "presentation"
+    ? `https://docs.google.com/presentation/d/${id}/export/pdf`
+    : `https://docs.google.com/${kind}/d/${id}/export?format=pdf`;
+}
+
 export function parseConferenceDocuments(raw: unknown): ConferenceDocument[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(

@@ -4109,6 +4109,7 @@ export type Database = {
           created_at: string
           deadline_at: string | null
           description: string
+          document_ids: string[]
           hardens_because: string | null
           id: string
           name: string
@@ -4128,6 +4129,7 @@ export type Database = {
           created_at?: string
           deadline_at?: string | null
           description: string
+          document_ids?: string[]
           hardens_because?: string | null
           id?: string
           name: string
@@ -4147,6 +4149,7 @@ export type Database = {
           created_at?: string
           deadline_at?: string | null
           description?: string
+          document_ids?: string[]
           hardens_because?: string | null
           id?: string
           name?: string

@@ -6,7 +6,7 @@ import {
   syncConferencePeopleIndex,
 } from "@/lib/actions/conference-people";
 import { isGlobalAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
-import WarRoomClient, { type WhatsNext } from "@/components/admin/conference/WarRoomClient";
+import WarRoomClient, { SendToPrinterButton, type WhatsNext } from "@/components/admin/conference/WarRoomClient";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -25,11 +25,29 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** A staff task's live line and its buttons, rendered inside its own row. */
-function StaffTaskControls({ extra }: { extra: StaffTaskExtra }) {
+/** A staff task's live line, its buttons and its documents, inside its own row. */
+function StaffTaskControls({ conferenceId, extra }: { conferenceId: string; extra: StaffTaskExtra }) {
   return (
     <div className="space-y-2">
       {extra.detail ? <p className="text-xs text-gray-600">{extra.detail}</p> : null}
+      {extra.documents.length > 0 ? (
+        <ul className="space-y-1.5">
+          {extra.documents.map((doc) => (
+            <li key={doc.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium text-gray-800">{doc.label}</span>
+              <a
+                href={doc.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Open
+              </a>
+              <SendToPrinterButton conferenceId={conferenceId} documentId={doc.id} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {extra.actions.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {extra.actions.map((action) => (
@@ -92,7 +110,7 @@ export default async function ConferenceWarRoomPage({
     const controlsByTaskId: Record<string, ReactNode> = {};
     for (const list of checklists) {
       for (const [taskId, extra] of Object.entries(list.extras)) {
-        controlsByTaskId[taskId] = <StaffTaskControls extra={extra} />;
+        controlsByTaskId[taskId] = <StaffTaskControls conferenceId={id} extra={extra} />;
       }
     }
     whatsNext = {

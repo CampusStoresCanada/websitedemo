@@ -106,6 +106,11 @@ export type ChecklistTaskInput = {
   description: string;
   /** Who answers. `undefined` leaves an existing task's audience alone. */
   audience?: TaskAudience;
+  /**
+   * Documents from the conference's Documents page that belong to this task
+   * (a speech, a run-sheet). `undefined` leaves them alone.
+   */
+  documentIds?: string[];
   checkType: CheckType | StaffCheckType;
   checkEntityId: string | null;
   /**
@@ -158,6 +163,9 @@ export async function saveChecklistTask(
     check_type: input.checkType,
     check_entity_id: !isStaff && ENTITY_SCOPED_CHECKS.has(input.checkType as CheckType) ? input.checkEntityId : null,
     ...(input.audience !== undefined ? { audience: input.audience } : {}),
+    ...(input.documentIds !== undefined
+      ? { document_ids: [...new Set(input.documentIds.filter((id) => typeof id === "string" && id))] }
+      : {}),
     // A staff task has no org to scope by.
     ...(isStaff
       ? { scope_entity_kind: null, scope_entity_id: null }

@@ -8,6 +8,7 @@ import type { StaffChecklistGroups } from "@/lib/conference/deadline-urgency";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 import { PRINT_SORT_KEYS, type PrintSortKey } from "@/lib/conference/badges/arrangement";
 import { setMyPrintSort } from "@/lib/actions/profile";
+import { sendDocumentToPrinter } from "@/lib/actions/conference-badges";
 
 type ConferencePerson = {
   id: string;
@@ -52,6 +53,53 @@ export type WhatsNext = {
   /** The viewer's own order for printed name lists. */
   printSort: PrintSortKey;
 };
+
+/**
+ * "Send to printer" on a task's document: onto the print station's queue, so it
+ * is printing on the paper printer while you walk over to get it. Says so when
+ * no station is online, because then nothing is printing it.
+ */
+export function SendToPrinterButton({ conferenceId, documentId }: { conferenceId: string; documentId: string }) {
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "queued_offline" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const label =
+    state === "sending"
+      ? "Sending…"
+      : state === "sent"
+        ? "Sent to printer"
+        : state === "queued_offline"
+          ? "Queued, but no print station is online"
+          : "Send to printer";
+  return (
+    <>
+      <button
+        type="button"
+        disabled={state === "sending"}
+        onClick={async () => {
+          setState("sending");
+          setError(null);
+          const result = await sendDocumentToPrinter({ conferenceId, documentId });
+          if (!result.success) {
+            setState("error");
+            setError(result.error);
+            return;
+          }
+          setState(result.data.stationOnline ? "sent" : "queued_offline");
+        }}
+        className={`rounded-md px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${
+          state === "sent"
+            ? "bg-green-700 text-white"
+            : state === "queued_offline"
+              ? "bg-amber-600 text-white"
+              : "bg-[#163D6D] text-white hover:bg-[#12325a]"
+        }`}
+      >
+        {label}
+      </button>
+      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+    </>
+  );
+}
 
 const PRINT_SORT_LABELS: Record<PrintSortKey, string> = {
   person_first_name: "First name",

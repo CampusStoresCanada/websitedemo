@@ -555,8 +555,13 @@ export async function recordPersonalTaskAnswer(
   });
 }
 
-/** What the War Room shows under a staff task: the live line and its buttons. */
-export type StaffTaskExtra = Pick<StaffCheckResult, "detail" | "actions">;
+/**
+ * What the War Room shows under a staff task: the live line, its buttons, and
+ * the documents that belong to it (each with Open and Send to printer).
+ */
+export type StaffTaskExtra = Pick<StaffCheckResult, "detail" | "actions"> & {
+  documents: { id: string; label: string; href: string }[];
+};
 
 export type StaffChecklist = {
   id: string;
@@ -600,7 +605,7 @@ export async function loadStaffChecklists(
 ): Promise<StaffChecklist[]> {
   const { data: checklists, error } = await db
     .from("conference_checklists")
-    .select("id, name, description, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, hardens_because)")
+    .select("id, name, description, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, hardens_because, document_ids)")
     .eq("conference_id", conferenceId)
     .eq("active", true)
     .order("deadline_at", { ascending: true });
@@ -609,6 +614,7 @@ export async function loadStaffChecklists(
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number; active: boolean;
     audience: string; check_type: string; deadline_at: string | null; hardens_because: string | null;
+    document_ids: string[] | null;
   };
   const staffLists = (checklists ?? [])
     .map((cl) => ({
@@ -648,6 +654,24 @@ export async function loadStaffChecklists(
     )
   );
 
+  // The documents tasks carry live on the conference's Documents page; signed
+  // here (stored files) so the War Room's Open works without another trip.
+  const wantedDocs = new Set(staffLists.flatMap((e) => e.tasks.flatMap((t) => t.document_ids ?? [])));
+  const docById = new Map<string, { id: string; label: string; href: string }>();
+  if (wantedDocs.size > 0) {
+    const { data: conference } = await db
+      .from("conference_instances")
+      .select("documents")
+      .eq("id", conferenceId)
+      .maybeSingle();
+    const { parseConferenceDocuments } = await import("@/lib/conference-documents");
+    const { resolveConferenceDocuments } = await import("@/lib/actions/get-conference-document-url");
+    const resolved = await resolveConferenceDocuments(
+      parseConferenceDocuments(conference?.documents).filter((d) => wantedDocs.has(d.id))
+    );
+    for (const doc of resolved) docById.set(doc.id, { id: doc.id, label: doc.label, href: doc.href });
+  }
+
   return staffLists.map(({ cl, tasks }) => {
     const extras: Record<string, StaffTaskExtra> = {};
     const rendered = tasks.map((task): PersonalTask => {
@@ -660,7 +684,13 @@ export async function loadStaffChecklists(
       };
       const ack = ackByTask.get(task.id);
       const result = isStaffCheckType(task.check_type) ? results.get(task.check_type) : undefined;
-      if (result) extras[task.id] = { detail: result.detail, actions: result.actions };
+      // A document removed from the Documents page simply stops showing.
+      const documents = (task.document_ids ?? [])
+        .map((id) => docById.get(id))
+        .filter((d): d is { id: string; label: string; href: string } => Boolean(d));
+      if (result || documents.length > 0) {
+        extras[task.id] = { detail: result?.detail ?? null, actions: result?.actions ?? [], documents };
+      }
 
       // Read from data: a tick neither completes nor reopens it.
       if (result && result.verdict !== "tick") {

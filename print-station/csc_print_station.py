@@ -12,8 +12,12 @@ own paper (a 120 mm back came out as two 100 mm pieces). Talking to the printer
 directly — the way last year's badge printer did (brother_ql) — the length is
 ours, and the stickers line up with the card to fractions of a millimetre.
 
-Setup: run it once and paste the print station key from the conference's
-desk (toolkit → Open the print station → Add this laptop).
+It also prints DOCUMENTS sent from the War Room ("Send to printer" on a task's
+speech or run-sheet): the website hands over a PDF, and this sends it to the
+laptop's ordinary paper printer with the system's own `lp`.
+
+Setup: run it once and paste the print station key (War Room → What's next →
+Open the print station → Get a key).
 """
 
 import json
@@ -78,11 +82,19 @@ def setup(config: dict) -> dict:
     config["server"] = (server or config.get("server") or DEFAULT_SERVER).rstrip("/")
     key = input("Print station key (starts with cscps_): ").strip()
     if not key.startswith("cscps_"):
-        sys.exit("That is not a print station key. Make one on the desk: toolkit → Open the print station.")
+        sys.exit("That is not a print station key. Make one in the War Room: What's next → Open the print station.")
     config["key"] = key
-    printer = input("Printer [blank = find it on USB, or tcp://PRINTER-IP:9100]: ").strip()
+    printer = input("Sticker printer [blank = find it on USB, or tcp://PRINTER-IP:9100]: ").strip()
     if printer:
         config["printer"] = printer
+    paper = list_paper_printers()
+    if paper:
+        print(f"Paper printers on this laptop: {', '.join(paper)}")
+    document_printer = input(
+        f"Paper printer for documents [{config.get('document_printer') or 'blank = the default printer'}]: "
+    ).strip()
+    if document_printer:
+        config["document_printer"] = document_printer
     save_config(config)
     print(f"\nSaved to {CONFIG_PATH}\n")
     return config
@@ -115,6 +127,31 @@ def print_images(printer: str, images: list) -> dict:
     )
     return send(instructions=instructions, printer_identifier=printer,
                 backend_identifier=backend_for(printer), blocking=True)
+
+
+def list_paper_printers() -> list:
+    """The system's printers (CUPS), for setup. Empty where `lpstat` isn't available."""
+    try:
+        out = subprocess.run(["lpstat", "-a"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.split()[0] for line in out.splitlines() if line.strip()]
+
+
+def print_document(config: dict, pdf: bytes, title: str) -> None:
+    """A PDF to the paper printer through the system's own `lp`. Raises on failure."""
+    if platform.system() == "Windows":
+        raise RuntimeError("Printing documents needs a Mac (or Linux) print station for now.")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "document.pdf"
+        path.write_bytes(pdf)
+        command = ["lp", "-t", title]
+        if config.get("document_printer"):
+            command += ["-d", config["document_printer"]]
+        command.append(str(path))
+        done = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        if done.returncode != 0:
+            raise RuntimeError((done.stderr or done.stdout or "lp failed").strip())
 
 
 def describe_printer(result: dict) -> tuple:
@@ -199,14 +236,24 @@ class Station:
                               json={"printerStatus": self.printer_status, "printerMedia": self.printer_media},
                               timeout=15)
         if r.status_code == 401:
-            sys.exit("This print station key is unknown or was revoked. Make a new one on the desk.")
+            sys.exit("This print station key is unknown or was revoked. Make a new one in the War Room.")
         r.raise_for_status()
         return r.json()
 
     def claim(self):
-        r = self.session.post(self.url("/api/print-station/claim"), timeout=15)
+        # Saying we print documents is what gets us handed them; an older
+        # station that doesn't say so only ever gets stickers.
+        r = self.session.post(self.url("/api/print-station/claim"),
+                              json={"accepts": ["stickers", "document"]}, timeout=15)
         r.raise_for_status()
         return r.json().get("job")
+
+    def document(self, job_id: str) -> bytes:
+        r = self.session.get(self.url(f"/api/print-station/jobs/{job_id}/document"), timeout=120)
+        if r.status_code == 422:
+            raise DocumentError(r.json().get("error", "This document cannot be printed."))
+        r.raise_for_status()
+        return r.content
 
     def sticker(self, job_id: str, side: str):
         r = self.session.get(self.url(f"/api/print-station/jobs/{job_id}/sticker"), params={"side": side}, timeout=60)
@@ -221,6 +268,33 @@ class Station:
 
 class StickerError(Exception):
     """The sticker itself cannot be drawn — retrying will not help."""
+
+
+class DocumentError(Exception):
+    """The document itself cannot become a PDF (not shared, not a PDF) — retrying will not help."""
+
+
+def run_document_job(station: "Station", config: dict, job: dict) -> None:
+    title = job.get("title") or "Document"
+    log(f"Printing document: {title}")
+    try:
+        pdf = station.document(job["jobId"])
+    except DocumentError as error:
+        log(f"  Cannot print this document: {error}")
+        station.report(job["jobId"], ok=False, retry=False, error=str(error))
+        return
+    except requests.RequestException as error:
+        log(f"  Could not fetch it ({error}). It stays in the queue.")
+        station.report(job["jobId"], ok=False, retry=True, error=f"Fetching failed: {error}")
+        return
+    try:
+        print_document(config, pdf, title)
+    except Exception as error:  # printer missing, lp refused
+        log(f"  The paper printer refused it: {error}. It stays in the queue.")
+        station.report(job["jobId"], ok=False, retry=True, error=f"Paper printer: {error}")
+        return
+    log(f"  Sent to {config.get('document_printer') or 'the default printer'}.")
+    station.report(job["jobId"], ok=True)
 
 
 def run_job(station: Station, browser: str, printer: str, job: dict) -> None:
@@ -278,7 +352,10 @@ def main() -> None:
             station.heartbeat()
             job = station.claim()
             if job:
-                run_job(station, browser, printer, job)
+                if job.get("kind") == "document":
+                    run_document_job(station, config, job)
+                else:
+                    run_job(station, browser, printer, job)
                 continue  # straight on to the next one
         except requests.RequestException as error:
             log(f"Website not reachable ({error}); trying again.")

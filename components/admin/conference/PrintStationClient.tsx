@@ -169,7 +169,15 @@ export default function PrintStationClient({
           <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
             {queue.map((job) => (
               <li key={job.jobId} className="px-4 py-2 text-sm">
-                {job.personName || "Unnamed"} <span className="text-gray-500">· {job.stickers.length} stickers</span>
+                {job.documentTitle ? (
+                  <>
+                    {job.documentTitle} <span className="text-gray-500">· document, on the paper printer</span>
+                  </>
+                ) : (
+                  <>
+                    {job.personName || "Unnamed"} <span className="text-gray-500">· {job.stickers.length} stickers</span>
+                  </>
+                )}
               </li>
             ))}
           </ul>
