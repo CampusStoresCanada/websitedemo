@@ -16,6 +16,9 @@ import {
 } from "@/lib/conference/checklist-tasks";
 import { arrangeStaffChecklists } from "@/lib/conference/deadline-urgency";
 import { readPreferences } from "@/lib/profile/preferences";
+import { ENTITY_SELECT, buildEntityGraph } from "@/lib/conference/seats";
+import { deriveAgenda, deriveAnswers } from "@/lib/conference/agenda";
+import { loadConferenceAsks } from "@/lib/actions/flags";
 import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
 
 export const metadata = {
@@ -94,14 +97,38 @@ export default async function ConferenceWarRoomPage({
   }
 
   const rows = peopleResult.success ? peopleResult.data ?? [] : [];
+  const conferenceTimeZone =
+    ((conferenceResult.data as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
+
+  // Answers (Wi-Fi, coat check) and meal menus: the same graph and the same
+  // readers as each person's own page, so desk and phone say the same thing.
+  const graphDb = createAdminClient();
+  const [entityRes, refRes, asks] = await Promise.all([
+    graphDb.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
+    graphDb
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, role, quantity")
+      .eq("conference_id", id),
+    loadConferenceAsks(id),
+  ]);
+  const entities = buildEntityGraph(entityRes.data ?? [], refRes.data ?? []);
+  const answers = deriveAnswers(entities);
+  const menus = deriveAgenda(entities, conferenceTimeZone)
+    .filter((item) => item.kind === "meal" && item.description?.startsWith("Menu: "))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      dayKey: item.dayKey,
+      startTime: item.startTime,
+      menu: item.description!.slice("Menu: ".length),
+    }));
 
   // What's next is CSC's own run-sheet: admins only. Desk temps reach this page
   // for People Lookup and never see it.
   let whatsNext: WhatsNext | null = null;
   if (isAdmin) {
-    const db = createAdminClient();
-    const timeZone =
-      ((conferenceResult.data as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
+    const db = graphDb;
+    const timeZone = conferenceTimeZone;
     const [answeringOrgId, preferences] = await Promise.all([
       loadStaffAnsweringOrgId(db),
       readPreferences(auth.ctx.userId),
@@ -189,6 +216,9 @@ export default async function ConferenceWarRoomPage({
         initialRows={rows}
         canEditAdminNotes={isAdmin}
         whatsNext={whatsNext}
+        answers={answers}
+        menus={menus}
+        asks={asks}
       />
     </main>
   );

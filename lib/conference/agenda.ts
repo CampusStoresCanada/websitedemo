@@ -57,6 +57,9 @@ const STRUCTURAL_KINDS = new Set([
   "ticket",
   "equipment",
   "item",
+  // An answer (Wi-Fi, coat check) may name a Where or a When for context; it
+  // is still something to know, not something to attend.
+  "answer",
 ]);
 
 const MAX_DEPTH = 3;
@@ -123,7 +126,11 @@ export function deriveAgenda(
       id: e.id,
       kind: e.kind,
       title: e.name,
-      description: attr(e, byId, "purpose") ?? attr(e, byId, "notes"),
+      // A meal's menu is what people ask about it ("what's for dinner?").
+      description:
+        e.kind === "meal" && attr(e, byId, "menu")
+          ? `Menu: ${attr(e, byId, "menu")}`
+          : attr(e, byId, "purpose") ?? attr(e, byId, "notes"),
       summary: attr(e, byId, "summary"),
       dayKey,
       startTime,
@@ -229,4 +236,32 @@ function pickParent(
     if (!best || durationMs(parent) < durationMs(best)) best = parent;
   }
   return best?.id ?? null;
+}
+
+/** Something people ask at the conference, answered once in Build. */
+export type ConferenceAnswer = {
+  id: string;
+  /** The thing's name — written as the question or the topic ("Wi-Fi"). */
+  question: string;
+  answer: string;
+  /** Its Where, when it is somewhere ("by the ballroom"). */
+  where: string | null;
+};
+
+/**
+ * The conference's answers (kind `answer`), A to Z. One read for each person's
+ * own page and the War Room, so the two always say the same thing.
+ */
+export function deriveAnswers(entities: BuildEntity[]): ConferenceAnswer[] {
+  const byId = new Map(entities.map((e) => [e.id, e]));
+  return entities
+    .filter((e) => e.kind === "answer")
+    .map((e) => ({
+      id: e.id,
+      question: e.name,
+      answer: attr(e, byId, "answer") ?? "",
+      where: effectiveRefs(e, byId).find((r) => r.role === "where")?.toName ?? null,
+    }))
+    .filter((a) => a.answer)
+    .sort((a, b) => a.question.localeCompare(b.question));
 }

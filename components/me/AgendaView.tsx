@@ -176,6 +176,10 @@ export default function AgendaView({
                     {conflicted.has(item.id) && (
                       <span className="ml-2 text-xs font-semibold text-amber-700">overlaps</span>
                     )}
+                    {/* "What's for dinner?" — the meal's menu, from Build. */}
+                    {item.kind === "meal" && item.description?.startsWith("Menu: ") ? (
+                      <span className="mt-0.5 block text-xs text-gray-600">{item.description}</span>
+                    ) : null}
                     {/* Counted: the record bursary travellers look for. */}
                     {agenda.counted?.[item.id] ? (
                       <span className="ml-2 text-xs font-semibold text-emerald-700">

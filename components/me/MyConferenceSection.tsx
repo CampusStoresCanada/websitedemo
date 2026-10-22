@@ -116,6 +116,16 @@ export default async function MyConferenceSection() {
         <h2 className="text-lg font-semibold text-gray-900">
           {conference?.name ?? "Conference"}
         </h2>
+        {/* The member map: who is in which booth, every floor. "Where is X?"
+            is the question people ask most once they are in the building. */}
+        {conference ? (
+          <Link
+            href={`/conference/${conference.year}/${conference.edition_code}/map`}
+            className="text-sm font-medium text-[#163D6D] hover:underline"
+          >
+            Map &rarr;
+          </Link>
+        ) : null}
         {/*
           The "Your schedule →" link is gone: it pointed at
           /conference/[year]/[edition]/schedule, which now redirects straight
@@ -139,6 +149,25 @@ export default async function MyConferenceSection() {
           swap={swap}
         />
       )}
+
+      {/* Answered once by CSC in Build (kind "answer"), the same list the War
+          Room reads: Wi-Fi, coat check, the shuttle. */}
+      {agenda && agenda.answers.length > 0 ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <h3 className="text-sm font-semibold text-gray-900">Good to know</h3>
+          <dl className="mt-2 divide-y divide-gray-100">
+            {agenda.answers.map((a) => (
+              <div key={a.id} className="py-2">
+                <dt className="text-sm font-medium text-gray-900">
+                  {a.question}
+                  {a.where ? <span className="ml-2 font-normal text-gray-500">{a.where}</span> : null}
+                </dt>
+                <dd className="mt-0.5 whitespace-pre-line text-sm text-gray-700">{a.answer}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
 
       {conference && buyable.length > 0 ? (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">

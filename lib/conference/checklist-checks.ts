@@ -542,11 +542,14 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
     };
   },
 
+  /** The directory's own map, booth index and A–Z list, as a sheet (lib/publication mapSheet). */
   async map_printed({ conferenceId }) {
     return {
       verdict: "tick",
-      detail: "The floor plan, then every booth by number and A to Z.",
-      actions: [{ label: "Print the map", href: `/admin/conference/${conferenceId}/check-in/map`, print: true }],
+      detail: "The floor plan, then every booth by number and every exhibitor A to Z.",
+      actions: [
+        { label: "Print the map", href: `/admin/conference/${conferenceId}/directory?sheet=map`, print: true },
+      ],
     };
   },
 

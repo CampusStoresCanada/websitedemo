@@ -4,6 +4,7 @@ import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/li
 import { loadSeatHoldings, pickMeetingSeat } from "@/lib/conference/seats";
 import { offerRequiresOwnershipOfEntityIds } from "@/lib/conference/ownership-gate";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
+import { deriveAnswers, type ConferenceAnswer } from "@/lib/conference/agenda";
 import {
   getConferenceScheduleTimeline,
   type ConferenceScheduleItem,
@@ -117,6 +118,8 @@ export type PersonAgenda = {
    * says who confirmed it: her, the exhibitor, or both.
    */
   counted: Record<string, { attendee: boolean; exhibitor: boolean }>;
+  /** Wi-Fi, coat check, the shuttle: answered once in Build, for everyone. */
+  answers: ConferenceAnswer[];
 };
 
 /**
@@ -405,6 +408,8 @@ export async function loadPersonAgenda(
       meetingSeatId: meetingSeat?.seatId ?? null,
       dayKeys: [...new Set(items.map((i) => i.dayKeyLocal))].sort(),
       conflicts: clashes,
+      // Not entitlement-gated: the Wi-Fi password is for everyone there.
+      answers: deriveAnswers([...byId.values()]),
     },
   };
 }
