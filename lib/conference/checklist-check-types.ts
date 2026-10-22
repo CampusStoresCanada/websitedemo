@@ -49,6 +49,10 @@ export const STAFF_CHECK_TYPES = [
   "directory_printed",
   "map_printed",
   "attendee_list_printed",
+  "schedule_emailed",
+  "schedules_printed",
+  "meetings_confirmed",
+  "bursary_proof_sent",
 ] as const;
 export type StaffCheckType = (typeof STAFF_CHECK_TYPES)[number];
 

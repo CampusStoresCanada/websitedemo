@@ -72,6 +72,10 @@ const CHECK_TYPE_LABELS: Record<CheckType | StaffCheckType, string> = {
   directory_printed: "Directory printed",
   map_printed: "Map printed",
   attendee_list_printed: "Attendee list printed",
+  schedule_emailed: "Everyone emailed their meeting schedule",
+  schedules_printed: "Individual schedules and suite door sheets printed",
+  meetings_confirmed: "Meetings so far confirmed (booth check-in cards)",
+  bursary_proof_sent: "CANCOLL bursary proof sent",
 };
 
 /** Who answers a task, in the editor's words. */

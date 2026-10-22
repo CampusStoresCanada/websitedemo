@@ -94,18 +94,22 @@ export async function sendSchedulesForRun(params: {
    */
   const { data: runRows } = await db
     .from("schedules")
-    .select("delegate_seat_ids, meeting_slots(day_number)")
+    .select("exhibitor_seat_id, delegate_seat_ids, meeting_slots(day_number)")
     .eq("conference_id", conferenceId)
     .eq("scheduler_run_id", runId)
     .neq("status", "canceled");
 
   const meetingsBySeat = new Map<string, { meetings: number; days: Set<number> }>();
   for (const row of (runRows ?? []) as Array<{
+    exhibitor_seat_id: string | null;
     delegate_seat_ids: string[] | null;
     meeting_slots: { day_number: number } | { day_number: number }[] | null;
   }>) {
     const slot = Array.isArray(row.meeting_slots) ? row.meeting_slots[0] : row.meeting_slots;
-    for (const seatId of row.delegate_seat_ids ?? []) {
+    // The exhibitor sits in every one of their meetings too — counting only
+    // delegate seats told every exhibitor they had "0 meetings".
+    const seatsInMeeting = [...(row.delegate_seat_ids ?? []), ...(row.exhibitor_seat_id ? [row.exhibitor_seat_id] : [])];
+    for (const seatId of seatsInMeeting) {
       const tally = meetingsBySeat.get(seatId) ?? { meetings: 0, days: new Set<number>() };
       tally.meetings += 1;
       if (typeof slot?.day_number === "number") tally.days.add(slot.day_number);

@@ -43,7 +43,50 @@ export type ScheduleOpsAssignment = {
   delegateNames: string[];
   status: string;
   isManual: boolean;
+  /** Who has confirmed it happened (booth check-in card). Active run only; null for a draft. */
+  confirmation: MeetingConfirmation | null;
 };
+
+/**
+ * Whether a meeting happened, from its booth check-in card scans.
+ *
+ * ⛔ One reader for the grid, the War Room and the CANCOLL bursary report, so
+ * the three cannot count differently. Each side's scan is its own row
+ * (check-in-cards.ts); a delegate is confirmed by either side. Rehearsal (test)
+ * scans never count.
+ */
+export type MeetingConfirmation = {
+  byAttendee: boolean;
+  byExhibitor: boolean;
+  /** The delegates (conference_people ids) confirmed in this meeting. */
+  confirmedPersonIds: string[];
+};
+
+export async function loadMeetingConfirmations(
+  db: ReturnType<typeof createAdminClient>,
+  scheduleIds: readonly string[]
+): Promise<Map<string, MeetingConfirmation>> {
+  const out = new Map<string, MeetingConfirmation>();
+  const ids = [...new Set(scheduleIds)];
+  // Chunked: a full day's run is hundreds of ids, too long for one URL.
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await db
+      .from("conference_check_in_events")
+      .select("schedule_id, confirmed_by, person_id")
+      .eq("is_test", false)
+      .in("schedule_id", ids.slice(i, i + 200));
+    if (error) throw new Error(`Could not read meeting confirmations: ${error.message}`);
+    for (const row of data ?? []) {
+      if (!row.schedule_id) continue;
+      const entry = out.get(row.schedule_id) ?? { byAttendee: false, byExhibitor: false, confirmedPersonIds: [] };
+      if (row.confirmed_by === "attendee") entry.byAttendee = true;
+      if (row.confirmed_by === "exhibitor") entry.byExhibitor = true;
+      if (row.person_id && !entry.confirmedPersonIds.includes(row.person_id)) entry.confirmedPersonIds.push(row.person_id);
+      out.set(row.schedule_id, entry);
+    }
+  }
+  return out;
+}
 
 export type ScheduleOpsSummary = {
   generatedAt: string;
@@ -234,12 +277,22 @@ export async function loadScheduleOpsSummary(
       delegateNames,
       status: row.status,
       isManual: row.is_manual === true,
+      confirmation: null,
     };
   };
 
   const enrichedAssignments = schedules
     .map(mapAssignment)
     .filter((value): value is ScheduleOpsAssignment => Boolean(value));
+
+  // Only the published run can have happened.
+  if (activeRun) {
+    const confirmations = await loadMeetingConfirmations(
+      adminClient,
+      enrichedAssignments.filter((row) => row.schedulerRunId === activeRun.id).map((row) => row.id)
+    );
+    for (const row of enrichedAssignments) row.confirmation = confirmations.get(row.id) ?? null;
+  }
 
   const activeAssignments = activeRun
     ? enrichedAssignments.filter((row) => row.schedulerRunId === activeRun.id)

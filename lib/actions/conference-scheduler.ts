@@ -1120,3 +1120,73 @@ export async function promoteSchedulerRun(
     data: mapRunSummary(data as SchedulerRunRow),
   };
 }
+
+/**
+ * Tell everyone in the published schedule that it's ready — the last stage of
+ * the pipeline, which existed (sendSchedulesForRun) and had no caller.
+ *
+ * Everyone with a meeting in the ACTIVE run, delegates and exhibitors both.
+ * Idempotent per (person, run): pressing it twice sends nothing the second
+ * time; promoting a new run and pressing it again tells people their day
+ * changed. Same permission as promoting, because it is the same act: publishing.
+ */
+export async function emailActiveSchedule(
+  conferenceId: string
+): Promise<
+  | { success: true; data: { sent: number; noEmail: number; alreadySent: boolean } }
+  | { success: false; error: string }
+> {
+  const auth = await requireSuperAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data: run } = await db
+    .from("scheduler_runs")
+    .select("id")
+    .eq("conference_id", conferenceId)
+    .eq("run_mode", "active")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!run) return { success: false, error: "There is no published (active) schedule to send." };
+
+  const { data: rows, error } = await db
+    .from("schedules")
+    .select("exhibitor_seat_id, delegate_seat_ids")
+    .eq("conference_id", conferenceId)
+    .eq("scheduler_run_id", run.id)
+    .neq("status", "canceled");
+  if (error) return { success: false, error: error.message };
+  const seatIds = [
+    ...new Set((rows ?? []).flatMap((r) => [r.exhibitor_seat_id, ...(r.delegate_seat_ids ?? [])]).filter(Boolean)),
+  ];
+  if (seatIds.length === 0) return { success: false, error: "The published schedule has no meetings in it." };
+
+  const { count: before } = await db
+    .from("message_automation_runs")
+    .select("id", { count: "exact", head: true })
+    .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`);
+
+  const { sendSchedulesForRun } = await import("@/lib/conference/schedule-delivery");
+  const result = await sendSchedulesForRun({ db, conferenceId, runId: run.id, delegateSeatIds: seatIds });
+
+  const { count: after } = await db
+    .from("message_automation_runs")
+    .select("id", { count: "exact", head: true })
+    .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`);
+
+  await logAuditEventSafe({
+    action: "scheduler_run_emailed",
+    entityType: "scheduler_run",
+    entityId: run.id,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId, seats: seatIds.length, newSends: (after ?? 0) - (before ?? 0), noEmail: result.noEmail.length },
+  });
+
+  const newSends = Math.max(0, (after ?? 0) - (before ?? 0));
+  return {
+    success: true,
+    data: { sent: newSends, noEmail: result.noEmail.length, alreadySent: newSends === 0 && (before ?? 0) > 0 },
+  };
+}

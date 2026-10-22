@@ -254,6 +254,22 @@ function GridLens({
                             manual
                           </span>
                         )}
+                        {/* Did it happen? From the booth's check-in card. A
+                            meeting with no scan is unconfirmed — Stephen's
+                            no-show, without a separate state. */}
+                        {assignment.confirmation ? (
+                          <span
+                            className="rounded bg-emerald-600 px-1 text-[9px] font-semibold uppercase text-white"
+                            title={`Confirmed by ${[
+                              assignment.confirmation.byAttendee ? "a delegate" : null,
+                              assignment.confirmation.byExhibitor ? "the exhibitor" : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" and ")}`}
+                          >
+                            ✓ {assignment.confirmation.confirmedPersonIds.length}/{assignment.delegateSeatIds.length}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="text-emerald-700">
                         {assignment.delegateNames.length > 0

@@ -26,6 +26,7 @@ function assignment(
     delegateNames: delegateSeatIds,
     status: "scheduled",
     isManual: false,
+    confirmation: null,
   };
 }
 

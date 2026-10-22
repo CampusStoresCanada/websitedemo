@@ -166,7 +166,9 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
     startTransition(() => router.refresh());
   }
 
-  const TabButton = ({ id, label }: { id: Tab; label: string }) => (
+  // A render helper, not a component: a component declared inside render is a
+  // new type every render (react-hooks/static-components).
+  const tabButton = (id: Tab, label: string) => (
     <button
       type="button"
       onClick={() => setTab(id)}
@@ -192,8 +194,17 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
       </div>
 
       <div className="mb-3 flex items-center gap-6">
-        <TabButton id="review" label={`To review (${awaiting.length})`} />
-        <TabButton id="decided" label={`Decided (${decided.length})`} />
+        {tabButton("review", `To review (${awaiting.length})`)}
+        {tabButton("decided", `Decided (${decided.length})`)}
+        {/* The proof CANCOLL asks for afterwards: each institution's meetings,
+            and which the booth check-in cards confirmed. */}
+        <a
+          href={`/admin/conference/${data.conferenceId}/bursary-proof`}
+          className="ml-auto text-[12px] hover:underline"
+          style={{ color: MUTED }}
+        >
+          Meeting proof →
+        </a>
       </div>
 
       {error && (

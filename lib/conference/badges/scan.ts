@@ -385,7 +385,9 @@ export async function resolveEncounter(params: {
     .from("schedules")
     .select("exhibitor_seat_id, delegate_seat_ids")
     .eq("conference_id", conferenceId)
-    .eq("scheduler_run_id", schedulerRunId);
+    .eq("scheduler_run_id", schedulerRunId)
+    // A canceled meeting is not one they had.
+    .neq("status", "canceled");
 
   for (const row of (rows ?? []) as Array<Record<string, unknown>>) {
     const exhibitorSeat = typeof row.exhibitor_seat_id === "string" ? row.exhibitor_seat_id : null;

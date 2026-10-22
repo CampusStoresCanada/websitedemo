@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { ScheduleOpsAssignment, ScheduleOpsSummary } from "@/lib/conference/schedule-ops";
+import { emailActiveSchedule } from "@/lib/actions/conference-scheduler";
 
 type ScheduleOpsClientProps = {
   conferenceId: string;
@@ -361,6 +362,18 @@ export default function ScheduleOpsClient({
           </div>
         ) : null}
 
+        {summary.activeRunId ? (
+          <EmailScheduleControl
+            conferenceId={conferenceId}
+            canSend={canPromote}
+            seatCount={
+              new Set(
+                summary.activeAssignments.flatMap((a) => [a.exhibitorSeatId, ...a.delegateSeatIds])
+              ).size
+            }
+          />
+        ) : null}
+
         {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
       </section>
 
@@ -469,6 +482,58 @@ export default function ScheduleOpsClient({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * The step after promoting: tell everyone in the schedule. Asks first — it
+ * emails real people — and says what happened, including who had no address.
+ */
+function EmailScheduleControl({
+  conferenceId,
+  canSend,
+  seatCount,
+}: {
+  conferenceId: string;
+  canSend: boolean;
+  seatCount: number;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <div className="mt-4 border-t border-gray-100 pt-3">
+      <button
+        type="button"
+        disabled={busy || !canSend || seatCount === 0}
+        onClick={async () => {
+          if (
+            !window.confirm(
+              `Email everyone in the published schedule (${seatCount} people) that their meetings are ready? Anyone already told about this schedule is skipped.`
+            )
+          ) {
+            return;
+          }
+          setBusy(true);
+          setMessage(null);
+          const result = await emailActiveSchedule(conferenceId);
+          setBusy(false);
+          if (!result.success) {
+            setMessage(result.error);
+            return;
+          }
+          const { sent, noEmail, alreadySent } = result.data;
+          setMessage(
+            alreadySent
+              ? "Everyone had already been emailed this schedule. Nothing new was sent."
+              : `Emailed ${sent} ${sent === 1 ? "person" : "people"}.${noEmail ? ` ${noEmail} have no email address.` : ""}`
+          );
+        }}
+        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy ? "Sending…" : "Email everyone their schedule"}
+      </button>
+      {message ? <p className="mt-1 text-xs text-gray-700">{message}</p> : null}
     </div>
   );
 }

@@ -550,6 +550,94 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
     };
   },
 
+  /**
+   * Has anyone been told? The send is idempotent per (person, run) and each one
+   * leaves a message_automation_runs row keyed on the run — so a re-promoted
+   * schedule reads as not sent, which is true.
+   */
+  async schedule_emailed({ db, conferenceId }) {
+    const actions = [{ label: "Open Schedule Ops", href: `/admin/conference/${conferenceId}/schedule-ops` }];
+    const { data: run } = await db
+      .from("scheduler_runs")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("run_mode", "active")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!run) return { verdict: "not_done", detail: "Promote a schedule first.", actions };
+    const { count } = await db
+      .from("message_automation_runs")
+      .select("id", { count: "exact", head: true })
+      .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`)
+      .eq("status", "sent");
+    const sent = count ?? 0;
+    return sent > 0
+      ? { verdict: "done", detail: `${plural(sent, "person", "people")} emailed this schedule.`, actions }
+      : { verdict: "not_done", detail: "Nobody has been emailed this schedule yet.", actions };
+  },
+
+  async schedules_printed({ conferenceId }) {
+    const base = `/admin/conference/${conferenceId}/check-in/schedules`;
+    return {
+      verdict: "tick",
+      detail: "One page per person, and one sheet per suite door.",
+      actions: [
+        { label: "Individual schedules", href: `${base}?view=people`, print: true },
+        { label: "Suite door sheets", href: `${base}?view=suites`, print: true },
+      ],
+    };
+  },
+
+  /**
+   * The meetings that have started, against the ones confirmed by a booth card
+   * scan. Unconfirmed is the no-show (Stephen, 2026-10-22): no separate state.
+   */
+  async meetings_confirmed({ db, conferenceId }) {
+    const actions = [{ label: "Open the meeting grid", href: `/admin/conference/${conferenceId}/schedule` }];
+    const { getConferenceScheduleTimeline } = await import("./schedule-service");
+    const { loadMeetingConfirmations } = await import("./schedule-ops");
+    const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
+    const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
+    if (meetings.length === 0) return { verdict: "not_done", detail: "No meetings are scheduled.", actions };
+    const now = Date.now();
+    const started = meetings.filter((m) => m.startsAt && Date.parse(m.startsAt) <= now);
+    if (started.length === 0) {
+      const first = meetings[0];
+      return {
+        verdict: "not_done",
+        detail: `${plural(meetings.length, "meeting")} scheduled; the first starts ${first.startsAtLocal}.`,
+        actions,
+      };
+    }
+    const confirmations = await loadMeetingConfirmations(
+      db,
+      started.map((m) => m.meetingAssignment!.scheduleId)
+    );
+    const unconfirmed = started.filter((m) => !confirmations.has(m.meetingAssignment!.scheduleId)).length;
+    return {
+      verdict: unconfirmed === 0 ? "done" : "not_done",
+      detail:
+        `${started.length - unconfirmed} of ${plural(started.length, "meeting")} so far confirmed` +
+        (unconfirmed ? `; ${unconfirmed} not yet. Unconfirmed shows as no ✓ on the grid.` : "."),
+      actions,
+    };
+  },
+
+  async bursary_proof_sent({ db, conferenceId }) {
+    const { count } = await db
+      .from("conference_bursary_applications")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId);
+    return {
+      verdict: "tick",
+      detail: `${plural(count ?? 0, "bursary institution")}: their meetings, and which were confirmed.`,
+      actions: [
+        { label: "Open the bursary proof", href: `/admin/conference/${conferenceId}/bursary-proof`, print: true },
+      ],
+    };
+  },
+
   async attendee_list_printed({ conferenceId }) {
     return {
       verdict: "tick",
