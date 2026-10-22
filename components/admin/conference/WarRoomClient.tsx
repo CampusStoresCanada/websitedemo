@@ -617,7 +617,10 @@ function AsksView({
 function AskRow({ ask, canResolve }: { ask: ConferenceAsk; canResolve: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const page = ask.pageUrl.split("/").slice(4).join("/") || "war-room";
+  // "Ask CSC" from their own page, or raised by staff on one of ours.
+  const page = ask.pageUrl.includes("war-room?ask=")
+    ? "Ask CSC"
+    : ask.pageUrl.split("/").slice(4).join("/").split("?")[0] || "war-room";
   return (
     <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-[18px] py-3 odd:bg-white/60">
       <div className="min-w-0">
@@ -627,6 +630,9 @@ function AskRow({ ask, canResolve }: { ask: ConferenceAsk; canResolve: boolean }
           ) : null}
           {ask.note || <span className="text-gray-500">(no note)</span>}
         </p>
+        {ask.details ? (
+          <p className="mt-1 whitespace-pre-line text-xs text-gray-600">{ask.details}</p>
+        ) : null}
         <p className="mt-0.5 text-xs text-gray-500">
           {ask.flaggerName ?? "Someone"} · {formatDayMonth(ask.createdAt, "America/Edmonton")}{" "}
           {new Date(ask.createdAt).toLocaleTimeString("en-CA", {

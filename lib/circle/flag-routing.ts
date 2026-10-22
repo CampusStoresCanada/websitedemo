@@ -22,3 +22,16 @@
 export function isBenchmarkingSurveyFlag(pageUrl: string): boolean {
   return /\/benchmarking\/(survey|worksheet|compare)/.test(pageUrl);
 }
+
+/**
+ * Something someone needs from CSC at a conference — "Ask CSC" on their own
+ * page, or an ask a staff member typed into the War Room. Both are filed
+ * against the conference's War Room, where they are kept and resolved.
+ *
+ * Same reversal as the survey: the asker's organization is who is ASKING, so
+ * routing by organization_id would send a delegate's question to their own
+ * store's admins. It goes to CSC staff (Stephen, 2026-10-22).
+ */
+export function isConferenceAskFlag(pageUrl: string): boolean {
+  return /^\/admin\/conference\/[^/?#]+\/war-room(?:[?#]|$)/.test(pageUrl);
+}

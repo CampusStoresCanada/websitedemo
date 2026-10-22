@@ -9,6 +9,7 @@ import { loadSeatHoldings } from "@/lib/conference/seats";
 import { isConferenceOnSale, type ConferenceStatus } from "@/lib/constants/conference";
 import { selfBuyableOffers, unassignedByEntity } from "@/lib/conference/self-purchase";
 import OfferCard from "@/components/conference/OfferCard";
+import AskCscBox from "@/components/me/AskCscBox";
 
 /**
  * The attendee's own conference to-dos, on the page they already use.
@@ -133,6 +134,9 @@ export default async function MyConferenceSection() {
           is worse than no link.
         */}
       </div>
+
+      {/* At the top: the thing someone at the conference most needs to find. */}
+      <AskCscBox conferenceId={person.conference_id} />
 
       {/*
         ⛔ DEADLINES RENDER EVEN WITH AN EMPTY SCHEDULE. This was gated on

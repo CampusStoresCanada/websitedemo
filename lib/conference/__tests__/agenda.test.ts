@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BuildEntity, EntityRefView } from "../../actions/conference-entities";
-import { deriveAgenda, deriveAnswers } from "../agenda";
+import { deriveAgenda, deriveAnswers, nowAndNext } from "../agenda";
 
 type RefSpec = [role: string, toId: string, toName: string, toKind: string];
 
@@ -124,6 +124,27 @@ describe("deriveAgenda", () => {
   it("carries where/who metadata", () => {
     expect(byId.get("lunch-tue")!.locationLabel).toBe("Vista Salon");
     expect(byId.get("lunch-tue")!.audienceNames).toEqual(["Member"]);
+  });
+});
+
+describe("now and next, for Ask CSC", () => {
+  const item = (id: string, startsAt: string | null, endsAt: string | null) => ({ id, startsAt, endsAt });
+  const items = [
+    item("show", "2027-02-02T14:00:00Z", "2027-02-02T22:00:00Z"),
+    item("meeting", "2027-02-02T15:30:00Z", "2027-02-02T15:45:00Z"),
+    item("lunch", "2027-02-02T17:00:00Z", "2027-02-02T18:00:00Z"),
+    item("untimed", null, null),
+  ];
+
+  it("says where they are (the meeting, not the show it sits inside) and what's next", () => {
+    const { now, next } = nowAndNext(items, new Date("2027-02-02T15:35:00Z"));
+    expect(now?.id).toBe("meeting");
+    expect(next?.id).toBe("lunch");
+  });
+
+  it("has nothing now before the day starts, and nothing next after it ends", () => {
+    expect(nowAndNext(items, new Date("2027-02-02T12:00:00Z"))).toEqual({ now: null, next: items[0] });
+    expect(nowAndNext(items, new Date("2027-02-03T12:00:00Z"))).toEqual({ now: null, next: null });
   });
 });
 

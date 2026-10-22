@@ -34,7 +34,7 @@ import {
 type OrgRow = Omit<OrgCompletenessSource, "contactCount">;
 
 /** org id → booth numbers held at this conference, ascending. */
-async function boothNumbersByOrg(
+export async function boothNumbersByOrg(
   conferenceId: string,
 ): Promise<Map<string, string[]>> {
   const db = createAdminClient();

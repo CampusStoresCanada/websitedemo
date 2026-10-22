@@ -35,9 +35,22 @@ export function buildFlagDm(input: {
   note: string | null;
   elementContent: string | null;
   survey: boolean;
+  /**
+   * "Ask CSC" at a conference. `elementContent` is then who they are and where
+   * they are — store, booth, phone, what they're in now and next — written as
+   * lines, so it is printed whole rather than as one clipped line.
+   */
+  conferenceAsk?: boolean;
   issuesUrl: string;
   reviewLink: string;
 }): string {
+  if (input.conferenceAsk) {
+    const details = input.elementContent?.trim() ? `\n\n${input.elementContent.trim().slice(0, 600)}` : "";
+    return (
+      `${input.priorityLabel} — ${input.who} asked CSC.${quoted(input.note, 600)}${details}\n\n` +
+      `Reply here and we can sort it out. In the War Room: ${input.reviewLink}`
+    );
+  }
   /*
     ⛔ Written to a ROOM that contains the person who raised it, not to a
     committee about them. They can read it, so it cannot be a report on their

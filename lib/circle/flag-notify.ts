@@ -14,7 +14,7 @@ import { getCircleGhostClient } from "./client";
 import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isBenchmarkingSurveyFlag } from "@/lib/circle/flag-routing";
+import { isBenchmarkingSurveyFlag, isConferenceAskFlag } from "@/lib/circle/flag-routing";
 import { buildFlagDm, oneLine } from "@/lib/circle/flag-message";
 import { createClient } from "@/lib/supabase/server";
 
@@ -72,6 +72,17 @@ export interface FlagNotificationParams {
  * reaches the wrong one. That state is real: the survey has sat with nobody
  * appointed before.
  */
+/**
+ * Who answers a conference ask: CSC staff (Stephen, 2026-10-22) — the host
+ * organization's contacts tagged Staff, through the site's one reader of that
+ * (getCSCStaff). Super admins remain the fallback below, as for every flag.
+ */
+async function conferenceAskRecipients(): Promise<string[]> {
+  const { getCSCStaff } = await import("@/lib/data");
+  const staff = (await getCSCStaff()) as unknown as Array<{ email?: string | null; work_email?: string | null }>;
+  return [...new Set(staff.map((s) => s.work_email || s.email).filter((e): e is string => !!e))];
+}
+
 async function benchmarkingRecipients(): Promise<string[]> {
   const adminClient = createAdminClient();
 
@@ -127,6 +138,8 @@ export async function sendFlagNotification(
   */
   if (isBenchmarkingSurveyFlag(pageUrl)) {
     recipientEmails = await benchmarkingRecipients();
+  } else if (isConferenceAskFlag(pageUrl)) {
+    recipientEmails = await conferenceAskRecipients();
   } else if (organizationId) {
     const { data: memberships } = await supabase
       .from("user_organizations")
@@ -175,13 +188,16 @@ export async function sendFlagNotification(
   const reviewLink = `${pageLink}${pageLink.includes("?") ? "&" : "?"}flag=${flagId}`;
   const survey = isBenchmarkingSurveyFlag(pageUrl);
   const who = params.reporterName?.trim() || "A CSC member";
+  const conferenceAsk = isConferenceAskFlag(pageUrl);
   const dmText = buildFlagDm({
-    priorityLabel, who, note, elementContent, survey,
+    priorityLabel, who, note, elementContent, survey, conferenceAsk,
     issuesUrl: `${APP_URL}/benchmarking/admin/issues`,
     reviewLink,
   });
 
-  const emailSubject = priority === "high"
+  const emailSubject = conferenceAsk
+    ? `${priority === "high" ? "🔴 " : ""}Ask CSC: ${who}`
+    : priority === "high"
     ? "🔴 HIGH PRIORITY: Content flagged on CSC site"
     : "Content flagged on CSC site";
 

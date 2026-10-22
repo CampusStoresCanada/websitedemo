@@ -73,4 +73,13 @@ describe("the message a flag sends", () => {
     expect(buildFlagDm({ ...base, survey: true })).toContain(base.issuesUrl);
     expect(buildFlagDm(base)).toContain(base.reviewLink);
   });
+
+  it("prints an Ask CSC's details whole: who, booth, now and next", () => {
+    const details = "Karin Stonehouse · McMaster University\nBooth 412\nNow: Meeting with Roots, Suite 12, until 10:45\nNext: Lunch at 12:00";
+    const dm = buildFlagDm({ ...base, note: "My 10:30 didn't show", elementContent: details, conferenceAsk: true });
+    expect(dm).toContain("asked CSC");
+    expect(dm).toContain("My 10:30 didn't show");
+    expect(dm).toContain("Next: Lunch at 12:00");
+    expect(dm).toContain(base.reviewLink);
+  });
 });
