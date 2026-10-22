@@ -54,6 +54,9 @@ export default function KnownPeopleNotice({
                 {person.roleTitle ? (
                   <span className="text-gray-500"> ({person.roleTitle})</span>
                 ) : null}
+                {person.isArchived ? (
+                  <span className="text-amber-700"> · archived</span>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -98,6 +98,7 @@ export default function RespondentPicker({
               <option key={c.id} value={c.id}>
                 {c.name}
                 {c.isYou ? " (you)" : ""}
+                {c.isArchived ? " (archived)" : ""}
                 {c.roleTitle ? ` — ${c.roleTitle}` : ""}
               </option>
             ))}
