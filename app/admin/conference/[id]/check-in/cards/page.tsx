@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Check-in cards | Check-in" };
 
 /**
- * Every check-in card, ready to print on cardstock (toolkit → Print check-in
- * cards): one per meeting booth, one per event marked "Check-in card: yes" in
+ * Every check-in card, ready to print on cardstock (War Room → What's next →
+ * Print check-in cards): one per meeting booth, one per event marked "Check-in card: yes" in
  * the Build tab. Two to a letter page. Printed from the browser, like the door
  * list (lib/conference/check-in-cards.ts).
  */

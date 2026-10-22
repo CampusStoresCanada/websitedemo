@@ -40,6 +40,12 @@
 
 import { resolveAccess } from "@/lib/conference/entity-commerce";
 import { loadSeatHoldings } from "@/lib/conference/seats";
+import {
+  badgeNames,
+  DEFAULT_PRINT_SORT,
+  sortNames,
+  type PrintSortKey,
+} from "@/lib/conference/badges/arrangement";
 import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 export type EntityAttendance = {
@@ -182,67 +188,113 @@ export function capacityOf(entity: BuildEntity): number | null {
 export type DoorRosterRow = {
   personId: string;
   name: string;
+  /** From the badge's own name rule, so "last name" sorts the way the badge reads. */
+  firstName: string | null;
+  lastName: string | null;
   organizationName: string;
-  /** Already recorded at this event's door. */
+  /** Already recorded at this event's door. Always false on the attendee list. */
   inAlready: boolean;
 };
 
 /**
  * Everyone whose access reaches one event — the door's printed backup list.
+ * With no event: everyone holding a registration — the attendee list.
  *
  * ⛔ The SAME walk as loadAttendance's `expectedNamed`, so the paper list and
  * the attendance number cannot disagree. Named people only: an unnamed seat
  * has no person to tick off. The 2026-09-08 decisions require this list — the
  * phone is never the only way in.
+ *
+ * Returned in the viewer's own name order: each person sets it once, in the
+ * War Room, and every printed name list reads it.
  */
 export async function loadDoorRoster(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
   db: any,
   conferenceId: string,
-  entityId: string
+  entityId: string | null,
+  sort: PrintSortKey = DEFAULT_PRINT_SORT
 ): Promise<DoorRosterRow[]> {
   const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, assigned: true });
 
-  const heldByPerson = new Map<string, { held: string[]; name: string; organizationId: string }>();
+  const heldByPerson = new Map<
+    string,
+    { held: string[]; name: string; organizationId: string; contactId: string | null; registered: boolean }
+  >();
   for (const seat of seats) {
     if (!seat.holderPersonId) continue;
     const entry = heldByPerson.get(seat.holderPersonId) ?? {
       held: [],
       name: seat.holderName ?? "",
       organizationId: seat.organizationId,
+      contactId: seat.holderContactId ?? null,
+      registered: false,
     };
     if (!entry.held.includes(seat.entityId)) entry.held.push(seat.entityId);
+    if (seat.entityKind === "registration") entry.registered = true;
     heldByPerson.set(seat.holderPersonId, entry);
   }
 
   const reaching = [...heldByPerson.entries()].filter(([, entry]) =>
-    resolveAccess(entry.held, entitiesById).has(entityId)
+    entityId ? resolveAccess(entry.held, entitiesById).has(entityId) : entry.registered
   );
   const orgIds = [...new Set(reaching.map(([, entry]) => entry.organizationId))];
+  const contactIds = [...new Set(reaching.map(([, entry]) => entry.contactId).filter((id): id is string => !!id))];
 
-  const [{ data: orgs, error: orgError }, { data: scans, error: scanError }] = await Promise.all([
+  const [
+    { data: orgs, error: orgError },
+    { data: scans, error: scanError },
+    { data: contacts, error: contactError },
+  ] = await Promise.all([
     orgIds.length
       ? db.from("organizations").select("id, name").in("id", orgIds)
       : Promise.resolve({ data: [], error: null }),
-    db
-      .from("conference_check_in_events")
-      .select("person_id")
-      .eq("conference_id", conferenceId)
-      .eq("entity_id", entityId)
-      .in("result_state", ["valid", "not_on_ticket"]),
+    entityId
+      ? db
+          .from("conference_check_in_events")
+          .select("person_id")
+          .eq("conference_id", conferenceId)
+          .eq("entity_id", entityId)
+          .in("result_state", ["valid", "not_on_ticket"])
+      : Promise.resolve({ data: [], error: null }),
+    contactIds.length
+      ? db.from("contacts").select("id, first_name, last_name").in("id", contactIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (orgError) throw new Error(`Could not load organisations: ${orgError.message}`);
   if (scanError) throw new Error(`Could not load door scans: ${scanError.message}`);
+  if (contactError) throw new Error(`Could not load names: ${contactError.message}`);
 
   const orgName = new Map(((orgs ?? []) as Array<{ id: string; name: string }>).map((o) => [o.id, o.name]));
   const inAlready = new Set(((scans ?? []) as Array<{ person_id: string | null }>).map((r) => r.person_id));
+  const contactById = new Map(
+    ((contacts ?? []) as Array<{ id: string; first_name: string | null; last_name: string | null }>).map((c) => [
+      c.id,
+      c,
+    ])
+  );
 
-  return reaching
-    .map(([personId, entry]) => ({
+  const rows = reaching.map(([personId, entry]) => {
+    const names = badgeNames(
+      { display_name: entry.name },
+      entry.contactId ? contactById.get(entry.contactId) ?? null : null
+    );
+    return {
       personId,
-      name: entry.name,
+      name: names.displayName ?? entry.name,
+      firstName: names.firstName,
+      lastName: names.lastName,
+      displayName: names.displayName ?? entry.name,
       organizationName: orgName.get(entry.organizationId) ?? "",
       inAlready: inAlready.has(personId),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    };
+  });
+  return sortNames(rows, sort).map((row) => ({
+    personId: row.personId,
+    name: row.name,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    organizationName: row.organizationName,
+    inAlready: row.inAlready,
+  }));
 }

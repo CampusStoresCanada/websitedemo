@@ -3,7 +3,14 @@
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runChecklistReminders, type ChecklistRunResult } from "@/lib/conference/checklist-engine";
-import { CHECK_TYPES, type CheckType } from "@/lib/conference/checklist-check-types";
+import {
+  CHECK_TYPES,
+  STAFF_TASK_CHECK_TYPES,
+  TASK_AUDIENCES,
+  type CheckType,
+  type StaffCheckType,
+  type TaskAudience,
+} from "@/lib/conference/checklist-check-types";
 import { revalidatePath } from "next/cache";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
@@ -97,7 +104,9 @@ export type ChecklistTaskInput = {
   id?: string;
   name: string;
   description: string;
-  checkType: CheckType;
+  /** Who answers. `undefined` leaves an existing task's audience alone. */
+  audience?: TaskAudience;
+  checkType: CheckType | StaffCheckType;
   checkEntityId: string | null;
   /**
    * Restrict the task to orgs holding a kind of thing — "a booth". Three-state
@@ -127,8 +136,17 @@ export async function saveChecklistTask(
   if (!auth.ok) return { success: false, error: auth.error };
   if (!input.name.trim()) return { success: false, error: "Give the task a name." };
   if (!input.description.trim()) return { success: false, error: "Explain why this task matters — it's shown in the reminder email." };
-  if (!CHECK_TYPES.includes(input.checkType)) return { success: false, error: "Unknown check type." };
-  if (ENTITY_SCOPED_CHECKS.has(input.checkType) && !input.checkEntityId) {
+  if (input.audience !== undefined && !TASK_AUDIENCES.includes(input.audience)) {
+    return { success: false, error: "Unknown audience." };
+  }
+  // Staff checks read the conference, org checks read a company: neither is
+  // meaningful for the other's answerer.
+  const allowed: readonly string[] = input.audience === "staff" ? STAFF_TASK_CHECK_TYPES : CHECK_TYPES;
+  if (!allowed.includes(input.checkType)) {
+    return { success: false, error: "That check doesn't apply to who answers this task." };
+  }
+  const isStaff = input.audience === "staff";
+  if (!isStaff && ENTITY_SCOPED_CHECKS.has(input.checkType as CheckType) && !input.checkEntityId) {
     return { success: false, error: "This check type needs a specific catalog item selected." };
   }
 
@@ -138,9 +156,15 @@ export async function saveChecklistTask(
     name: input.name.trim(),
     description: input.description.trim(),
     check_type: input.checkType,
-    check_entity_id: ENTITY_SCOPED_CHECKS.has(input.checkType) ? input.checkEntityId : null,
-    ...(input.scopeEntityKind !== undefined ? { scope_entity_kind: input.scopeEntityKind } : {}),
-    ...(input.scopeEntityId !== undefined ? { scope_entity_id: input.scopeEntityId } : {}),
+    check_entity_id: !isStaff && ENTITY_SCOPED_CHECKS.has(input.checkType as CheckType) ? input.checkEntityId : null,
+    ...(input.audience !== undefined ? { audience: input.audience } : {}),
+    // A staff task has no org to scope by.
+    ...(isStaff
+      ? { scope_entity_kind: null, scope_entity_id: null }
+      : {
+          ...(input.scopeEntityKind !== undefined ? { scope_entity_kind: input.scopeEntityKind } : {}),
+          ...(input.scopeEntityId !== undefined ? { scope_entity_id: input.scopeEntityId } : {}),
+        }),
     sort_order: input.sortOrder,
     active: input.active,
     updated_at: new Date().toISOString(),

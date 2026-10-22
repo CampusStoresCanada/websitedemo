@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import TaskChecklist from "@/components/conference/TaskChecklist";
+import { answerOrgTask } from "@/lib/actions/conference-tasks";
+import type { StaffChecklist } from "@/lib/conference/checklist-tasks";
+import type { StaffChecklistGroups } from "@/lib/conference/deadline-urgency";
+import { formatDayMonth } from "@/lib/time/supabase-timestamp";
+import { PRINT_SORT_KEYS, type PrintSortKey } from "@/lib/conference/badges/arrangement";
+import { setMyPrintSort } from "@/lib/actions/profile";
 
 type ConferencePerson = {
   id: string;
@@ -19,28 +26,98 @@ type ConferencePerson = {
   admin_notes: string | null;
 };
 
-type OpsTab = "people" | "messaging" | "badge_ops" | "materials";
+type OpsTab = "whats_next" | "people" | "messaging";
 
-const OPS_TABS: Array<{ id: OpsTab; label: string }> = [
+const OPS_TABS: Array<{ id: OpsTab; label: string; adminOnly?: boolean }> = [
+  { id: "whats_next", label: "What's next", adminOnly: true },
   { id: "people", label: "People Lookup" },
   { id: "messaging", label: "Messaging" },
-  { id: "badge_ops", label: "Badge Ops" },
-  { id: "materials", label: "Materials" },
 ];
 
 const POLL_MS = 30_000;
 const STALE_MS = POLL_MS * 2;
 
+/**
+ * CSC's run-sheet for the conference: the staff checklists, in order.
+ *
+ * Built on the server (the checks read the database; each task's live line and
+ * buttons arrive as rendered nodes) and only for admins.
+ */
+export type WhatsNext = {
+  /** CSC's own organization — whom a staff tick is filed under. */
+  answeringOrgId: string | null;
+  timeZone: string;
+  groups: StaffChecklistGroups<StaffChecklist>;
+  controlsByTaskId: Record<string, ReactNode>;
+  /** The viewer's own order for printed name lists. */
+  printSort: PrintSortKey;
+};
+
+const PRINT_SORT_LABELS: Record<PrintSortKey, string> = {
+  person_first_name: "First name",
+  person_last_name: "Last name",
+  organization_name: "Organization",
+};
+
+/**
+ * Set once, here, ahead of time: every printed name list (door lists, the
+ * attendee list) comes out in this order for whoever prints it. Stephen: "it
+ * shouldn't be while you are attempting the panic print on an iPad."
+ */
+function MyPrintSort({ initial }: { initial: PrintSortKey }) {
+  const [sort, setSort] = useState<PrintSortKey>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <section className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-[18px] py-3">
+      <span className="text-sm font-medium text-[#16345a]">My print sort</span>
+      <div className="flex flex-wrap gap-1.5">
+        {PRINT_SORT_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            disabled={saving}
+            aria-pressed={sort === key}
+            onClick={async () => {
+              if (sort === key) return;
+              const previous = sort;
+              setSort(key);
+              setSaving(true);
+              setError(null);
+              const result = await setMyPrintSort(key);
+              setSaving(false);
+              if (!result.success) {
+                setSort(previous);
+                setError(result.error ?? "Couldn't save that.");
+              }
+            }}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+              sort === key ? "bg-[#163D6D] text-white" : "border border-gray-300 text-gray-600 hover:border-gray-400"
+            }`}
+          >
+            {PRINT_SORT_LABELS[key]}
+          </button>
+        ))}
+      </div>
+      <span className="text-xs text-gray-500">
+        {error ?? "Door lists and the attendee list print in this order for you."}
+      </span>
+    </section>
+  );
+}
+
 interface WarRoomClientProps {
   conferenceId: string;
   initialRows: ConferencePerson[];
   canEditAdminNotes: boolean;
+  whatsNext: WhatsNext | null;
 }
 
 export default function WarRoomClient({
   conferenceId,
   initialRows,
   canEditAdminNotes,
+  whatsNext,
 }: WarRoomClientProps) {
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [loading, setLoading] = useState(false);
@@ -53,7 +130,8 @@ export default function WarRoomClient({
   const [checkIn, setCheckIn] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [lastSuccessAt, setLastSuccessAt] = useState<number>(Date.now());
-  const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>("people");
+  const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>(whatsNext ? "whats_next" : "people");
+  const tabs = OPS_TABS.filter((tab) => !tab.adminOnly || whatsNext);
 
   const selected = useMemo(
     () => rows.find((row) => row.id === selectedId) ?? null,
@@ -133,7 +211,7 @@ export default function WarRoomClient({
           <h2 className="text-base font-semibold text-gray-900">Operations</h2>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {OPS_TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -149,6 +227,10 @@ export default function WarRoomClient({
           ))}
         </div>
       </section>
+
+      {activeOpsTab === "whats_next" && whatsNext ? (
+        <WhatsNextView conferenceId={conferenceId} whatsNext={whatsNext} />
+      ) : null}
 
       {activeOpsTab === "people" ? (
         <>
@@ -370,29 +452,154 @@ export default function WarRoomClient({
         </section>
       ) : null}
 
-      {activeOpsTab === "badge_ops" ? (
-        <section className="rounded-xl border border-gray-200 bg-white p-4">
-          <h2 className="text-base font-semibold text-gray-900">Badge Operations</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Badge print/reprint queue and status controls will be surfaced in this tab.
-          </p>
-          <a
-            href={`/admin/conference/${conferenceId}/badges`}
-            className="mt-3 inline-flex rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Open Badge Operations
-          </a>
-        </section>
-      ) : null}
-
-      {activeOpsTab === "materials" ? (
-        <section className="rounded-xl border border-gray-200 bg-white p-4">
-          <h2 className="text-base font-semibold text-gray-900">Educational Materials</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Material distribution tracking and pickup status will be managed here.
-          </p>
-        </section>
-      ) : null}
     </div>
+  );
+}
+
+/**
+ * Now, Next, Later, Done — what needs doing surfaces, what's finished folds away.
+ *
+ * Stephen, 2026-10-22: the look of /admin/membership, the behaviour of the
+ * /admin widgets. Each checklist is a card; its tasks are the same tick-off
+ * list org admins and attendees answer (TaskChecklist), here answered by CSC
+ * for the conference.
+ */
+function WhatsNextView({ conferenceId, whatsNext }: { conferenceId: string; whatsNext: WhatsNext }) {
+  const { groups } = whatsNext;
+  const open = groups.now.length + groups.next.length + groups.later.length;
+
+  if (open + groups.done.length === 0) {
+    return (
+      <div className="space-y-6">
+      <MyPrintSort initial={whatsNext.printSort} />
+      <section className="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-base font-semibold text-gray-900">Nothing on the run-sheet yet</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          What&apos;s next is built from checklists answered by CSC staff. Add one under{" "}
+          <a href={`/admin/conference/${conferenceId}/checklists`} className="text-accent hover:underline">
+            Checklists
+          </a>{" "}
+          and set its tasks to &ldquo;CSC staff, in the War Room&rdquo;.
+        </p>
+      </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <MyPrintSort initial={whatsNext.printSort} />
+      {groups.now.length > 0 ? (
+        <ChecklistGroup title="Now" lists={groups.now} whatsNext={whatsNext} conferenceId={conferenceId} />
+      ) : null}
+      {groups.next.length > 0 ? (
+        <ChecklistGroup title="Next" lists={groups.next} whatsNext={whatsNext} conferenceId={conferenceId} />
+      ) : null}
+      {groups.later.length > 0 ? (
+        <ChecklistGroup title="Later" lists={groups.later} whatsNext={whatsNext} conferenceId={conferenceId} folded />
+      ) : null}
+      {groups.done.length > 0 ? (
+        <ChecklistGroup title="Done" lists={groups.done} whatsNext={whatsNext} conferenceId={conferenceId} folded />
+      ) : null}
+      <p className="text-xs text-gray-500">
+        These are the conference&apos;s{" "}
+        <a href={`/admin/conference/${conferenceId}/checklists`} className="text-accent hover:underline">
+          checklists
+        </a>{" "}
+        answered by CSC staff. Edit them there.
+      </p>
+    </div>
+  );
+}
+
+function ChecklistGroup({
+  title,
+  lists,
+  whatsNext,
+  conferenceId,
+  folded = false,
+}: {
+  title: string;
+  lists: StaffChecklist[];
+  whatsNext: WhatsNext;
+  conferenceId: string;
+  folded?: boolean;
+}) {
+  const cards = (
+    <div className="space-y-4">
+      {lists.map((list) => (
+        <StaffChecklistCard key={list.id} list={list} whatsNext={whatsNext} conferenceId={conferenceId} />
+      ))}
+    </div>
+  );
+  const heading = (
+    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+      {title} · {lists.length}
+    </span>
+  );
+  if (folded) {
+    return (
+      <details className="group">
+        <summary className="cursor-pointer list-none">{heading}</summary>
+        <div className="mt-3">{cards}</div>
+      </details>
+    );
+  }
+  return (
+    <section className="space-y-3">
+      <h2>{heading}</h2>
+      {cards}
+    </section>
+  );
+}
+
+function StaffChecklistCard({
+  list,
+  whatsNext,
+  conferenceId,
+}: {
+  list: StaffChecklist;
+  whatsNext: WhatsNext;
+  conferenceId: string;
+}) {
+  const answered = list.tasks.filter((t) => t.state !== "pending").length;
+  const when = formatDayMonth(list.deadline, whatsNext.timeZone);
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white px-[18px] py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="text-[15.5px] font-medium leading-tight text-[#16345a]">{list.name}</h3>
+          {list.description ? <p className="mt-0.5 text-[12.5px] text-gray-500">{list.description}</p> : null}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          {when ? <span>{when}</span> : null}
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              answered === list.tasks.length ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {answered} of {list.tasks.length}
+          </span>
+        </div>
+      </div>
+      <div className="mt-2">
+        <TaskChecklist
+          tasks={list.tasks}
+          controlsByTaskId={whatsNext.controlsByTaskId}
+          onAnswer={async (taskId, state, evidence) => {
+            if (!whatsNext.answeringOrgId) {
+              return { success: false, error: "CSC's own organization record is missing, so a tick has nowhere to go." };
+            }
+            return answerOrgTask({
+              organizationId: whatsNext.answeringOrgId,
+              conferenceId,
+              taskId,
+              state,
+              evidence,
+            });
+          }}
+        />
+      </div>
+    </section>
   );
 }

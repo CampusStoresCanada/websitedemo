@@ -2373,26 +2373,10 @@ export default function CheckInDeskClient({
                 }}
               />
             ) : null}
-            <ToolButton
-              size="lg"
-              showLabel
-              icon={<PrintIcon />}
-              label="Open the print station (laptop by the printer)"
-              onClick={() => {
-                setDeskMenuOpen(false);
-                window.open(`/admin/conference/${conferenceId}/check-in/print-station`, "_blank", "noopener");
-              }}
-            />
-            <ToolButton
-              size="lg"
-              showLabel
-              icon={<PrintIcon />}
-              label="Print check-in cards (booths and events)"
-              onClick={() => {
-                setDeskMenuOpen(false);
-                window.open(`/admin/conference/${conferenceId}/check-in/cards`, "_blank", "noopener");
-              }}
-            />
+            {/* ⛔ The one print the desk keeps: a door's backup list, the moment
+                a phone fails (Stephen, 2026-10-22). Everything else that
+                prints — the print station, check-in cards, the map — is run
+                from the War Room's What's next, not from the desk. */}
             {activeDoorEvent ? (
               <ToolButton
                 size="lg"

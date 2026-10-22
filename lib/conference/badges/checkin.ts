@@ -366,7 +366,7 @@ export async function openEventSeats(
  * The conference's timed events, for the door picker. Capped ones are the
  * doors the desk offers on its own; the rest can still be picked by hand.
  */
-async function loadDoorEvents(
+export async function loadDoorEvents(
   db: ReturnType<typeof createAdminClient>,
   conferenceId: string
 ): Promise<{ doorEvents: DoorEvent[]; timeZone: string }> {

@@ -10,7 +10,13 @@ import {
   deleteChecklistCheckpoint,
   runChecklistRemindersNow,
 } from "@/lib/actions/conference-checklists";
-import { CHECK_TYPES, type CheckType } from "@/lib/conference/checklist-check-types";
+import {
+  CHECK_TYPES,
+  STAFF_TASK_CHECK_TYPES,
+  type CheckType,
+  type StaffCheckType,
+  type TaskAudience,
+} from "@/lib/conference/checklist-check-types";
 import type { ChecklistRunResult } from "@/lib/conference/checklist-engine";
 import type { Tables } from "@/lib/database.types";
 import { parseUTC } from "@/lib/utils";
@@ -41,7 +47,7 @@ function one<T>(rel: T[] | T | null): T | null {
 const inputClass =
   "block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent";
 
-const CHECK_TYPE_LABELS: Record<CheckType, string> = {
+const CHECK_TYPE_LABELS: Record<CheckType | StaffCheckType, string> = {
   seat_assigned: "Seat assigned (for a catalog item)",
   entity_purchased: "Item purchased (for a catalog item)",
   travel_info_submitted: "Travel info submitted (per org, all attendees)",
@@ -51,6 +57,23 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   directory_profile_enriched: "Directory listing enriched (featured product, catalogue)",
   self_reported: "Self-reported — the org ticks it off (Stronco, Encore, anything off-site)",
   top_choices_declared: "Top choices declared (who they most want to meet)",
+  // CSC staff, in the War Room
+  badge_package_current: "Badge package made, with nobody added since",
+  schedule_promoted: "Meeting schedule promoted",
+  print_station_online: "Print station online",
+  test_check_ins_cleared: "Rehearsal check-ins cleared",
+  check_in_cards_printed: "Check-in cards printed",
+  door_lists_printed: "Door lists printed",
+  directory_printed: "Directory printed",
+  map_printed: "Map printed",
+  attendee_list_printed: "Attendee list printed",
+};
+
+/** Who answers a task, in the editor's words. */
+const AUDIENCE_LABELS: Record<TaskAudience, string> = {
+  org: "An org admin, for the company",
+  person: "Each person, for themselves",
+  staff: "CSC staff, in the War Room",
 };
 
 // `self_reported` binds check_entity_id to the TASK's own id rather than a
@@ -147,7 +170,8 @@ export default function ChecklistDetail({
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">{task.description}</p>
                   <p className="mt-1 text-xs text-gray-400">
-                    {CHECK_TYPE_LABELS[task.check_type as CheckType]}
+                    {task.audience === "staff" ? "CSC staff · " : ""}
+                    {CHECK_TYPE_LABELS[task.check_type as CheckType | StaffCheckType]}
                     {task.check_entity_id && (
                       <> — {entities.find((e) => e.id === task.check_entity_id)?.name ?? "unknown item"}</>
                     )}
@@ -424,7 +448,14 @@ function TaskForm({
 }) {
   const [name, setName] = useState(task?.name ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
-  const [checkType, setCheckType] = useState<CheckType>((task?.check_type as CheckType) ?? "seat_assigned");
+  const [audience, setAudience] = useState<TaskAudience>((task?.audience as TaskAudience | undefined) ?? "org");
+  const [checkType, setCheckType] = useState<CheckType | StaffCheckType>(
+    (task?.check_type as CheckType | StaffCheckType | undefined) ?? "seat_assigned"
+  );
+  // A staff task answers for the conference: it has its own checks, and no
+  // org to scope by.
+  const checkOptions: readonly (CheckType | StaffCheckType)[] =
+    audience === "staff" ? STAFF_TASK_CHECK_TYPES : CHECK_TYPES;
   const [checkEntityId, setCheckEntityId] = useState(task?.check_entity_id ?? "");
   /**
    * Who this task is for, when the check cannot work it out itself.
@@ -457,6 +488,7 @@ function TaskForm({
       id: task?.id,
       name,
       description,
+      audience,
       checkType,
       checkEntityId: checkEntityId || null,
       scopeEntityKind: scopeKind || null,
@@ -492,16 +524,39 @@ function TaskForm({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Who answers</label>
+          <select
+            value={audience}
+            onChange={(e) => {
+              const next = e.target.value as TaskAudience;
+              setAudience(next);
+              const options: readonly string[] = next === "staff" ? STAFF_TASK_CHECK_TYPES : CHECK_TYPES;
+              if (!options.includes(checkType)) setCheckType(next === "staff" ? "self_reported" : "seat_assigned");
+            }}
+            className={inputClass}
+          >
+            {(Object.keys(AUDIENCE_LABELS) as TaskAudience[]).map((a) => (
+              <option key={a} value={a}>
+                {AUDIENCE_LABELS[a]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Check</label>
-          <select value={checkType} onChange={(e) => setCheckType(e.target.value as CheckType)} className={inputClass}>
-            {CHECK_TYPES.map((ct) => (
+          <select
+            value={checkType}
+            onChange={(e) => setCheckType(e.target.value as CheckType | StaffCheckType)}
+            className={inputClass}
+          >
+            {checkOptions.map((ct) => (
               <option key={ct} value={ct}>
                 {CHECK_TYPE_LABELS[ct]}
               </option>
             ))}
           </select>
         </div>
-        {ENTITY_SCOPED.has(checkType) && (
+        {ENTITY_SCOPED.has(checkType as CheckType) && (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Catalog item</label>
             <select value={checkEntityId} onChange={(e) => setCheckEntityId(e.target.value)} className={inputClass}>
@@ -518,6 +573,7 @@ function TaskForm({
             </select>
           </div>
         )}
+        {audience !== "staff" ? (<>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Only ask orgs holding</label>
           <select value={scopeKind} onChange={(e) => setScopeKind(e.target.value)} className={inputClass}>
@@ -541,6 +597,7 @@ function TaskForm({
             ))}
           </select>
         </div>
+        </>) : null}
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />

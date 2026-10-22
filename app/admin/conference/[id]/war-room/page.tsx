@@ -1,12 +1,22 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { getConference } from "@/lib/actions/conference";
 import {
   listConferencePeople,
   syncConferencePeopleIndex,
 } from "@/lib/actions/conference-people";
 import { isGlobalAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
-import WarRoomClient from "@/components/admin/conference/WarRoomClient";
+import WarRoomClient, { type WhatsNext } from "@/components/admin/conference/WarRoomClient";
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  loadStaffAnsweringOrgId,
+  loadStaffChecklists,
+  type StaffTaskExtra,
+} from "@/lib/conference/checklist-tasks";
+import { arrangeStaffChecklists } from "@/lib/conference/deadline-urgency";
+import { readPreferences } from "@/lib/profile/preferences";
+import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
 
 export const metadata = {
   title: "Conference War Room | Admin",
@@ -14,6 +24,29 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+/** A staff task's live line and its buttons, rendered inside its own row. */
+function StaffTaskControls({ extra }: { extra: StaffTaskExtra }) {
+  return (
+    <div className="space-y-2">
+      {extra.detail ? <p className="text-xs text-gray-600">{extra.detail}</p> : null}
+      {extra.actions.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {extra.actions.map((action) => (
+            <a
+              key={action.href}
+              href={action.href}
+              {...(action.print ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              {action.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default async function ConferenceWarRoomPage({
   params,
@@ -31,7 +64,8 @@ export default async function ConferenceWarRoomPage({
   }
 
   const { id } = await params;
-  const canRunSync = isGlobalAdmin(auth.ctx.globalRole);
+  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  const canRunSync = isAdmin;
   const [conferenceResult, peopleResult] = await Promise.all([
     getConference(id),
     listConferencePeople(id),
@@ -42,6 +76,33 @@ export default async function ConferenceWarRoomPage({
   }
 
   const rows = peopleResult.success ? peopleResult.data ?? [] : [];
+
+  // What's next is CSC's own run-sheet: admins only. Desk temps reach this page
+  // for People Lookup and never see it.
+  let whatsNext: WhatsNext | null = null;
+  if (isAdmin) {
+    const db = createAdminClient();
+    const timeZone =
+      ((conferenceResult.data as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
+    const [answeringOrgId, preferences] = await Promise.all([
+      loadStaffAnsweringOrgId(db),
+      readPreferences(auth.ctx.userId),
+    ]);
+    const checklists = await loadStaffChecklists(db, id, answeringOrgId);
+    const controlsByTaskId: Record<string, ReactNode> = {};
+    for (const list of checklists) {
+      for (const [taskId, extra] of Object.entries(list.extras)) {
+        controlsByTaskId[taskId] = <StaffTaskControls extra={extra} />;
+      }
+    }
+    whatsNext = {
+      answeringOrgId,
+      timeZone,
+      groups: arrangeStaffChecklists(checklists, new Date(), timeZone),
+      controlsByTaskId,
+      printSort: parsePrintSort(preferences[PRINT_SORT_PREFERENCE_KEY]),
+    };
+  }
 
   return (
     <main className="space-y-6">
@@ -108,7 +169,8 @@ export default async function ConferenceWarRoomPage({
       <WarRoomClient
         conferenceId={id}
         initialRows={rows}
-        canEditAdminNotes={isGlobalAdmin(auth.ctx.globalRole)}
+        canEditAdminNotes={isAdmin}
+        whatsNext={whatsNext}
       />
     </main>
   );

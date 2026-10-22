@@ -86,6 +86,91 @@ export function defaultArrangement(
   };
 }
 
+function deriveNames(row: Record<string, unknown>): {
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string | null;
+} {
+  const first = typeof row.first_name === "string" ? row.first_name.trim() : "";
+  const last = typeof row.last_name === "string" ? row.last_name.trim() : "";
+  const display = typeof row.display_name === "string" ? row.display_name.trim() : "";
+  if (first || last) {
+    return {
+      firstName: first || null,
+      lastName: last || null,
+      displayName: `${first} ${last}`.trim() || null,
+    };
+  }
+  if (!display) return { firstName: null, lastName: null, displayName: null };
+  const parts = display.split(/\s+/);
+  return {
+    firstName: parts[0] || null,
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : null,
+    displayName: display,
+  };
+}
+
+/**
+ * The name on a badge. ⛔ ONE rule for the printed badge, the desk's reprint
+ * sticker and every printed name list: the person's contact record (first /
+ * last name) when they have one, otherwise the roster row (deriveNames: the
+ * FIRST word is the given name). The sticker once split at the LAST word
+ * instead, and printed "DESK TEST THURSDAY / Only" for a badge that reads
+ * "DESK / Test Thursday Only".
+ */
+export function badgeNames(
+  row: Record<string, unknown>,
+  canonicalPerson: { first_name: string | null; last_name: string | null } | null
+): { firstName: string | null; lastName: string | null; displayName: string | null } {
+  return canonicalPerson
+    ? {
+        firstName: canonicalPerson.first_name?.trim() || null,
+        lastName: canonicalPerson.last_name?.trim() || null,
+        displayName: `${canonicalPerson.first_name ?? ""} ${canonicalPerson.last_name ?? ""}`.trim() || null,
+      }
+    : deriveNames(row);
+}
+
+/**
+ * How someone likes a printed list of names: the door list, the attendee list.
+ *
+ * Stephen, 2026-10-21: "I like Alphabetical by first name, my colleague likes
+ * by last name … it shouldn't be while you are attempting the panic print on
+ * an iPad." So it is set once, per account, in the War Room, and a print page
+ * reads the viewer's choice. The words are the badge run's own — one sort
+ * vocabulary, not a second.
+ */
+export const PRINT_SORT_KEYS = ["person_first_name", "person_last_name", "organization_name"] as const;
+export type PrintSortKey = (typeof PRINT_SORT_KEYS)[number];
+export const DEFAULT_PRINT_SORT: PrintSortKey = "person_last_name";
+/** Key inside profiles.preferences. */
+export const PRINT_SORT_PREFERENCE_KEY = "print_sort";
+
+export function parsePrintSort(value: unknown): PrintSortKey {
+  return (PRINT_SORT_KEYS as readonly unknown[]).includes(value) ? (value as PrintSortKey) : DEFAULT_PRINT_SORT;
+}
+
+/** The fields a printed name list sorts by. */
+export type SortableName = Pick<ArrangeableBadge, "firstName" | "lastName" | "displayName" | "organizationName">;
+
+/**
+ * A name list in the viewer's order. By company keeps each company's people
+ * together, last name A–Z inside it.
+ */
+export function sortNames<T extends SortableName>(rows: T[], key: PrintSortKey): T[] {
+  const value = (row: T, k: BadgeSortKey) =>
+    sortValue({ entityId: "", entityName: "", roomNumber: null, seatedAt: null, ...row }, k);
+  return [...rows].sort((a, b) => {
+    const primary = value(a, key).localeCompare(value(b, key));
+    if (primary !== 0) return primary;
+    if (key === "organization_name") {
+      const within = value(a, "person_last_name").localeCompare(value(b, "person_last_name"));
+      if (within !== 0) return within;
+    }
+    return (a.displayName ?? "").localeCompare(b.displayName ?? "");
+  });
+}
+
 function sortValue(badge: ArrangeableBadge, key: BadgeSortKey): string {
   switch (key) {
     case "person_first_name":

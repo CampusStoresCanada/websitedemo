@@ -22,7 +22,7 @@ import {
   type BadgeRunSeat,
   type BadgeRunType,
 } from "@/lib/conference/badges/run";
-import { arrangeBadges, normalizeArrangement } from "@/lib/conference/badges/arrangement";
+import { arrangeBadges, badgeNames, normalizeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgePrintStock,
   loadSpareStacks,
@@ -81,29 +81,6 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
-function deriveNames(row: Record<string, unknown>): {
-  firstName: string | null;
-  lastName: string | null;
-  displayName: string | null;
-} {
-  const first = typeof row.first_name === "string" ? row.first_name.trim() : "";
-  const last = typeof row.last_name === "string" ? row.last_name.trim() : "";
-  const display = typeof row.display_name === "string" ? row.display_name.trim() : "";
-  if (first || last) {
-    return {
-      firstName: first || null,
-      lastName: last || null,
-      displayName: `${first} ${last}`.trim() || null,
-    };
-  }
-  if (!display) return { firstName: null, lastName: null, displayName: null };
-  const parts = display.split(/\s+/);
-  return {
-    firstName: parts[0] || null,
-    lastName: parts.length > 1 ? parts.slice(1).join(" ") : null,
-    displayName: display,
-  };
-}
 
 function applyOrdering(params: {
   people: HydratedBadgePerson[];
@@ -244,25 +221,9 @@ function orgLogoUrl(org: Record<string, unknown> | undefined): string | null {
   return org?.organization_type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
 }
 
-/**
- * The name on a badge. ⛔ ONE rule for the printed badge and the desk's reprint
- * sticker: the person's contact record (first / last name) when they have one,
- * otherwise the roster row (deriveNames: the FIRST word is the given name). The
- * sticker once split at the LAST word instead, and printed "DESK TEST
- * THURSDAY / Only" for a badge that reads "DESK / Test Thursday Only".
- */
-export function badgeNames(
-  row: Record<string, unknown>,
-  canonicalPerson: { first_name: string | null; last_name: string | null } | null
-): { firstName: string | null; lastName: string | null; displayName: string | null } {
-  return canonicalPerson
-    ? {
-        firstName: canonicalPerson.first_name?.trim() || null,
-        lastName: canonicalPerson.last_name?.trim() || null,
-        displayName: `${canonicalPerson.first_name ?? ""} ${canonicalPerson.last_name ?? ""}`.trim() || null,
-      }
-    : deriveNames(row);
-}
+// The name rule lives with the sort rules (arrangement.ts, no server imports)
+// so a printed name list can use it without loading the badge renderer.
+export { badgeNames };
 
 /** The title on a badge — same order for the badge and the sticker. */
 export function badgeRoleTitle(

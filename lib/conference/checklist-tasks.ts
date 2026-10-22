@@ -19,8 +19,14 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evaluateChecklistTaskCheck, evaluatePersonChecklistTaskCheck } from "./checklist-checks";
-import type { CheckType } from "./checklist-check-types";
+import {
+  evaluateChecklistTaskCheck,
+  evaluatePersonChecklistTaskCheck,
+  STAFF_CHECKS,
+  type StaffCheckResult,
+} from "./checklist-checks";
+import { isStaffCheckType, type CheckType } from "./checklist-check-types";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -546,5 +552,135 @@ export async function recordPersonalTaskAnswer(
     state: input.state,
     evidence,
     acknowledged_by: input.userId ?? null,
+  });
+}
+
+/** What the War Room shows under a staff task: the live line and its buttons. */
+export type StaffTaskExtra = Pick<StaffCheckResult, "detail" | "actions">;
+
+export type StaffChecklist = {
+  id: string;
+  name: string;
+  description: string | null;
+  /** When the moment is — the checklist's own date. Orders the War Room. */
+  deadline: string;
+  tasks: PersonalTask[];
+  extras: Record<string, StaffTaskExtra>;
+};
+
+/**
+ * CSC's own organization: who a staff tick is filed under.
+ *
+ * A staff answer is an ordinary company-level acknowledgement — the company
+ * being CSC — so it is written by `answerOrgTask` like any other, and no table
+ * had to learn a new shape. Looked up by type, of which there is one.
+ */
+export async function loadStaffAnsweringOrgId(db: AdminClient): Promise<string | null> {
+  const { data } = await db
+    .from("organizations")
+    .select("id")
+    .eq("type", ORG_TYPE.staff)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as string | undefined) ?? null;
+}
+
+/**
+ * The checklists CSC staff answer for the conference itself — the War Room.
+ *
+ * The same checklists, tasks and acknowledgements as the org and person lists,
+ * read for the third audience. Within a checklist the tasks keep the order they
+ * were written in: a staff list is a run-sheet, not a pile sorted by urgency.
+ */
+export async function loadStaffChecklists(
+  db: AdminClient,
+  conferenceId: string,
+  answeringOrgId: string | null
+): Promise<StaffChecklist[]> {
+  const { data: checklists, error } = await db
+    .from("conference_checklists")
+    .select("id, name, description, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, hardens_because)")
+    .eq("conference_id", conferenceId)
+    .eq("active", true)
+    .order("deadline_at", { ascending: true });
+  if (error) throw new Error(`Could not load the staff checklists: ${error.message}`);
+
+  type TaskRow = {
+    id: string; name: string; description: string; sort_order: number; active: boolean;
+    audience: string; check_type: string; deadline_at: string | null; hardens_because: string | null;
+  };
+  const staffLists = (checklists ?? [])
+    .map((cl) => ({
+      cl,
+      tasks: ((cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [])
+        .filter((t) => t.active && t.audience === "staff")
+        .sort((a, b) => a.sort_order - b.sort_order),
+    }))
+    .filter((entry) => entry.tasks.length > 0);
+  if (staffLists.length === 0) return [];
+
+  const taskIds = staffLists.flatMap((entry) => entry.tasks.map((t) => t.id));
+  const { data: acks } = answeringOrgId
+    ? await db
+        .from("conference_task_acknowledgements")
+        .select("task_id, state, evidence")
+        .eq("organization_id", answeringOrgId)
+        .is("person_id", null)
+        .in("task_id", taskIds)
+    : { data: [] };
+  const ackByTask = new Map((acks ?? []).map((a) => [a.task_id, a]));
+
+  // One check per type, however many tasks use it: two "door lists" tasks on
+  // two lists must not disagree, and must not cost two roster walks.
+  const types = [...new Set(staffLists.flatMap((e) => e.tasks.map((t) => t.check_type)))].filter(isStaffCheckType);
+  const results = new Map<string, StaffCheckResult>(
+    await Promise.all(
+      types.map(async (type): Promise<[string, StaffCheckResult]> => {
+        try {
+          return [type, await STAFF_CHECKS[type]({ db, conferenceId })];
+        } catch (err) {
+          // One unreadable fact must not take the War Room down with it.
+          const message = err instanceof Error ? err.message : String(err);
+          return [type, { verdict: "not_done", detail: `Could not check this: ${message}`, actions: [] }];
+        }
+      })
+    )
+  );
+
+  return staffLists.map(({ cl, tasks }) => {
+    const extras: Record<string, StaffTaskExtra> = {};
+    const rendered = tasks.map((task): PersonalTask => {
+      // The card carries the list's date; a task repeats it only when it has
+      // its own.
+      const deadline = task.deadline_at;
+      const base = {
+        taskId: task.id, name: task.name, description: task.description, deadline,
+        checkType: task.check_type, service: null, hardensBecause: task.hardens_because, askingNow: true,
+      };
+      const ack = ackByTask.get(task.id);
+      const result = isStaffCheckType(task.check_type) ? results.get(task.check_type) : undefined;
+      if (result) extras[task.id] = { detail: result.detail, actions: result.actions };
+
+      // Read from data: a tick neither completes nor reopens it.
+      if (result && result.verdict !== "tick") {
+        return {
+          ...base, state: result.verdict === "done" ? "done" : "pending",
+          evidence: null, derived: true, source: "monitored",
+        };
+      }
+      return {
+        ...base, state: ack ? (ack.state as PersonalTaskState) : "pending",
+        evidence: ack?.evidence ?? null, derived: false, source: "self_reported",
+      };
+    });
+    return {
+      id: cl.id as string,
+      name: cl.name as string,
+      description: (cl.description as string | null) ?? null,
+      deadline: cl.deadline_at as string,
+      tasks: rendered,
+      extras,
+    };
   });
 }

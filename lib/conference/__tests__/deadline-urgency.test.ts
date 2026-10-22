@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeUrgency } from "../deadline-urgency";
+import { arrangeStaffChecklists, describeUrgency } from "../deadline-urgency";
 
 // Seating is introduced today and hardens 11 January — 133 days apart.
 const TODAY = "2026-08-31";
@@ -39,5 +39,56 @@ describe("gently, then accelerating", () => {
     // it, and no instant is ever constructed from these.
     expect(describeUrgency("2027-01-01", "2026-12-31").daysUntil).toBe(1);
     expect(describeUrgency("2026-09-01", "2026-08-31").daysUntil).toBe(1);
+  });
+});
+
+describe("the War Room's Now / Next / Later / Done", () => {
+  const TZ = "America/Toronto";
+  const list = (name: string, deadline: string, states: string[]) => ({
+    name,
+    deadline,
+    tasks: states.map((state) => ({ state })),
+  });
+  const names = (xs: Array<{ name: string }>) => xs.map((x) => x.name);
+
+  it("puts today's and late lists in Now, the next one in Next, the rest in Later", () => {
+    const groups = arrangeStaffChecklists(
+      [
+        list("week before", "2027-01-26T04:59:59Z", ["pending"]),
+        list("badges", "2027-01-12T04:59:59Z", ["pending"]),
+        list("doors open", "2027-02-01T12:00:00Z", ["pending"]),
+        list("late", "2027-01-05T04:59:59Z", ["pending"]),
+      ],
+      new Date("2027-01-11T15:00:00Z"),
+      TZ
+    );
+    // 2027-01-12T04:59:59Z is 11:59 pm on the 11th in Toronto: today, not tomorrow.
+    expect(names(groups.now)).toEqual(["late", "badges"]);
+    expect(names(groups.next)).toEqual(["week before"]);
+    expect(names(groups.later)).toEqual(["doors open"]);
+  });
+
+  it("folds answered lists into Done, latest first, counting doesn't-apply as answered", () => {
+    const groups = arrangeStaffChecklists(
+      [
+        list("a", "2027-01-01T12:00:00Z", ["done", "not_applicable"]),
+        list("b", "2027-01-02T12:00:00Z", ["done"]),
+        list("c", "2027-03-01T12:00:00Z", ["done", "pending"]),
+      ],
+      new Date("2027-01-10T12:00:00Z"),
+      TZ
+    );
+    expect(names(groups.done)).toEqual(["b", "a"]);
+    expect(names(groups.next)).toEqual(["c"]);
+    expect(groups.now).toEqual([]);
+  });
+
+  it("always shows the next open list, however far away", () => {
+    const groups = arrangeStaffChecklists(
+      [list("far", "2027-02-01T12:00:00Z", ["pending"])],
+      new Date("2026-10-22T12:00:00Z"),
+      TZ
+    );
+    expect(names(groups.next)).toEqual(["far"]);
   });
 });

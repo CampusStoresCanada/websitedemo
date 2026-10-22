@@ -70,6 +70,7 @@ function audienceLabel(c: ChecklistRow): string {
     (c.conference_checklist_tasks ?? []).filter((t) => t.active).map((t) => t.audience)
   );
   if (audiences.size === 0) return "—";
+  if (audiences.has("staff") && audiences.size === 1) return "CSC staff";
   if (audiences.has("org") && audiences.has("person")) return "Org admins + individuals";
   return audiences.has("person") ? "Individuals" : "Org admins";
 }
@@ -81,6 +82,8 @@ function scopeLabel(c: ChecklistRow): string {
     (c.conference_checklist_tasks ?? []).filter((t) => t.active).map((t) => t.audience)
   );
   if (audiences.size > 0 && !audiences.has("org")) {
+    // A staff list is answered by CSC for the conference — nobody else sees it.
+    if (!audiences.has("person")) return "The War Room";
     return "Each person, on their own conference page";
   }
   const publication = one(c.publication);

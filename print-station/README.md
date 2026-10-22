@@ -11,7 +11,7 @@ ours, and stickers line up with the card to fractions of a millimetre.
 ## On the conference laptop (Mac)
 
 1. Plug the QL in by USB, with the **62 mm continuous roll** loaded (DK-2113 clear).
-2. On the desk: toolkit → **Open the print station** → **Get a key**. It is shown once.
+2. In the War Room: **What's next** → **Open the print station** → **Get a key**. It is shown once.
 3. Double-click **CSC Print Station.command**. The first run sets itself up (needs
    Python 3 and internet), then asks for the website address and the key.
 4. Leave it running, plugged in and awake. The desk's print station page shows it
