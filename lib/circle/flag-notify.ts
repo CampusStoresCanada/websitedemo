@@ -253,13 +253,23 @@ export async function sendFlagNotification(
   */
   const ghostClient = isCircleConfigured() ? getCircleGhostClient() : null;
   const responders = recipientEmails.filter((e) => e !== params.reporterEmail);
-  const room = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
+  const intendedRoom = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
+
+  /*
+    ⛔ The same dev intercept email already honours (lib/email/send.ts). Butler's
+    DM ignored it, so a flag raised on a local server — every one shares the
+    live database and Circle — messaged real staff. With it set, the room is
+    the dev address alone, and the message says who it would have reached.
+  */
+  const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const room = intercept ? [intercept] : intendedRoom;
+  const sentText = intercept ? `[DEV — would have gone to: ${intendedRoom.join(", ")}]\n\n${dmText}` : dmText;
 
   let anyDm = false;
   let anyEmail = false;
 
   if (ghostClient && room.length > 0) {
-    const result = await ghostClient.sendGroupDirectMessage(room, dmText);
+    const result = await ghostClient.sendGroupDirectMessage(room, sentText);
     if (result.success) anyDm = true;
     else console.warn("[flag-notify] Circle group DM failed:", result.error);
   }
