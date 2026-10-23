@@ -394,7 +394,10 @@ function GrantForm({
             onChange={(e) => setCapability(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded text-sm bg-white"
           >
-            {Object.entries(CAPABILITY_LABEL).map(([k, v]) => (
+            {Object.entries(CAPABILITY_LABEL)
+              // Desk staff are added from their conference's Days & Setup page.
+              .filter(([k]) => k !== "conference.desk_staff")
+              .map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
               </option>

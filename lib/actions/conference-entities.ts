@@ -1,13 +1,13 @@
 "use server";
 
-import { requireAdmin, requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireAuthenticated, requireOrgCommerceAccess, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements, resolveSurfaces, type FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
 import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, priceForTier } from "@/lib/conference/entity-pricing";
-import { accessibleThings, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
+import { accessibleThings, admittedDates, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
@@ -410,6 +410,13 @@ export type ConferenceOffer = {
    * because nobody said it should not. Opting in has to be an act.
    */
   standalone: boolean;
+  /**
+   * The dates this offer gets someone in — the check-in rule (admittedDates):
+   * days it grants plus the day of every session and event it grants. The
+   * desk orders what it offers by these: what adds a day this person lacks,
+   * what is on soonest.
+   */
+  admittedDates: string[];
 };
 
 /**
@@ -422,14 +429,8 @@ export async function listConferenceOffers(
   conferenceId: string,
   organizationId: string
 ): Promise<Result<ConferenceOffer[]>> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (
-    !isGlobalAdmin(auth.ctx.globalRole) &&
-    !auth.ctx.activeOrgIds.includes(organizationId)
-  ) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
+  const auth = await requireOrgCommerceAccess(organizationId, conferenceId);
+  if (!auth.ok) return { success: false, error: "Not authorized for this organization." };
 
   const db = createAdminClient();
   const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([
@@ -538,6 +539,7 @@ export async function listConferenceOffers(
         soldOut: avail.soldOut,
         includes: offerGrants(offer.id, byId),
         accessSummary: summarizeAccess(offer.id, byId),
+        admittedDates: admittedDates(offer.id, byId),
         standalone:
           offerRequiresOwnershipOfEntityIds(refs).length === 0 &&
           eligibleTiers(offer, byId).length > 0,

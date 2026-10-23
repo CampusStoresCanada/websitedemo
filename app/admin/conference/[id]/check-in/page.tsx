@@ -1,8 +1,9 @@
 import { getConference } from "@/lib/actions/conference";
 import { listConferencePeople } from "@/lib/actions/conference-people";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import CheckInDeskClient from "@/components/admin/conference/CheckInDeskClient";
 import { loadCheckInFacts } from "@/lib/conference/badges/checkin";
+import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 
 export const metadata = {
   title: "Conference Check-in Desk | Admin",
@@ -18,7 +19,8 @@ export default async function ConferenceCheckInDeskPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return (
       <main className="h-screen w-screen bg-white p-6 text-sm text-red-700">
@@ -39,8 +41,12 @@ export default async function ConferenceCheckInDeskPage({
   // ⚠️ Only honoured in test mode. Pretending it is a different day is how you
   // rehearse the day-pass verdict in September; it is not something a live desk
   // should ever be able to do by editing its own URL.
+  // `as_of` may carry a venue time too (2027-02-01T18:00): the event door
+  // decides what to offer by the clock, so rehearsing it needs an hour.
   const asOfRaw = testMode ? one(query.as_of).trim() : "";
-  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw) ? asOfRaw : null;
+  const asOfMatch = /^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}))?$/.exec(asOfRaw);
+  const asOf = asOfMatch ? asOfMatch[1] : null;
+  const asOfTime = asOfMatch?.[2] ?? null;
   // ⛔ What each person HOLDS, resolved once when the desk opens rather than on
   // the roster poll — see loadCheckInFacts for why. A failure here must not take
   // the desk down with it: a desk that shows a name and no entitlement still
@@ -48,7 +54,13 @@ export default async function ConferenceCheckInDeskPage({
   const [conferenceResult, peopleResult, facts] = await Promise.all([
     getConference(id),
     listConferencePeople(id),
-    loadCheckInFacts(id).catch(() => ({ facts: {}, conferenceDates: [] })),
+    loadCheckInFacts(id).catch(() => ({
+      facts: {},
+      conferenceDates: [],
+      openSeats: [],
+      doorEvents: [],
+      timeZone: "America/Toronto",
+    })),
   ]);
 
   if (!conferenceResult.success || !conferenceResult.data) {
@@ -60,21 +72,20 @@ export default async function ConferenceCheckInDeskPage({
   }
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-black">
-      <style>{`
-        body header, body footer { display: none !important; }
-        nav[aria-label="Admin breadcrumbs"] { display: none !important; }
-        body main { margin: 0 !important; padding: 0 !important; min-height: 100vh !important; }
-        .max-w-7xl.mx-auto.px-4.py-8 { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
-      `}</style>
+    <>
       <CheckInDeskClient
         conferenceId={id}
         initialRows={peopleResult.success ? peopleResult.data ?? [] : []}
         initialFacts={facts.facts}
+        initialOpenSeats={facts.openSeats}
         conferenceDates={facts.conferenceDates}
         testMode={testMode}
         asOf={asOf}
+        storefrontPath={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}`}
+        doorEvents={facts.doorEvents}
+        timeZone={facts.timeZone}
+        doorNow={asOf && asOfTime ? zonedWallTimeToUtcIso(asOf, asOfTime, facts.timeZone) : null}
       />
-    </main>
+    </>
   );
 }

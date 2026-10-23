@@ -148,10 +148,12 @@ export async function provisionOrgLogin(params: {
             error: "User is already an active member of this organization",
           };
         }
-        // Reactivate if inactive
+        // Reactivate if inactive. ⛔ Clears any old end date too: a temp whose
+        // link expired and is invited back would otherwise be reactivated
+        // straight into a date already past, and still locked out.
         const { error: updateErr } = await adminClient
           .from("user_organizations")
-          .update({ status: "active", role, updated_at: new Date().toISOString() })
+          .update({ status: "active", role, expires_at: null, updated_at: new Date().toISOString() })
           .eq("id", existingMembership.id);
 
         if (updateErr) {

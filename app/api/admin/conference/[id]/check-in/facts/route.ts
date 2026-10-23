@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import { loadCheckInFacts } from "@/lib/conference/badges/checkin";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await context.params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }

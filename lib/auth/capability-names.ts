@@ -35,6 +35,13 @@ export const CAPABILITIES = {
    *
    */
   BENCHMARKING_BETA_TESTER: "benchmarking.beta_tester",
+  /**
+   * Runs one conference's check-in desk: check in, find, reprint, name a
+   * walk-up to a company's open seat, sell or invoice an existing company.
+   * Never designs anything (badges, catalogue, prices, schedule).
+   * ⛔ Always held FOR a conference — see lib/conference/desk-staff.ts.
+   */
+  CONFERENCE_DESK_STAFF: "conference.desk_staff",
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
@@ -55,6 +62,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   [CAPABILITIES.BENCHMARKING_QA_VERIFY]: "Interpretation",
   [CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM]: "Recipient confirmation",
   [CAPABILITIES.BENCHMARKING_BETA_TESTER]: "Beta tester",
+  [CAPABILITIES.CONFERENCE_DESK_STAFF]: "Desk staff",
 };
 
 /**

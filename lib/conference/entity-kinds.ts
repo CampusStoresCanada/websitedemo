@@ -86,6 +86,13 @@ const SUMMARY_FIELD: SuggestedField = {
   hint: "Short teaser shown in listings — put the full write-up in Purpose.",
 };
 
+/** Prints a QR card people scan to check themselves in (lib/conference/check-in-cards.ts). */
+const CHECK_IN_CARD_FIELD: SuggestedField = {
+  key: "check_in_card", label: "Check-in card", type: "text",
+  placeholder: "yes",
+  hint: "Type yes to print a QR card for this, which people scan to check themselves in (e.g. the CANCOLL AGM).",
+};
+
 const VIRTUAL_LINK_FIELD: SuggestedField = {
   key: "virtual_link", label: "Video call link", type: "text",
   placeholder: "e.g. Google Meet URL",
@@ -104,6 +111,7 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
       { key: "purpose", label: "Purpose", type: "textarea", placeholder: "e.g. how buyers and vendors connect" },
       { key: "format", label: "Format", type: "text", placeholder: "e.g. panel, keynote, workshop" },
       VIRTUAL_LINK_FIELD,
+      CHECK_IN_CARD_FIELD,
       ...TIME_FIELDS,
     ],
     suggestedRoles: ["when", "where", "who"], requiredRoles: ["when"], sellable: true,
@@ -136,6 +144,7 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
       SUMMARY_FIELD,
       { key: "purpose", label: "Purpose", type: "textarea", placeholder: "e.g. welcome reception" },
       VIRTUAL_LINK_FIELD,
+      CHECK_IN_CARD_FIELD,
       ...TIME_FIELDS,
     ],
     suggestedRoles: ["when", "where", "who"], requiredRoles: ["when"], sellable: true,

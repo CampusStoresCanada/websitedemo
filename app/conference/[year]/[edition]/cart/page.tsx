@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, isConferenceDeskStaff } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
@@ -45,6 +45,10 @@ export default async function ConferenceCartPage({
   const conference = conferenceResult.data;
   const adminClient = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  // This conference's desk staff can open any org's cart: the desk names and invoices a
+  // walk-up here. Same rule as the actions (requireOrgCommerceAccess).
+  const isOps = await isConferenceDeskStaff(auth.ctx, conference.id);
+  const canShopForAnyOrg = isOps;
 
   const { data: userOrgs } = await adminClient
     .from("user_organizations")
@@ -56,8 +60,8 @@ export default async function ConferenceCartPage({
     (row) => (row as unknown as { organizations: OrganizationMembership }).organizations
   );
 
-  const allOrgs = isAdmin ? await getOrganizations() : [];
-  const orgOptions: OrganizationMembership[] = isAdmin
+  const allOrgs = canShopForAnyOrg ? await getOrganizations() : [];
+  const orgOptions: OrganizationMembership[] = canShopForAnyOrg
     ? allOrgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug }))
     : memberships;
 
@@ -72,7 +76,7 @@ export default async function ConferenceCartPage({
     );
   }
 
-  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (isAdmin ? null : orgOptions[0]);
+  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (canShopForAnyOrg ? null : orgOptions[0]);
 
   if (!selectedOrg) {
     return (
@@ -94,8 +98,7 @@ export default async function ConferenceCartPage({
    * payment is a staff decision, so an org admin buying for their own org
    * passes the manage-org check and must still fail this one.
    */
-  const opsAccess = await requireConferenceOpsAccess();
-  const canInvoice = opsAccess.ok;
+  const canInvoice = isOps;
 
   const [cartResult, orgContacts, orgSeatsResult] = await Promise.all([
     getConferenceCart(conference.id, selectedOrg.id),
@@ -131,7 +134,7 @@ export default async function ConferenceCartPage({
         </Link>
       </div>
 
-      {isAdmin ? (
+      {canShopForAnyOrg ? (
         <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={selectedOrg.id} basePath={`/conference/${year}/${edition}/cart`} />
       ) : memberships.length > 1 ? (
         <div className="flex flex-wrap gap-2">

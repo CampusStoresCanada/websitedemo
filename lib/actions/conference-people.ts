@@ -10,6 +10,8 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireConferenceOpsAccess,
+  isConferenceDeskStaff,
+  requireConferenceDeskAccess,
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
@@ -21,12 +23,15 @@ import {
   requestBadgeReprint,
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
-import { ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
+import { createKnownPerson, ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
 import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
+import { personOwedAgreements, type OwedAgreement } from "@/lib/conference/legal-acceptance";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
 import { planReprint, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
+import { personHoldsExtras, personReachesEntity, personVerdictToday } from "@/lib/conference/badges/checkin";
+import { conferenceToday } from "@/lib/conference/desk-staff";
 
 type ConferencePersonRow = {
   id: string;
@@ -335,7 +340,9 @@ export async function listConferencePeople(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = conferencePeopleClient();
-  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+  // This conference's desk staff see its whole roster: the desk and war room are theirs.
+  const isAdmin =
+    await isConferenceDeskStaff(auth.ctx, conferenceId);
   const orgScope = auth.ctx.orgAdminOrgIds;
 
   const { data, error } = await db
@@ -971,10 +978,14 @@ export async function setConferencePersonCanonicalLink(params: {
 
 export async function markConferencePersonCheckedInManual(
   personId: string,
-  options?: { testMode?: boolean }
-): Promise<{ success: boolean; error?: string; data?: { checkedInAt: string } }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
+  options?: { testMode?: boolean; entityId?: string | null }
+): Promise<{
+  success: boolean;
+  error?: string;
+  data?: { checkedInAt: string | null; state?: CheckInScanResultState; owed?: OwedAgreement[] };
+}> {
+  const signedIn = await requireAuthenticated();
+  if (!signedIn.ok) return { success: false, error: signedIn.error };
 
   const db = createAdminClient();
   const { data: person, error: personError } = await db
@@ -984,6 +995,80 @@ export async function markConferencePersonCheckedInManual(
     .maybeSingle();
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
+  }
+  // ⛔ Desk staff for THIS person's conference, today.
+  const auth = await requireConferenceDeskAccess(person.conference_id);
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  // ── By name at an event's door ─────────────────────────────────────────
+  // ⛔ The EVENT only, never the conference (Stephen, 2026-10-20). Nobody
+  // scanned a badge, so nobody picked one up; marking them checked in here
+  // would make the desk later read them as a lost badge and offer a reprint.
+  if (options?.entityId) {
+    const { data: doorEntity } = await db
+      .from("conference_entities")
+      .select("id")
+      .eq("id", options.entityId)
+      .eq("conference_id", person.conference_id)
+      .eq("kind", "event")
+      .maybeSingle();
+    if (!doorEntity) return { success: false, error: "That event is not part of this conference." };
+    const { data: prior, error: priorError } = await db
+      .from("conference_check_in_events")
+      .select("id")
+      .eq("conference_id", person.conference_id)
+      .eq("person_id", person.id)
+      .eq("entity_id", doorEntity.id)
+      .in("result_state", ["valid", "not_on_ticket"])
+      .limit(1);
+    if (priorError) return { success: false, error: priorError.message };
+    const reaches = (prior ?? []).length > 0
+      ? true
+      : await personReachesEntity(person.conference_id, person.id, doorEntity.id as string).catch(() => true);
+    const state: CheckInScanResultState =
+      (prior ?? []).length > 0 ? "already_checked_in" : reaches ? "valid" : "not_on_ticket";
+    const at = new Date().toISOString();
+    await db.from("conference_check_in_events").insert({
+      conference_id: person.conference_id,
+      person_id: person.id,
+      checked_in_at: at,
+      checked_in_by: auth.ctx.userId,
+      check_in_source: "manual",
+      scan_token_id: null,
+      device_id: null,
+      result_state: state,
+      is_test: options?.testMode === true,
+      entity_id: doorEntity.id,
+    });
+    await logAuditEventSafe({
+      action: "conference_door_manual",
+      entityType: "conference_people",
+      entityId: personId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { conferenceId: person.conference_id, eventEntityId: doorEntity.id, resultState: state },
+    });
+    return { success: true, data: { checkedInAt: at, state } };
+  }
+
+  // Agreements first, as at a badge scan (scanConferenceCheckInToken): the desk
+  // collects what they owe, then checks them in.
+  if (!person.checked_in_at) {
+    const owed = await personOwedAgreements(db, person.conference_id, person.id).catch(() => []);
+    if (owed.length > 0) {
+      await db.from("conference_check_in_events").insert({
+        conference_id: person.conference_id,
+        person_id: person.id,
+        checked_in_at: new Date().toISOString(),
+        checked_in_by: auth.ctx.userId,
+        check_in_source: "manual",
+        scan_token_id: null,
+        device_id: null,
+        result_state: "legal_not_accepted",
+        is_test: options?.testMode === true,
+      });
+      return { success: true, data: { checkedInAt: null, state: "legal_not_accepted", owed } };
+    }
   }
 
   const checkedInAt = person.checked_in_at ?? new Date().toISOString();
@@ -1043,20 +1128,39 @@ export async function reprintConferenceBadge(
     badgePrintedAt: string;
     badgePrintJobId: string;
     qrPayload: string;
+    /**
+     * The result is a QL sticker (front + back) the desk can print now or send
+     * to the print station. False = no blank or spare in hand: the full colour
+     * badge, which the QL cannot print.
+     */
+    labelPrintable: boolean;
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
+  const signedIn = await requireAuthenticated();
+  if (!signedIn.ok) return { success: false, error: signedIn.error };
 
   const db = createAdminClient();
   const { data: person, error: personError } = await db
     .from("conference_people")
-    .select("id, conference_id, badge_reprint_count")
+    .select("id, conference_id, badge_reprint_count, badge_print_status, person_kind")
     .eq("id", personId)
     .maybeSingle();
   if (personError || !person) {
     return { success: false, error: "Conference person not found." };
   }
+  // ⛔ No seat, no badge: their company released it (deallocateSeat).
+  if (person.person_kind === "unassigned") {
+    return { success: false, error: "Nobody holds a seat for them now, so there is no badge to print." };
+  }
+  // ⛔ The desk's FIRST print for someone (a desk sale, or named to a seat at
+  // the desk) goes through this same path as ops_override. It is not a
+  // reprint: it must not inflate the reprint count. Only ops_override, because
+  // a pre-printed badge never marks itself printed, so "not_printed" alone
+  // cannot tell a first badge from a damaged one.
+  const firstPrint = reason === "ops_override" && person.badge_print_status === "not_printed";
+  // ⛔ Desk staff for THIS person's conference, today.
+  const auth = await requireConferenceDeskAccess(person.conference_id);
+  if (!auth.ok) return { success: false, error: auth.error };
 
   // ⛔ Transport stays "pdf" even when the plan says ql_label, and that is
   // deliberate until the bridge exists.
@@ -1069,9 +1173,16 @@ export async function reprintConferenceBadge(
   //
   // The plan is still computed and recorded, so the job carries what the label
   // should say the moment there is something to print it.
+  // On a company blank, extras the type doesn't include need their schedule
+  // printed too (planReprint). Only asked when it can matter.
+  const holdsExtras =
+    stockInHand === "company_blank"
+      ? await personHoldsExtras(person.conference_id, personId).catch(() => false)
+      : false;
   const plan = planReprint({
     stock: stockInHand ?? "none",
     personIsSeated: true, // a reprint is for somebody already seated; walk-ups take the assignment path
+    holdsExtras,
   });
   const reprintJob = await requestBadgeReprint({
     conferenceId: person.conference_id,
@@ -1085,12 +1196,12 @@ export async function reprintConferenceBadge(
     return { success: false, error: reprintJob.error ?? "Failed to queue badge reprint." };
   }
 
-  const nextReprintCount = (person.badge_reprint_count ?? 0) + 1;
+  const nextReprintCount = (person.badge_reprint_count ?? 0) + (firstPrint ? 0 : 1);
   const badgePrintedAt = new Date().toISOString();
   const { error: updateError } = await db
     .from("conference_people")
     .update({
-      badge_print_status: "reprinted",
+      badge_print_status: firstPrint ? "printed" : "reprinted",
       badge_reprint_count: nextReprintCount,
       badge_printed_at: badgePrintedAt,
       updated_at: badgePrintedAt,
@@ -1117,11 +1228,12 @@ export async function reprintConferenceBadge(
   return {
     success: true,
     data: {
-      badgePrintStatus: "reprinted",
+      badgePrintStatus: firstPrint ? "printed" : "reprinted",
       badgeReprintCount: nextReprintCount,
       badgePrintedAt,
       badgePrintJobId: reprintJob.data.jobId,
       qrPayload: reprintJob.data.qrPayload,
+      labelPrintable: plan.transport === "ql_label",
     },
   };
 }
@@ -1280,6 +1392,59 @@ export async function finalizePendingConferenceAssignmentsForCurrentUser(): Prom
     });
   }
 
+  // ⛔ Second route: registrations tied to THIS person's own contact record
+  // rather than to an email. A walk-up named at the desk without an email
+  // (recordNameOnlyWalkUp) has no email to match; when their company's admin
+  // later adds one and invites them, the login is stamped on that contact
+  // (contacts.profile_id), and that is how their registration finds them.
+  // By person, never by address: on a shared address the login stays with
+  // whoever holds it, so this cannot hand anyone a registration not theirs.
+  const { data: myContacts, error: myContactsError } = await db
+    .from("contacts")
+    .select("id")
+    .eq("profile_id", auth.ctx.userId)
+    .in("organization_id", activeOrgIds)
+    .is("archived_at", null);
+  if (myContactsError) {
+    return { success: false, error: `Failed to resolve conference registrations: ${myContactsError.message}` };
+  }
+  const myContactIds = (myContacts ?? []).map((c) => c.id as string);
+  if (myContactIds.length > 0) {
+    const { data: unclaimed, error: unclaimedError } = await db
+      .from("conference_people")
+      .select("id, conference_id, organization_id")
+      .in("canonical_person_id", myContactIds)
+      .is("user_id", null)
+      .neq("assignment_status", "canceled");
+    if (unclaimedError) {
+      return { success: false, error: `Failed to resolve conference registrations: ${unclaimedError.message}` };
+    }
+    for (const row of unclaimed ?? []) {
+      const { error: claimError } = await db
+        .from("conference_people")
+        .update({ user_id: auth.ctx.userId, updated_at: new Date().toISOString() })
+        .eq("id", row.id)
+        .is("user_id", null);
+      if (claimError) {
+        return { success: false, error: `Failed to finalize pending assignment: ${claimError.message}` };
+      }
+      personIds.push(row.id as string);
+      claimedConferenceIds.add(row.conference_id as string);
+      await logAuditEventSafe({
+        action: "conference_assignment_notification_hook",
+        entityType: "conference_people",
+        entityId: row.id as string,
+        actorId: auth.ctx.userId,
+        actorType: "user",
+        details: {
+          hook: "registration_claimed_by_person",
+          conferenceId: row.conference_id,
+          organizationId: row.organization_id,
+        },
+      });
+    }
+  }
+
   // After claiming the seats, surface the assignee legal gate for each conference
   // the user just joined, so the activation surface can prompt them to accept
   // their personal documents before participating. Best-effort — never fail the
@@ -1308,7 +1473,14 @@ export type CheckInScanResultState =
   | "invalid_token"
   | "revoked_token"
   | "not_found"
-  | "legal_not_accepted";
+  | "legal_not_accepted"
+  /** Their badge does not cover today. Refused at pickup — see verdictForDay. */
+  | "not_valid_today"
+  /**
+   * At an event's door: the event is not in their access. Let in and invoiced
+   * (enforcement off by default) — the desk offers the sale.
+   */
+  | "not_on_ticket";
 
 /**
  * How much of a rehearsal is still sitting in the real numbers.
@@ -1323,7 +1495,7 @@ export type CheckInScanResultState =
 export async function countTestCheckIns(
   conferenceId: string
 ): Promise<{ success: boolean; error?: string; data?: { people: number; events: number } }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -1363,7 +1535,7 @@ export async function countTestCheckIns(
 export async function resetTestCheckIns(
   conferenceId: string
 ): Promise<{ success: boolean; error?: string; data?: { peopleCleared: number; eventsDeleted: number } }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -1422,6 +1594,14 @@ export async function scanConferenceCheckInToken(params: {
    * remembers they were testing.
    */
   testMode?: boolean;
+  /** Rehearsal only: pretend it is this date (YYYY-MM-DD). Ignored otherwise. */
+  asOf?: string | null;
+  /**
+   * The event this device is checking people in to (lib/conference/door.ts),
+   * or null for badge pickup. ⛔ A door asks "is this event in their access?",
+   * never the desk's day rule.
+   */
+  entityId?: string | null;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -1429,9 +1609,11 @@ export async function scanConferenceCheckInToken(params: {
     state: CheckInScanResultState;
     personId: string | null;
     checkedInAt: string | null;
+    /** `legal_not_accepted`: what they must accept at the desk, with the text. */
+    owed?: OwedAgreement[];
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const conferenceId = params.conferenceId;
@@ -1443,10 +1625,25 @@ export async function scanConferenceCheckInToken(params: {
   const db = createAdminClient();
 
   const isTest = params.testMode === true;
+  // The door's event must be one of this conference's events — the id comes
+  // from the browser.
+  let doorEntityId: string | null = null;
+  if (params.entityId) {
+    const { data: doorEntity } = await db
+      .from("conference_entities")
+      .select("id")
+      .eq("id", params.entityId)
+      .eq("conference_id", conferenceId)
+      .eq("kind", "event")
+      .maybeSingle();
+    if (!doorEntity) return { success: false, error: "That event is not part of this conference." };
+    doorEntityId = doorEntity.id as string;
+  }
   const insertEvent = async (
     state: CheckInScanResultState,
     personId: string | null,
-    scanTokenId: string | null
+    scanTokenId: string | null,
+    entityId: string | null = doorEntityId
   ) => {
     await db.from("conference_check_in_events").insert({
       conference_id: conferenceId,
@@ -1461,6 +1658,7 @@ export async function scanConferenceCheckInToken(params: {
       device_id: deviceId,
       result_state: state,
       is_test: isTest,
+      entity_id: entityId,
     });
   };
 
@@ -1569,6 +1767,66 @@ export async function scanConferenceCheckInToken(params: {
     };
   }
 
+  // Picking up a badge: the conference check-in itself. Shared by the desk and
+  // by a door (a badge in hand at a door is a badge already picked up).
+  const checkInToConference = async (): Promise<{ checkedInAt: string } | { error: string }> => {
+    const at = new Date().toISOString();
+    const { error: updateError } = await db
+      .from("conference_people")
+      .update({ checked_in_at: at, check_in_source: "badge_pickup", check_in_is_test: isTest, updated_at: at })
+      .eq("id", personRow.id);
+    if (updateError) return { error: `Failed to set check-in state: ${updateError.message}` };
+    return { checkedInAt: at };
+  };
+
+  // ── At an event's door ────────────────────────────────────────────────
+  if (doorEntityId) {
+    // In already? A re-entry is not counted twice.
+    const { data: prior, error: priorError } = await db
+      .from("conference_check_in_events")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("person_id", personRow.id)
+      .eq("entity_id", doorEntityId)
+      .in("result_state", ["valid", "not_on_ticket"])
+      .limit(1);
+    if (priorError) return { success: false, error: priorError.message };
+    if ((prior ?? []).length > 0) {
+      await insertEvent("already_checked_in", personRow.id, resolvedTokenRow.id);
+      return {
+        success: true,
+        data: { state: "already_checked_in", personId: personRow.id, checkedInAt: personRow.checked_in_at },
+      };
+    }
+
+    // ⚠️ If what they hold cannot be read, let them in: a database hiccup must
+    // not stop the line at a reception.
+    const reaches = await personReachesEntity(conferenceId, personRow.id, doorEntityId).catch(() => true);
+
+    // ⛔ A badge scanned at a door also checks them in to the conference
+    // (Stephen, 2026-10-20) — and no day rule here: a Thursday-only holder who
+    // bought the Tuesday reception is let in.
+    let conferenceCheckedInAt = personRow.checked_in_at as string | null;
+    if (!conferenceCheckedInAt) {
+      const done = await checkInToConference();
+      if ("error" in done) return { success: false, error: done.error };
+      conferenceCheckedInAt = done.checkedInAt;
+      await insertEvent("valid", personRow.id, resolvedTokenRow.id, null);
+    }
+
+    const state: CheckInScanResultState = reaches ? "valid" : "not_on_ticket";
+    await insertEvent(state, personRow.id, resolvedTokenRow.id);
+    await logAuditEventSafe({
+      action: "conference_door_scan",
+      entityType: "conference_people",
+      entityId: personRow.id,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { conferenceId, eventEntityId: doorEntityId, resultState: state, deviceId, isTest },
+    });
+    return { success: true, data: { state, personId: personRow.id, checkedInAt: conferenceCheckedInAt } };
+  }
+
   if (personRow.checked_in_at) {
     await insertEvent("already_checked_in", personRow.id, resolvedTokenRow.id);
     return {
@@ -1581,36 +1839,44 @@ export async function scanConferenceCheckInToken(params: {
     };
   }
 
-  // ⛔ NO DOCUMENT GATE HERE, deliberately.
-  //
-  // Checking in is an ADMINISTRATIVE act — handing a person the badge that is
-  // already theirs — not a grant of access to anything. Refusing it because a
-  // waiver is unsigned turns the busiest queue of the conference into a
-  // paperwork desk, and punishes the attendee for a gap they cannot close while
-  // standing there.
-  //
-  // The documents are enforced where they actually mean something, and were
-  // already enforced there before this gate existed: registration
-  // (conference-registration), buying a day pass (DayPassOfferCard), and the
-  // welcome/acceptance surface the conference hub pushes people to. This was a
-  // fifth copy of that rule in the one place it did not belong.
-  //
-  // ⚠️ Historical `legal_not_accepted` rows remain in conference_check_in_events
-  // and the desk still renders their copy. Nothing produces new ones.
-
-  const checkedInAt = new Date().toISOString();
-  const { error: updateError } = await db
-    .from("conference_people")
-    .update({
-      checked_in_at: checkedInAt,
-      check_in_source: "badge_pickup",
-      check_in_is_test: isTest,
-      updated_at: checkedInAt,
-    })
-    .eq("id", personRow.id);
-  if (updateError) {
-    return { success: false, error: `Failed to set check-in state: ${updateError.message}` };
+  // ⛔ A DAY GATE, deliberately — unlike documents below. A Thursday day pass
+  // picked up on Tuesday is refused, red, and nothing is checked in (Stephen,
+  // 2026-10-19). Same rule the desk card shows (verdictForDay), judged on the
+  // conference's own date. ⚠️ If what the badge covers cannot be read, the scan
+  // goes through: a database hiccup must not stop the queue.
+  const today =
+    isTest && params.asOf && /^\d{4}-\d{2}-\d{2}$/.test(params.asOf)
+      ? params.asOf
+      : await conferenceToday(conferenceId);
+  const verdict = await personVerdictToday(conferenceId, personRow.id, today).catch(() => null);
+  if (verdict && !verdict.admitted) {
+    await insertEvent("not_valid_today", personRow.id, resolvedTokenRow.id);
+    return {
+      success: true,
+      data: { state: "not_valid_today", personId: personRow.id, checkedInAt: null },
+    };
   }
+
+  // ⛔ AGREEMENTS ARE COLLECTED HERE (Stephen, 2026-10-23): "if we haven't
+  // gotten them to do it by the time they are at the door, that is our last
+  // shot." Not a refusal: the desk shows what they owe, they read and accept
+  // on the desk's device (acceptAgreementsAtDesk), and the scan runs again.
+  // The 2026-09-08 removal was right that turning people away makes the queue
+  // a paperwork desk; collecting consent on the spot does not.
+  // ⚠️ If what they owe cannot be read, the scan goes through: a database
+  // hiccup must not stop the queue (same rule as the day check above).
+  const owed = await personOwedAgreements(createAdminClient(), conferenceId, personRow.id).catch(() => []);
+  if (owed.length > 0) {
+    await insertEvent("legal_not_accepted", personRow.id, resolvedTokenRow.id);
+    return {
+      success: true,
+      data: { state: "legal_not_accepted", personId: personRow.id, checkedInAt: null, owed },
+    };
+  }
+
+  const done = await checkInToConference();
+  if ("error" in done) return { success: false, error: done.error };
+  const checkedInAt = done.checkedInAt;
 
   await insertEvent("valid", personRow.id, resolvedTokenRow.id);
   await logAuditEventSafe({
@@ -1633,4 +1899,148 @@ export async function scanConferenceCheckInToken(params: {
     success: true,
     data: { state: "valid", personId: personRow.id, checkedInAt },
   };
+}
+
+
+/**
+ * The company's own people, for the desk's "Name someone" (Stephen, 2026-10-21):
+ * it suggests contacts AT THAT COMPANY only, so a known person is seated as
+ * themselves instead of being typed in again as a second record.
+ *
+ * Leaves out anyone already registered here: they are on the roster, and Find
+ * already reaches them.
+ */
+export async function listDeskCompanyContacts(params: {
+  conferenceId: string;
+  organizationId: string;
+}): Promise<
+  | { success: true; data: Array<{ id: string; name: string; email: string | null; title: string | null }> }
+  | { success: false; error: string }
+> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const [{ data: contacts, error }, { data: registered }] = await Promise.all([
+    db
+      .from("contacts")
+      .select("id, name, work_email, email, role_title")
+      .eq("organization_id", params.organizationId)
+      .is("archived_at", null)
+      .order("name"),
+    db
+      .from("conference_people")
+      .select("canonical_person_id")
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .not("canonical_person_id", "is", null),
+  ]);
+  if (error) return { success: false, error: error.message };
+  const here = new Set((registered ?? []).map((row) => row.canonical_person_id as string));
+  return {
+    success: true,
+    data: (contacts ?? [])
+      .filter((c) => !here.has(c.id as string) && String(c.name ?? "").trim())
+      .map((c) => ({
+        id: c.id as string,
+        name: String(c.name).trim(),
+        email: ((c.work_email ?? c.email) as string | null) ?? null,
+        title: (c.role_title as string | null) ?? null,
+      })),
+  };
+}
+
+/**
+ * A walk-up named at the desk with NO email: give them a person record so
+ * their badge can print, and tell their company's admins.
+ *
+ * ⛔ Stephen, 2026-10-19: the desk may skip the email. Without one the person
+ * gets no login (so no Circle and none of the signed-in conference tools), and
+ * their company's admins get a heads-up so they can add the address and invite
+ * them. A NEW person every time (createKnownPerson) — with no email there is
+ * nothing to tell two people apart, so never match by name.
+ *
+ * The heads-up is best-effort: the person and the badge are the record; a
+ * failed email never undoes them.
+ */
+export async function recordNameOnlyWalkUp(params: {
+  conferenceId: string;
+  conferencePersonId: string;
+}): Promise<{ success: true; data: { canonicalPersonId: string; adminsTold: number } } | { success: false; error: string }> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select("id, conference_id, organization_id, canonical_person_id, display_name, contact_email, role_title")
+    .eq("id", params.conferencePersonId)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person || person.conference_id !== params.conferenceId) {
+    return { success: false, error: "That person was not found at this conference." };
+  }
+  if (person.canonical_person_id) {
+    return { success: true, data: { canonicalPersonId: person.canonical_person_id as string, adminsTold: 0 } };
+  }
+  if ((person.contact_email as string | null)?.trim()) {
+    return { success: false, error: "They have an email address, so they are not a name-only walk-up." };
+  }
+  const name = (person.display_name as string | null)?.trim();
+  if (!name) return { success: false, error: "A name is needed." };
+  const organizationId = person.organization_id as string;
+
+  const created = await createKnownPerson(
+    { organizationId, name, title: (person.role_title as string | null) ?? null },
+    { provisionCircle: false }
+  );
+  if (!created.personId) return { success: false, error: created.error ?? "Could not add them." };
+
+  const { error: linkError } = await db
+    .from("conference_people")
+    .update({ canonical_person_id: created.personId, updated_at: new Date().toISOString() })
+    .eq("id", person.id);
+  if (linkError) return { success: false, error: linkError.message };
+
+  await logAuditEventSafe({
+    action: "conference_walkup_without_email",
+    entityType: "conference_person",
+    entityId: person.id as string,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId: params.conferenceId, organizationId, contactId: created.personId },
+  });
+
+  let adminsTold = 0;
+  try {
+    // Loaded here, not at the top: the email client starts with the module, and
+    // every other desk action in this file has no reason to load it.
+    const [{ resolveAudience }, { sendTransactionalBatch }] = await Promise.all([
+      import("@/lib/comms/audience"),
+      import("@/lib/comms/send"),
+    ]);
+    const [{ data: conference }, { data: org }, admins] = await Promise.all([
+      db.from("conference_instances").select("name").eq("id", params.conferenceId).maybeSingle(),
+      db.from("organizations").select("name, slug").eq("id", organizationId).maybeSingle(),
+      resolveAudience({ type: "org_admins", filters: { org_ids: [organizationId] } }),
+    ]);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const results = await sendTransactionalBatch({
+      templateKey: "conference_walkup_without_email",
+      recipients: admins.map((admin) => ({
+        to: admin.email,
+        variables: {
+          ...admin.variableOverrides,
+          person_name: name,
+          organization_name: (org?.name as string | null) ?? "your company",
+          conference_name: (conference?.name as string | null) ?? "the conference",
+          org_url: org?.slug ? `${appUrl}/org/${org.slug}` : appUrl,
+        },
+      })),
+    });
+    adminsTold = results.filter((r) => r.success).length;
+  } catch (err) {
+    console.warn("[recordNameOnlyWalkUp] heads-up email failed", err);
+  }
+
+  return { success: true, data: { canonicalPersonId: created.personId, adminsTold } };
 }

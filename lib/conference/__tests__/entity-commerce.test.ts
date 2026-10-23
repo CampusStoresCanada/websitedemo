@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expandOffer, offerGrants, resolveAccess, accessibleThings } from "../entity-commerce";
+import { expandOffer, offerGrants, resolveAccess, accessibleThings, admittedDates } from "../entity-commerce";
 import { indexById } from "../entity-graph";
 import type { BuildEntity, EntityRefView } from "../../actions/conference-entities";
 
@@ -92,5 +92,48 @@ describe("resolveAccess — the bundling rule, generalized", () => {
     const type = thing({ id: "booth", kind: "booth", name: "Booth", refs: [ref("ts", "Trade Show", "session", "involved_in")] });
     const inst = thing({ id: "b601", kind: "booth", name: "Booth 601", refs: [ref("booth", "Booth", "booth", "instance_of")] });
     expect(resolveAccess(["b601"], indexById([ts, type, inst])).has("ts")).toBe(true);
+  });
+});
+
+/**
+ * ⛔ The check-in rule: the dates someone may be on site. Days they are granted,
+ * PLUS the `when` day of every session and event they are granted — including
+ * one they hold outright. Counting days alone let a Thursday-only Big Ideas
+ * pass in any day and turned exhibitor staff away on Tuesday (2026-10-19).
+ */
+describe("admittedDates — the dates a badge is good for at check-in", () => {
+  function conferenceWorld() {
+    const tue = thing({ id: "tue", kind: "day", name: "Tue, Feb 2", attributes: { date: "2027-02-02" } });
+    const wed = thing({ id: "wed", kind: "day", name: "Wed, Feb 3", attributes: { date: "2027-02-03" } });
+    const thu = thing({ id: "thu", kind: "day", name: "Thu, Feb 4", attributes: { date: "2027-02-04" } });
+    const bigIdeas = thing({ id: "bi", kind: "session", name: "Big Ideas Day", refs: [ref("thu", "Thu, Feb 4", "day", "when")] });
+    const meetings = thing({ id: "mtg", kind: "session", name: "Get Organized", refs: [ref("tue", "Tue, Feb 2", "day", "when")] });
+    const offsite = thing({ id: "off", kind: "event", name: "Wednesday Offsite", refs: [ref("wed", "Wed, Feb 3", "day", "when")] });
+    const biPass = thing({ id: "bipass", kind: "registration", name: "Big Ideas Day pass", refs: [ref("bi", "Big Ideas Day", "session", "involved_in")] });
+    const exhibitor = thing({
+      id: "exh", kind: "registration", name: "Exhibitor Staff",
+      refs: [
+        ref("wed", "Wed, Feb 3", "day", "includes", 1),
+        ref("thu", "Thu, Feb 4", "day", "includes", 1),
+        ref("mtg", "Get Organized", "session", "involved_in"),
+      ],
+    });
+    return indexById([tue, wed, thu, bigIdeas, meetings, offsite, biPass, exhibitor]);
+  }
+
+  it("gives a session-only pass the day its session is on", () => {
+    expect(admittedDates("bipass", conferenceWorld())).toEqual(["2027-02-04"]);
+  });
+
+  it("adds the day of a session to the days a registration already grants", () => {
+    expect(admittedDates("exh", conferenceWorld())).toEqual(["2027-02-02", "2027-02-03", "2027-02-04"]);
+  });
+
+  it("counts an event held outright, with no registration", () => {
+    expect(admittedDates("off", conferenceWorld())).toEqual(["2027-02-03"]);
+  });
+
+  it("merges everything a person holds", () => {
+    expect(admittedDates(["bipass", "off"], conferenceWorld())).toEqual(["2027-02-03", "2027-02-04"]);
   });
 });

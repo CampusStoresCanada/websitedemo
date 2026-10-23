@@ -24,8 +24,19 @@ vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   requireAdmin: vi.fn(),
   requireConferenceOpsAccess: vi.fn(),
+  isConferenceDeskStaff: vi.fn(async () => false),
+  requireConferenceDeskAccess: vi.fn(),
   canManageOrganization: canManageOrganizationMock,
   isGlobalAdmin: isGlobalAdminMock,
+  // Mirrors the real rule over this file's mocks: global admin, member of the
+  // org, or conference ops.
+  requireOrgCommerceAccess: async (organizationId: string) => {
+    const auth = await requireAuthenticatedMock();
+    if (!auth.ok) return auth;
+    if (isGlobalAdminMock(auth.ctx.globalRole) || auth.ctx.activeOrgIds?.includes(organizationId)) return auth;
+    const ops = { ok: false };
+    return ops?.ok ? ops : { ok: false, status: 403, error: "You are not authorized to manage commerce for this organization." };
+  },
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({

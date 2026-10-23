@@ -1,0 +1,4 @@
+brother-ql>=0.9.4
+pyusb>=1.2.1
+Pillow>=10.1.0
+requests>=2.31.0

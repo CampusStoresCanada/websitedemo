@@ -26,6 +26,7 @@ const db = {
     const b: any = {};
     b.select = () => b;
     b.eq = () => b;
+    b.in = () => b;
     b.not = () => b;
     b.then = (r: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(r);
     return b;

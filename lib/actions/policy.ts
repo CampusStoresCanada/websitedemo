@@ -336,19 +336,19 @@ const REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS = [
   },
 ] as const;
 
-const REQUIRED_INTEGRATION_POLICY_DEFAULTS = [
-  {
-    key: "integration.conference_ops_masthead_org_ids",
-    category: "integrations",
-    type: "string_array",
-    label: "Conference Ops Masthead Org IDs",
-    description:
-      "Organization IDs whose org_admin users can access the conference war-room tooling.",
-    value: [] as string[],
-    isHighRisk: true,
-    displayOrder: 50,
-  },
-] as const;
+// Empty since 2026-10-19: its one entry, the conference-ops organisation
+// allowlist, was replaced by per-conference desk staff appointments
+// (lib/conference/desk-staff.ts). Kept as the seeding slot for the next one.
+const REQUIRED_INTEGRATION_POLICY_DEFAULTS: ReadonlyArray<{
+  key: string;
+  category: string;
+  type: string;
+  label: string;
+  description: string;
+  value: unknown;
+  isHighRisk: boolean;
+  displayOrder: number;
+}> = [];
 
 type BillingPolicySeed = (typeof REQUIRED_BILLING_POLICY_DEFAULTS)[number];
 type RetentionConsentPolicySeed =
@@ -1405,25 +1405,6 @@ export async function getImpactPreview(
           ? "Legacy Circle fallback path enabled — safe rollback available during cutover"
           : "⚠️ Legacy Circle fallback DISABLED — no rollback path if cutover encounters issues",
       });
-    }
-
-    if (change.key === "integration.conference_ops_masthead_org_ids") {
-      const oldList = (change.oldValue as string[]) ?? [];
-      const newList = (change.newValue as string[]) ?? [];
-      const added = newList.filter((orgId) => !oldList.includes(orgId));
-      const removed = oldList.filter((orgId) => !newList.includes(orgId));
-      if (added.length > 0) {
-        impacts.push({
-          category: "integrations",
-          description: `Masthead ops access granted to org IDs: ${added.join(", ")}`,
-        });
-      }
-      if (removed.length > 0) {
-        impacts.push({
-          category: "integrations",
-          description: `Masthead ops access revoked from org IDs: ${removed.join(", ")}`,
-        });
-      }
     }
 
     // Scheduling impact

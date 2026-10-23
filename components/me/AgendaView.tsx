@@ -176,6 +176,19 @@ export default function AgendaView({
                     {conflicted.has(item.id) && (
                       <span className="ml-2 text-xs font-semibold text-amber-700">overlaps</span>
                     )}
+                    {/* Counted: the record bursary travellers look for. */}
+                    {agenda.counted?.[item.id] ? (
+                      <span className="ml-2 text-xs font-semibold text-emerald-700">
+                        ✓ Counted
+                        {item.meetingAssignment
+                          ? agenda.counted[item.id].attendee && agenda.counted[item.id].exhibitor
+                            ? " · both sides confirmed"
+                            : agenda.counted[item.id].exhibitor
+                              ? " · confirmed by the exhibitor"
+                              : ""
+                          : ""}
+                      </span>
+                    ) : null}
                   </span>
                   {(() => {
                     /**

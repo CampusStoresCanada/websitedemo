@@ -23,6 +23,7 @@ import type {
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import type { PresentationLevel } from "@/lib/presentation/mode";
 import { loginWithNext } from "@/lib/auth/login-redirect";
+import { inForceOrgLinkFilter } from "@/lib/auth/org-link";
 
 // Client-safe fallback matching lib/policy/engine.ts's server-only
 // defaultMembershipPrograms() — only used if this provider somehow mounts
@@ -452,6 +453,8 @@ export function AuthProvider({
           )
           .eq("user_id", userId)
           .eq("status", "active")
+          // A link past its end date is off from that day, nightly run or not.
+          .or(inForceOrgLinkFilter())
           .abortSignal(signal as AbortSignal)),
         // Capabilities follow the roles this person currently holds.
         mark("capabilities", supabase.rpc("current_capabilities", { p_subject: userId })

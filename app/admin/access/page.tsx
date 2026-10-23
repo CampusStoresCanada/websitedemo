@@ -34,7 +34,12 @@ export default async function AccessGrantsPage({
     .select("*")
     .order("term_start", { ascending: false })) as { data: any[] | null };
 
-  const rows = (appointments ?? []).map((a) => ({
+  // Desk staff live on their conference's Days & Setup page, not here.
+  const governanceAppointments = (appointments ?? []).filter(
+    (a) => a.capability !== "conference.desk_staff"
+  );
+
+  const rows = governanceAppointments.map((a) => ({
     id: a.assignment_id as string,
     subjectId: a.subject_id as string,
     name: (a.display_name as string) ?? "Unknown",

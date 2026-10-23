@@ -429,6 +429,49 @@ function familyCssFor(family: BadgeBackBlock["family"]): string {
 }
 
 /**
+ * How a back block reads: the schedule and access summary. ⛔ ONE copy, shared
+ * by the printed badge and the desk's schedule sticker (renderScheduleLabel),
+ * so a reprinted schedule reads exactly like the printed ones.
+ */
+const BACK_BLOCK_CSS = `
+      .back-block {
+        position: absolute;
+        color: #14161a;
+        line-height: 1.25;
+      }
+      /* Flow groups stack; the gap is what keeps a long access summary from
+         touching the schedule heading below it. */
+      .bb-group + .bb-group { margin-top: 1.1em; }
+      .bb-head {
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        font-size: 0.86em;
+        margin-bottom: 0.5em;
+      }
+      .bb-day {
+        font-weight: 700;
+        margin-top: 0.55em;
+      }
+      .bb-item {
+        display: flex;
+        gap: 0.5em;
+      }
+      .bb-time {
+        flex: 0 0 auto;
+        width: 5.8em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .bb-name { flex: 1 1 auto; }
+      .bb-room { opacity: 0.62; }
+      .bb-room::before { content: " · "; }
+      .bb-more { font-style: italic; opacity: 0.75; margin-top: 0.3em; }
+      /* Operator wording (the QR caption, the venue's extra line) keeps the line
+         breaks it was typed with. */
+      .bb-row { white-space: pre-line; }`;
+
+/**
  * Every back block, laid out.
  *
  * Flow blocks share one column so a type with a long agenda pushes down instead
@@ -1106,39 +1149,7 @@ export function renderJobDocumentHtml(params: {
       /* The static map request suppresses Mapbox's burnt-in credit, which used to
          print inside the trim on the front. Mapbox's terms allow that only if the
          attribution appears elsewhere in the product -- this is that elsewhere. */
-      .back-block {
-        position: absolute;
-        color: #14161a;
-        line-height: 1.25;
-      }
-      /* Flow groups stack; the gap is what keeps a long access summary from
-         touching the schedule heading below it. */
-      .bb-group + .bb-group { margin-top: 1.1em; }
-      .bb-head {
-        font-weight: 700;
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-        font-size: 0.86em;
-        margin-bottom: 0.5em;
-      }
-      .bb-day {
-        font-weight: 700;
-        margin-top: 0.55em;
-      }
-      .bb-item {
-        display: flex;
-        gap: 0.5em;
-      }
-      .bb-time {
-        flex: 0 0 auto;
-        width: 5.8em;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .bb-name { flex: 1 1 auto; }
-      .bb-room { opacity: 0.62; }
-      .bb-room::before { content: " · "; }
-      .bb-more { font-style: italic; opacity: 0.75; margin-top: 0.3em; }
+      ${BACK_BLOCK_CSS}
       .map-credit {
         position: absolute;
         left: 0.125in;
@@ -1201,4 +1212,90 @@ export function renderJobDocumentHtml(params: {
     </main>
   </body>
 </html>`;
+}
+
+/**
+ * The desk's SCHEDULE sticker for a spare card (Stephen, 2026-10-20).
+ *
+ * A spare prints with its schedule area empty, so the reprint supplies the
+ * person's own schedule on the QL. ⛔ The badge back's flow column itself —
+ * same rows (backBlockRows), same styles, same line budget — narrowed to the
+ * roll's width, so it reads like every printed badge. Only the flow blocks:
+ * the QR and the venue have their own places on the card.
+ *
+ * The sticker is as long as the schedule. A browser cannot measure text here,
+ * so the length is ESTIMATED the way the badge budget already is (characters
+ * per line), with a margin: a few millimetres of spare film beats a cut-off
+ * last line.
+ */
+export function renderScheduleLabel(params: {
+  template: BadgeTemplateConfigV1;
+  person: BadgePersonRecord;
+  widthMm: number;
+}): { html: string; widthMm: number; heightMm: number } {
+  const { template, person, widthMm } = params;
+  const dpi = template.canvas.dpi;
+  const K = 96 / dpi;
+  const flow = (template.back.blocks ?? []).filter((b) => b.flow);
+  if (flow.length === 0 || (person.agenda.length === 0 && !person.access)) {
+    return { html: "", widthMm, heightMm: 0 };
+  }
+  const pad = (3 / 25.4) * dpi; // 3 mm, in design px
+  const widthDesign = (widthMm / 25.4) * dpi;
+  const blocks = flow.map((b, i) =>
+    i === 0 ? { ...b, x: pad, y: pad, width: widthDesign - 2 * pad } : { ...b, width: widthDesign - 2 * pad }
+  );
+  const body = renderBackBlocks({ blocks, person, venueAddress: null, onsiteContact: null, dpi, scaleX: K, scaleY: K });
+
+  // Estimate the column's height in CSS px, mirroring renderBackBlocks' budget.
+  const anchor = blocks[0];
+  const em = designPxFromPt(anchor.sizePt, dpi) * K;
+  const charsPerLine = Math.max(12, Math.floor(anchor.width / (designPxFromPt(anchor.sizePt, dpi) * 0.5)));
+  const budget = anchor.maxLines && anchor.maxLines > 0 ? anchor.maxLines : Infinity;
+  let lines = 0;
+  let extraEm = 0;
+  let groups = 0;
+  for (const block of blocks) {
+    const { heading, rows } = backBlockRows({ block, person, venueAddress: null, onsiteContact: null });
+    if (rows.length === 0) continue;
+    groups += 1;
+    if (heading) {
+      lines += 1;
+      extraEm += 0.5;
+    }
+    for (const row of rows) {
+      const wrapped = Math.max(1, Math.ceil(row.text.length / charsPerLine));
+      if (lines + wrapped > budget) continue;
+      lines += wrapped;
+      if (row.html.includes('class="bb-day"')) extraEm += 0.55;
+    }
+  }
+  extraEm += Math.max(0, groups - 1) * 1.1;
+  // 📏 +8%: measured 103.7 mm of real text where the bare estimate said ~103.
+  const contentPx = (lines * 1.25 + extraEm) * em * 1.08;
+  const naturalMm = Math.ceil(((pad * K + contentPx + pad * K) * 25.4) / 96);
+
+  // ⛔ It must FIT THE CARD: from the top of the schedule area down to the QR,
+  // less a gap. The roll is narrower than the card's column, so a long schedule
+  // wraps more and runs longer than it does on a printed badge — 📏 a Full
+  // Conference schedule measured 104 mm against ~95 mm of room. Too long:
+  // scale the whole sticker down to the room, never into the QR.
+  const roomMm = Math.max(20, ((template.back.qr.y - flow[0].y) / dpi) * 25.4 - 2);
+  const scale = naturalMm > roomMm ? roomMm / naturalMm : 1;
+  const heightMm = Math.ceil(naturalMm * scale);
+
+  const fonts = template.fonts;
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://use.typekit.net/uxh8ckq.css" />
+<style>
+  @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
+  :root { --font-primary: ${fonts.primary}; --font-secondary: ${fonts.secondary}; --font-slab: ${fonts.slab}; }
+  html,body { margin:0; padding:0; background:transparent; }
+  .label { position:relative; width:${widthMm}mm; height:${heightMm}mm; overflow:hidden; }
+  .fit { transform: scale(${scale.toFixed(4)}); transform-origin: top left; }
+  ${BACK_BLOCK_CSS}
+  /* Thermal prints one colour. */
+  .back-block, .bb-room { color:#000; opacity:1; }
+</style></head><body><div class="label"><div class="fit">${body}</div></div></body></html>`;
+  return { html, widthMm, heightMm };
 }

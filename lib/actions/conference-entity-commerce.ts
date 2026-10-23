@@ -1,7 +1,14 @@
 "use server";
 
 import crypto from "node:crypto";
-import { canManageOrganization, isGlobalAdmin, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import {
+  canManageOrganization,
+  isGlobalAdmin,
+  requireAdmin,
+  requireAuthenticated,
+  isConferenceDeskStaff,
+  type AuthContext,
+} from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { EntityKind } from "@/lib/actions/conference-entities";
 import { resolveAssigneeForEmail } from "@/lib/actions/conference-people";
@@ -11,6 +18,9 @@ import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
 import { findUserByEmail } from "../supabase/user-lookup";
+import { resolveChosenPerson } from "../conference/registration-mint";
+import { seatIncludedEvents } from "../conference/included-seats";
+import { releaseSeat } from "../conference/release-seat";
 
 /**
  * v3 fulfill — the read/allocate side. The buy-side (cart → checkout → mint)
@@ -74,6 +84,21 @@ export type OrgEntitySeat = {
   holderName: string | null;
 };
 
+/**
+ * Who may manage an organisation's people and seats at a conference: its org
+ * admin, a global admin, or THAT conference's desk staff — who name walk-ups
+ * to a company's open seats at the check-in desk.
+ * ⛔ The one check for this file; do not inline it again.
+ */
+async function canManageOrgSeats(
+  ctx: AuthContext,
+  organizationId: string,
+  conferenceId: string | null
+): Promise<boolean> {
+  if (canManageOrganization(ctx, organizationId) || isGlobalAdmin(ctx.globalRole)) return true;
+  return conferenceId ? isConferenceDeskStaff(ctx, conferenceId) : false;
+}
+
 /** Every allocatable seat an org holds for a conference, with who (if anyone) sits in it. */
 export async function listEntitySeatsForOrg(
   conferenceId: string,
@@ -81,7 +106,7 @@ export async function listEntitySeatsForOrg(
 ): Promise<Result<OrgEntitySeat[]>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -138,13 +163,13 @@ export async function allocateSeat(
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || (!canManageOrganization(auth.ctx, seat.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id, seat.conference_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
   const { data: person, error: personErr } = await db
     .from("conference_people")
-    .select("conference_id, organization_id")
+    .select("conference_id, organization_id, person_kind")
     .eq("id", personId)
     .single();
   if (personErr || !person) return { success: false, error: personErr?.message ?? "Person not found." };
@@ -206,11 +231,21 @@ export async function allocateSeat(
     return { success: false, error: "This seat was just assigned to someone else — refresh and try again." };
   }
 
-  const { error: personUpdateError } = await db
-    .from("conference_people")
-    .update({ person_kind: tier.personKind, registration_tier: tier.tierLabel })
-    .eq("id", personId);
-  if (personUpdateError) return { success: false, error: personUpdateError.message };
+  // ⛔ Only a REGISTRATION says what kind of attendee someone is. Seating an
+  // exhibitor in the Meet & Greet used to make them a "delegate" labelled
+  // "Meet & Greet Reception" (6 people relabelled by 2026-10-21). Any other
+  // seat names a type only for somebody who has none yet: a guest given just a
+  // reception ticket at the door is still somebody the desk can find.
+  if (entity.kind === "registration" || person.person_kind === "unassigned") {
+    const { error: personUpdateError } = await db
+      .from("conference_people")
+      .update({ person_kind: tier.personKind, registration_tier: tier.tierLabel })
+      .eq("id", personId);
+    if (personUpdateError) return { success: false, error: personUpdateError.message };
+  }
+
+  // Whoever holds a registration holds what it includes (included-seats.ts).
+  if (entity.kind === "registration") await seatIncludedEvents(db, seat.conference_id, seatId, personId);
 
   return { success: true, data: { warning } };
 }
@@ -223,26 +258,20 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   const db = createAdminClient();
   const { data: seat, error: seatErr } = await db
     .from("entity_balance_seats")
-    .select("organization_id, holder_person_id")
+    .select("organization_id, conference_id")
     .eq("id", seatId)
     .single();
   if (seatErr || !seat) return { success: false, error: seatErr?.message ?? "Seat not found." };
-  if (!seat.organization_id || (!canManageOrganization(auth.ctx, seat.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
+  if (!seat.organization_id || !(await canManageOrgSeats(auth.ctx, seat.organization_id, seat.conference_id))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
-  const { error } = await db.from("entity_balance_seats").update({ holder_person_id: null }).eq("id", seatId);
-  if (error) return { success: false, error: error.message };
-
-  if (seat.holder_person_id) {
-    await db
-      .from("conference_people")
-      .update({ person_kind: "unassigned", registration_tier: null })
-      .eq("id", seat.holder_person_id);
-  }
+  const released = await releaseSeat(db, seat.conference_id, seatId, auth.ctx.userId ?? null);
+  if (!released.ok) return { success: false, error: released.error };
 
   return { success: true, data: null };
 }
+
 
 /**
  * Declare how many of this entity's purchased seats the org actually plans
@@ -260,7 +289,7 @@ export async function setEntityUsageIntent(
 ): Promise<Result<null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
   if (!Number.isInteger(intendedQuantity) || intendedQuantity < 0) {
@@ -332,15 +361,20 @@ export async function findExistingUserByEmail(email: string): Promise<string | n
  * matching an existing platform user is linked immediately. A new email is
  * invited via resolveAssigneeForEmail(), parked as pending_user_activation
  * until that person logs in.
+ *
+ * ⛔ A `contactId` is a person someone already picked. It is never re-matched
+ * by email: Alice and Bob on info@store.ca are two people, and assigning Bob
+ * must seat Bob (resolveChosenPerson decides whether the address's login is
+ * his to have).
  */
 export async function addConferenceAttendee(
   conferenceId: string,
   organizationId: string,
-  attendee: { displayName: string; contactEmail: string | null }
+  attendee: { displayName: string; contactEmail: string | null; contactId?: string | null }
 ): Promise<Result<{ id: string; assignmentStatus: "assigned" | "pending_user_activation"; invited: boolean }>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (!(await canManageOrgSeats(auth.ctx, organizationId, conferenceId))) {
     return { success: false, error: "Not authorized for this organization." };
   }
 
@@ -353,7 +387,16 @@ export async function addConferenceAttendee(
   let canonicalPersonId: string | null = null;
   let assignedEmailSnapshot: string | null = null;
 
-  if (trimmedEmail) {
+  const db = createAdminClient();
+
+  if (attendee.contactId) {
+    const chosen = await resolveChosenPerson(db, organizationId, attendee.contactId, trimmedEmail);
+    if (!chosen) return { success: false, error: "That person isn't at this organization." };
+    userId = chosen.userId;
+    assignmentStatus = chosen.assignmentStatus;
+    canonicalPersonId = chosen.contactId;
+    assignedEmailSnapshot = chosen.assignedEmailSnapshot;
+  } else if (trimmedEmail) {
     const existingUserId = await findExistingUserByEmail(trimmedEmail);
     const resolved = await resolveAssigneeForEmail({
       organizationId,
@@ -367,8 +410,6 @@ export async function addConferenceAttendee(
     assignedEmailSnapshot = assignmentStatus === "pending_user_activation" ? resolved.data.normalizedEmail : null;
   }
 
-  const db = createAdminClient();
-
   // Reuse an existing conference_people row for this same person at this
   // conference/org, if one already exists — e.g. they're already seated in
   // a different registration line. Inserting unconditionally every call was
@@ -379,13 +420,17 @@ export async function addConferenceAttendee(
   // checkbox matrix even though it was really allocated. Only possible when
   // there's an email to match on — a name-only walk-in still always inserts
   // fresh, matching the shipped fix's same limitation.
-  if (trimmedEmail) {
-    const { data: existing } = await db
+  if (attendee.contactId || trimmedEmail) {
+    const lookup = db
       .from("conference_people")
       .select("id, assignment_status")
       .eq("conference_id", conferenceId)
-      .eq("organization_id", organizationId)
-      .ilike("contact_email", trimmedEmail)
+      .eq("organization_id", organizationId);
+    // A picked person's own row is found by WHO they are, never the address's.
+    const { data: existing } = await (attendee.contactId
+      ? lookup.eq("canonical_person_id", attendee.contactId)
+      : lookup.ilike("contact_email", trimmedEmail!)
+    )
       .limit(1)
       .maybeSingle();
     if (existing) {
@@ -427,37 +472,3 @@ export async function addConferenceAttendee(
   };
 }
 
-/** Remove a manually added attendee (frees any seats they hold first). */
-export async function removeConferenceAttendee(personId: string): Promise<Result<null>> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const db = createAdminClient();
-  const { data: person, error: personErr } = await db
-    .from("conference_people")
-    .select("organization_id, source_type")
-    .eq("id", personId)
-    .single();
-  if (personErr || !person) return { success: false, error: personErr?.message ?? "Person not found." };
-  if (!person.organization_id || (!canManageOrganization(auth.ctx, person.organization_id) && !isGlobalAdmin(auth.ctx.globalRole))) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
-  if (person.source_type !== "manual") {
-    return { success: false, error: "Only manually added attendees can be removed here." };
-  }
-
-  await db.from("entity_balance_seats").update({ holder_person_id: null }).eq("holder_person_id", personId);
-  const { error } = await db.from("conference_people").delete().eq("id", personId);
-  if (error) return { success: false, error: error.message };
-
-  await logAuditEventSafe({
-    action: "conference_attendee_removed",
-    entityType: "conference_people",
-    entityId: personId,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: { organizationId: person.organization_id },
-  });
-
-  return { success: true, data: null };
-}

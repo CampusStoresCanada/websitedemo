@@ -8,6 +8,7 @@ import {
 import { archivePersonContact } from "@/lib/identity/lifecycle";
 import { enqueueContactCircleDeprovisioning } from "@/lib/circle/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { releaseSeatsForContact } from "@/lib/conference/release-seat";
 
 interface DeleteContactParams {
   contactId: string;
@@ -79,6 +80,14 @@ export async function deleteContact({
     console.log("Name:", contact.name);
     console.log("Deleted by:", userEmail);
     console.log("=======================");
+
+    // ⛔ A deleted person holds no seats: they used to keep them, and their
+    // roster entry with them, unseen on the org page (release-seat.ts).
+    try {
+      await releaseSeatsForContact(supabase, contactId, auth.ctx.userId ?? null);
+    } catch (error) {
+      console.error("[delete-contact] could not release their conference seats:", error);
+    }
 
     // Queue Circle de-provisioning (fire-and-forget)
     void enqueueContactCircleDeprovisioning(contactId);

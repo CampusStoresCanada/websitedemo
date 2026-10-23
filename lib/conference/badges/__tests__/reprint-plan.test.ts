@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planReprint, suggestStock } from "../reprint-plan";
+import { blankCardKey, planReprint, suggestStock } from "../reprint-plan";
 
 /**
  * ⛔ The delta follows the CARD, not the person. A QL cannot overprint a rigid
@@ -49,46 +49,62 @@ describe("the write the desk must not skip", () => {
 });
 
 describe("which stock to reach for", () => {
-  const orgs = ["org-crestar"];
+  // A blank is printed for a company AND a registration type.
+  const blanks = [blankCardKey("org-crestar", "reg-full")];
+  // Spares are generic within a badge LOOK: the schedule prints at the desk.
+  const stacks = [
+    { label: "Delegate", typeIds: ["reg-full", "reg-day", "reg-board"], count: 35 },
+    { label: "Exhibitor", typeIds: ["reg-exhibitor"], count: 48 },
+  ];
 
-  it("suggests the company blank when that company has an unnamed seat", () => {
-    expect(
-      suggestStock({
-        organizationId: "org-crestar",
-        unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: true,
-      }).stock
-    ).toBe("company_blank");
+  it("suggests the company blank when that company has an unnamed seat of their type", () => {
+    const r = suggestStock({ organizationId: "org-crestar", unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: stacks });
+    expect(r.stock).toBe("company_blank");
   });
 
-  it("falls back to desk stock when the company has none", () => {
-    expect(
-      suggestStock({
-        organizationId: "org-other",
-        unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: true,
-      }).stock
-    ).toBe("spare");
+  // ⛔ The blank's back carries the schedule of the seat it was printed for.
+  it("never suggests a company blank of another registration type", () => {
+    const r = suggestStock({ organizationId: "org-crestar", unnamedSeatKeys: blanks, registrationTypeId: "reg-day", registrationTypeName: "Day Pass", spareStacks: stacks });
+    expect(r.cards.companyBlank).toBe(false);
+    expect(r.stock).toBe("spare");
+  });
+
+  // ⛔ Stephen, 2026-10-20: no more forecasting by type. A small type no longer
+  // rounds to zero — any delegate spare fits a Day Pass holder.
+  it("any spare of their badge's look fits, whatever their type", () => {
+    const r = suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-day", registrationTypeName: "Day Pass", spareStacks: stacks });
+    expect(r.stock).toBe("spare");
+    expect(r.cards).toEqual({ companyBlank: false, spareCount: 35, spareLabel: "Delegate", typeName: "Day Pass" });
+  });
+
+  it("an exhibitor gets an exhibitor spare, never a delegate one", () => {
+    const r = suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-exhibitor", spareStacks: stacks });
+    expect(r.cards).toMatchObject({ spareCount: 48, spareLabel: "Exhibitor" });
   });
 
   it("says none when the run carried no spares", () => {
     expect(
-      suggestStock({
-        organizationId: "org-other",
-        unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: false,
-      }).stock
+      suggestStock({ organizationId: "org-other", unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: [] }).stock
     ).toBe("none");
   });
 
   it("does not let one company's blank cover another company's person", () => {
     expect(
-      suggestStock({
-        organizationId: null,
-        unnamedSeatOrganizationIds: orgs,
-        sparesWerePrinted: false,
-      }).stock
+      suggestStock({ organizationId: null, unnamedSeatKeys: blanks, registrationTypeId: "reg-full", spareStacks: [] }).stock
     ).toBe("none");
+  });
+
+  it("a spare reprint prints the schedule; a company blank already has it", () => {
+    expect(planReprint({ stock: "spare", personIsSeated: true }).delta).toContain("schedule");
+    expect(planReprint({ stock: "company_blank", personIsSeated: true }).delta).not.toContain("schedule");
+    // ...unless they hold something their type doesn't include: the blank's
+    // back carries the TYPE's schedule, so theirs is added (Stephen, 2026-10-22).
+    expect(planReprint({ stock: "company_blank", personIsSeated: true, holdsExtras: true }).delta).toEqual([
+      "name",
+      "title",
+      "qr",
+      "schedule",
+    ]);
   });
 });
 

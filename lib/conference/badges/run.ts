@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadSeatHoldings } from "@/lib/conference/seats";
 import { getBadgeScanRules } from "@/lib/conference/badges/rules";
 import {
+  admittedDates,
   summarizeAccess,
   summarizeAgenda,
   type AccessSummary,
@@ -84,6 +85,8 @@ export type BadgeRun = {
     personId: string;
     access: AccessSummary;
     agenda: AgendaItem[];
+    /** Dates they may be on site — the check-in rule (admittedDates). */
+    admittedDates?: string[];
   }>;
   /**
    * People named to seats of more than one registration type. One person gets
@@ -300,6 +303,8 @@ export async function resolveBadgeRun(conferenceId: string): Promise<BadgeRun> {
     personId,
     access: summarizeAccess(heldIds, byId),
     agenda: summarizeAgenda(heldIds, byId, onsiteAgendaOptions),
+    // The check-in rule's dates — see admittedDates.
+    admittedDates: admittedDates(heldIds, byId),
   }));
 
   return { types, peopleInMultipleTypes, venueAddress, entitlements };

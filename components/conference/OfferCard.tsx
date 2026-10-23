@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { addOfferToCart } from "@/lib/actions/conference-commerce";
+import { addOfferToCart, type AttendeeRef } from "@/lib/actions/conference-commerce";
 import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
@@ -15,6 +15,8 @@ export default function OfferCard({
   compact = false,
   highlighted = false,
   goToAfterAdd,
+  touch = false,
+  attendee = null,
 }: {
   offer: ConferenceOffer;
   conferenceId: string;
@@ -31,6 +33,13 @@ export default function OfferCard({
   highlighted?: boolean;
   /** Where to send the buyer once the add succeeds. Omit to stay put. */
   goToAfterAdd?: string;
+  /** Finger-sized button, for the check-in desk on an iPad. */
+  touch?: boolean;
+  /**
+   * Who a registration is for, when the buyer already said — the desk names the
+   * walk-up before choosing, so the seat is minted named. Events ignore it.
+   */
+  attendee?: AttendeeRef | null;
 }) {
   const router = useRouter();
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
@@ -44,12 +53,18 @@ export default function OfferCard({
         organizationId,
         offerEntityId: offer.id,
         quantity: 1,
+        ...(attendee && offer.kind === "registration" ? { attendees: [attendee] } : {}),
       });
       if (res.success) dispatchConferenceCartUpdated(organizationId);
       setFeedback(
         res.success
           ? {
-              text: offer.kind === "registration" ? "Added to cart — assign who it's for in the cart." : "Added to cart.",
+              text:
+                offer.kind === "registration" && !attendee
+                  ? "Added to cart — assign who it's for in the cart."
+                  : attendee && offer.kind === "registration"
+                    ? `Added for ${attendee.name}.`
+                    : "Added to cart.",
               ok: true,
             }
           : { text: res.error, ok: false }
@@ -124,7 +139,9 @@ export default function OfferCard({
         <button
           onClick={add}
           disabled={disabled}
-          className="w-full rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50"
+          className={`w-full rounded-md bg-[#EE2A2E] px-4 font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50 ${
+            touch ? "min-h-12 text-base" : "py-2 text-sm"
+          }`}
         >
           {isPending ? "Adding…" : offer.soldOut ? "Sold out" : "Add to cart"}
         </button>

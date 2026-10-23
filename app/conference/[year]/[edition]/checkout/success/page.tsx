@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isConferenceDeskStaff } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import { createAdminClient } from "@/lib/supabase/admin";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
@@ -13,12 +13,35 @@ export default async function ConferenceCheckoutSuccessPage({
   searchParams,
 }: {
   params: Promise<{ year: string; edition: string }>;
-  searchParams: Promise<{ org?: string }>;
+  /** `desk`: a sale started at this conference's check-in desk (its id). */
+  searchParams: Promise<{ org?: string; desk?: string }>;
 }) {
   const { year, edition } = await params;
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
+  // ⛔ A desk sale is paid on the ATTENDEE's own phone (scanning the desk's QR),
+  // signed out — or on the desk's iPad after a hand-over, signed in as staff.
+  // The first must not be sent to a login screen for having paid; the second
+  // goes straight back to the desk.
+  if (query.desk && /^[0-9a-f-]{36}$/i.test(query.desk)) {
+    // Only the desk's own staff go back to the desk; an attendee who happens to
+    // be signed in on their own phone just sees the thank-you.
+    if (auth.ok && (await isConferenceDeskStaff(auth.ctx, query.desk))) {
+      redirect(`/admin/conference/${query.desk}/check-in`);
+    }
+    return (
+      <main className="max-w-xl mx-auto py-16 px-4 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+          <svg className="h-8 w-8 text-green-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+          </svg>
+        </div>
+        <h1 className="text-2xl font-semibold text-gray-900">Payment received</h1>
+        <p className="mt-3 text-base text-gray-700">Thank you. You can head back to the desk for your badge.</p>
+      </main>
+    );
+  }
   if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/checkout/success`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);

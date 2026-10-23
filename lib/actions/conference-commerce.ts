@@ -4,7 +4,8 @@ import crypto from "node:crypto";
 import {
   isGlobalAdmin,
   requireAuthenticated,
-  requireConferenceOpsAccess,
+  requireConferenceDeskAccess,
+  requireOrgCommerceAccess,
 } from "@/lib/auth/guards";
 import { stripe } from "@/lib/stripe/client";
 import { resolveConferenceOrderTaxRates } from "@/lib/stripe/tax";
@@ -81,8 +82,6 @@ interface CheckoutInput {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey?: string;
-  /** Desk sale: conference ops transacting for an attending org. */
-  allowConferenceOps?: boolean;
   /**
    * ⛔ How they are paying. "invoice" sends the ORGANISATION a Stripe invoice
    * instead of taking a card now — Carolyn's actual sentence at the desk is
@@ -96,40 +95,18 @@ interface CheckoutInput {
 }
 
 /**
- * ⛔ `allowConferenceOps` is an EXPLICIT capability, not a widened role.
- *
- * Conference operations staff sell on an attending organisation's behalf at the
- * desk — that is the job, and it is the same trust level that already lets them
- * create booth sales. But it is not something every commerce call should
- * inherit, so callers opt in one at a time and the flag names why.
- *
- * ⚠️ requireConferenceOpsAccess is NOT the same as isGlobalAdmin: it also passes
- * an org admin of an allowlisted masthead org. So a desk operator can be
- * conference ops and fail this check, which is exactly what blocked selling a
- * fifth badge to somebody standing at the desk.
+ * The storefront's org check, shaped for this module's callers.
+ * ⛔ The rule itself lives in requireOrgCommerceAccess — do not re-derive it here.
  */
 async function assertUserCanManageOrg(params: {
   organizationId: string;
-  allowConferenceOps?: boolean;
+  conferenceId: string;
 }): Promise<
   | { ok: true; userId: string; userEmail: string | null }
   | { ok: false; error: string }
 > {
-  const auth = await requireAuthenticated();
+  const auth = await requireOrgCommerceAccess(params.organizationId, params.conferenceId);
   if (!auth.ok) return { ok: false, error: auth.error };
-
-  let canAccess =
-    isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(params.organizationId);
-
-  if (!canAccess && params.allowConferenceOps) {
-    const ops = await requireConferenceOpsAccess();
-    canAccess = ops.ok;
-  }
-
-  if (!canAccess) {
-    return { ok: false, error: "You are not authorized to manage commerce for this organization." };
-  }
-
   return { ok: true, userId: auth.ctx.userId, userEmail: auth.ctx.userEmail };
 }
 
@@ -367,7 +344,17 @@ function linkedToIds(metadata: unknown): string[] {
   return [];
 }
 
-export type AttendeeRef = { name: string; email: string | null };
+export type AttendeeRef = {
+  name: string;
+  email: string | null;
+  /**
+   * The exact person (contacts.id) this seat is for, when someone already
+   * decided — the check-in desk, after its operator confirmed who they are.
+   * ⛔ An email is not a person: two people can share info@store.ca. With this
+   * set, the seat goes to THIS person instead of being re-matched by email.
+   */
+  contactId?: string | null;
+};
 
 /**
  * A registration cart line holds one attendee slot per unit of quantity —
@@ -385,7 +372,11 @@ function parseAttendees(metadata: unknown, quantity: number): (AttendeeRef | nul
     const entry = list[i];
     slots.push(
       entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
-        ? { name: (entry as { name: string }).name, email: (entry as { email?: string | null }).email ?? null }
+        ? {
+            name: (entry as { name: string }).name,
+            email: (entry as { email?: string | null }).email ?? null,
+            contactId: (entry as { contactId?: string | null }).contactId ?? null,
+          }
         : null
     );
   }
@@ -498,7 +489,7 @@ export async function getConferenceMembershipGateInfo(params: {
     }>
   | CommerceFailure
 > {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
@@ -566,7 +557,7 @@ export async function getConferenceCart(
   taxCents: number;
   totalCents: number;
 }> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId, conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
@@ -647,8 +638,6 @@ export async function addOfferToCart(params: {
   organizationId: string;
   offerEntityId: string;
   quantity?: number;
-  /** Desk sale: conference ops transacting for an attending org. */
-  allowConferenceOps?: boolean;
   /** One slot per unit being added — `null`/omitted entries are "assign later." Registration offers only. */
   attendees?: (AttendeeRef | null)[];
 }): Promise<
@@ -658,10 +647,7 @@ export async function addOfferToCart(params: {
     }>
   | CommerceFailure
 > {
-  const authz = await assertUserCanManageOrg({
-    organizationId: params.organizationId,
-    allowConferenceOps: params.allowConferenceOps,
-  });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const quantity = Math.max(1, params.quantity ?? 1);
@@ -1106,12 +1092,9 @@ export async function updateCartItemQuantity(params: {
 
     if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
-    if (
-      !isGlobalAdmin(auth.ctx.globalRole) &&
-      item.user_id !== auth.ctx.userId &&
-      !auth.ctx.activeOrgIds.includes(item.organization_id)
-    ) {
-      return { success: false, error: "Not authorized" };
+    if (item.user_id !== auth.ctx.userId) {
+      const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
+      if (!authz.ok) return { success: false, error: "Not authorized" };
     }
 
     if (params.quantity <= 0) {
@@ -1167,7 +1150,13 @@ export async function updateCartItemQuantity(params: {
  */
 /** email if present, else the trimmed lowercased name — the identity key used to spot the same person picked twice. */
 function attendeeKey(attendee: AttendeeRef): string {
-  return (attendee.email?.trim().toLowerCase() || attendee.name.trim().toLowerCase());
+  // A confirmed person first: two people on one shared inbox are not "the same
+  // person picked twice".
+  return (
+    attendee.contactId ||
+    attendee.email?.trim().toLowerCase() ||
+    attendee.name.trim().toLowerCase()
+  );
 }
 
 export async function setCartItemAttendee(params: {
@@ -1186,12 +1175,9 @@ export async function setCartItemAttendee(params: {
     .single();
   if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
-  if (
-    !isGlobalAdmin(auth.ctx.globalRole) &&
-    item.user_id !== auth.ctx.userId &&
-    !auth.ctx.activeOrgIds.includes(item.organization_id)
-  ) {
-    return { success: false, error: "Not authorized" };
+  if (item.user_id !== auth.ctx.userId) {
+    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
+    if (!authz.ok) return { success: false, error: "Not authorized" };
   }
 
   if (params.index < 0 || params.index >= item.quantity) {
@@ -1199,6 +1185,19 @@ export async function setCartItemAttendee(params: {
   }
 
   const slots = parseAttendees(item.metadata, item.quantity);
+
+  // A picked person must be someone at THIS organisation — the id is what the
+  // seat will be minted for, so it is never taken on the browser's word.
+  if (params.attendee?.contactId) {
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("id")
+      .eq("id", params.attendee.contactId)
+      .eq("organization_id", item.organization_id)
+      .is("archived_at", null)
+      .maybeSingle();
+    if (!contact) return { success: false, error: "That person isn't on this organization's contacts." };
+  }
 
   // Same person, two units of the same line — never legitimate (both units
   // grant the exact same access), so this is a hard block, not a warning.
@@ -1231,12 +1230,21 @@ export async function setCartItemAttendee(params: {
     const email = params.attendee.email.trim().toLowerCase();
 
     const [{ data: people }, { data: siblingItems }, entitiesRes, refsRes] = await Promise.all([
-      adminClient
-        .from("conference_people")
-        .select("id")
-        .eq("conference_id", item.conference_id)
-        .eq("organization_id", item.organization_id)
-        .ilike("contact_email", email),
+      // By WHO they are when known — on a shared address, by email would
+      // warn about the other person's registration.
+      params.attendee.contactId
+        ? adminClient
+            .from("conference_people")
+            .select("id")
+            .eq("conference_id", item.conference_id)
+            .eq("organization_id", item.organization_id)
+            .eq("canonical_person_id", params.attendee.contactId)
+        : adminClient
+            .from("conference_people")
+            .select("id")
+            .eq("conference_id", item.conference_id)
+            .eq("organization_id", item.organization_id)
+            .ilike("contact_email", email),
       adminClient
         .from("cart_items")
         .select("offer_entity_id, quantity, metadata")
@@ -1261,7 +1269,13 @@ export async function setCartItemAttendee(params: {
         : { data: [] as Array<{ entity_id: string }> };
 
     const siblingEntityIds = (siblingItems ?? [])
-      .filter((row) => parseAttendees(row.metadata, row.quantity).some((a) => a && a.email?.trim().toLowerCase() === email))
+      .filter((row) =>
+        parseAttendees(row.metadata, row.quantity).some((a) =>
+          a && params.attendee?.contactId && a.contactId
+            ? a.contactId === params.attendee.contactId
+            : a?.email?.trim().toLowerCase() === email
+        )
+      )
       .map((row) => row.offer_entity_id)
       .filter((id): id is string => Boolean(id));
 
@@ -1283,18 +1297,15 @@ export async function removeCartItem(cartItemId: string): Promise<CommerceSucces
   const adminClient = createAdminClient();
   const { data: item, error: itemError } = await adminClient
     .from("cart_items")
-    .select("id, user_id, organization_id, metadata")
+    .select("id, user_id, organization_id, conference_id, metadata")
     .eq("id", cartItemId)
     .single();
 
   if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
 
-  if (
-    !isGlobalAdmin(auth.ctx.globalRole) &&
-    item.user_id !== auth.ctx.userId &&
-    !auth.ctx.activeOrgIds.includes(item.organization_id)
-  ) {
-    return { success: false, error: "Not authorized" };
+  if (item.user_id !== auth.ctx.userId) {
+    const authz = await assertUserCanManageOrg({ organizationId: item.organization_id, conferenceId: item.conference_id });
+    if (!authz.ok) return { success: false, error: "Not authorized" };
   }
 
   // A membership-renewal line auto-attached to a booth can't be removed on
@@ -1335,7 +1346,7 @@ export async function clearCart(params: {
   conferenceId: string;
   organizationId: string;
 }): Promise<CommerceSuccess<null> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const adminClient = createAdminClient();
@@ -1365,10 +1376,7 @@ export async function clearCart(params: {
 export async function createConferenceCheckout(
   input: CheckoutInput
 ): Promise<CommerceSuccess<{ checkoutUrl: string; orderId: string; checkoutSessionId: string }> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({
-    organizationId: input.organizationId,
-    allowConferenceOps: input.allowConferenceOps,
-  });
+  const authz = await assertUserCanManageOrg({ organizationId: input.organizationId, conferenceId: input.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   /**
@@ -1384,7 +1392,7 @@ export async function createConferenceCheckout(
    * already been converted to a pending order, so a refusal would leave one
    * stranded holding inventory for the reservation window.
    *
-   * ⚠️ Deliberately NOT folded into allowConferenceOps. That flag says "ops may
+   * ⚠️ Deliberately NOT folded into requireOrgCommerceAccess. That says "ops may
    * transact for an org they do not belong to". This says "deferring payment is
    * a decision only staff can make". An org admin buying for their own org
    * passes the first and must still fail this one.
@@ -1395,8 +1403,10 @@ export async function createConferenceCheckout(
    * branch.
    */
   if (input.paymentMethod === "invoice") {
-    const opsForInvoice = await requireConferenceOpsAccess();
-    if (!opsForInvoice.ok) {
+    // Desk staff for THIS conference may invoice an existing company; nobody
+    // buying for themselves may.
+    const deskForInvoice = await requireConferenceDeskAccess(input.conferenceId);
+    if (!deskForInvoice.ok) {
       return { success: false, error: "Invoicing is only available to conference staff." };
     }
   }
@@ -1688,6 +1698,11 @@ export async function createConferenceCheckout(
           error: `Invoice sent but the entitlement did not mint: ${mintV3Error.message}`,
         };
       }
+      // ⛔ And NAME them now, not on invoice.paid: an invoiced walk-up at the
+      // desk is printed while they are standing there, and an unnamed seat has
+      // no badge. Same call the paid path makes; it only fills OPEN seats, so
+      // when invoice.paid runs it later there is nothing left to do.
+      await mintRegistrationAttendeesFromOrder(adminClient, order.id, input.conferenceId, input.organizationId);
       /**
        * ⚠️ v3 ONLY, deliberately. process_conference_order_paid also calls
        * mint_grant_balances_for_order — the LEGACY grant model — but that
@@ -1833,7 +1848,7 @@ export async function listConferenceOrdersForOrganization(params: {
   conferenceId: string;
   organizationId: string;
 }): Promise<CommerceSuccess<OrderRow[]> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId, conferenceId: params.conferenceId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const adminClient = createAdminClient();

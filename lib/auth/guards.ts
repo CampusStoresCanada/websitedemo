@@ -6,12 +6,13 @@ import { createClient } from "@/lib/supabase/server";
 import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { CAPABILITY } from "@/lib/constants/capabilities";
-import { getIntegrationConfig } from "@/lib/policy/engine";
+import { holdsDeskStaff } from "@/lib/conference/desk-staff";
 import type { GlobalRole, UserOrganization, UserProfile } from "./types";
 import {
   readPresentationMode,
   type PresentationLevel,
 } from "@/lib/presentation/mode";
+import { inForceOrgLinkFilter } from "@/lib/auth/org-link";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -38,6 +39,8 @@ export interface AuthContext {
    * is not admin/super_admin.
    */
   presentationMode: PresentationLevel | null;
+  /** When they last actually signed in (seconds since epoch), or null. */
+  signedInAt: number | null;
 }
 
 export interface GuardFailure {
@@ -80,7 +83,20 @@ export type IdentitySnapshot =
        *  than null on failure — a capability is a grant, so the safe direction
        *  when we cannot resolve one is "not held". */
       capabilities: string[];
+      /** When this person last actually AUTHENTICATED (seconds since epoch),
+       *  from the token's `amr` — kept across token refreshes. Null if absent. */
+      signedInAt: number | null;
     };
+
+/** The latest authentication time in a token's `amr` claim, or null. */
+function latestAuthenticationAt(claims: Record<string, unknown> | undefined): number | null {
+  const amr = claims?.amr;
+  if (!Array.isArray(amr)) return null;
+  const times = amr
+    .map((entry) => (entry && typeof entry === "object" ? (entry as { timestamp?: unknown }).timestamp : null))
+    .filter((t): t is number => typeof t === "number");
+  return times.length ? Math.max(...times) : null;
+}
 
 export const getIdentitySnapshot = cache(
   async (): Promise<IdentitySnapshot> => {
@@ -119,7 +135,9 @@ export const getIdentitySnapshot = cache(
         `
         )
         .eq("user_id", userId)
-        .eq("status", "active"),
+        .eq("status", "active")
+        // A link past its end date is off from that day, nightly run or not.
+        .or(inForceOrgLinkFilter()),
       // Capabilities come from governance_role_assignments via a SECURITY
       // DEFINER function, NOT from a flag on profiles. Roles are the single
       // place authority is recorded, so a capability follows the office and
@@ -152,6 +170,7 @@ export const getIdentitySnapshot = cache(
     capabilities,
     organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
     orgsError: orgsResult?.error ?? null,
+    signedInAt: latestAuthenticationAt(claimsData?.claims as Record<string, unknown> | undefined),
   };
 });
 
@@ -214,6 +233,7 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     isBenchmarkingReviewer,
     isBenchmarkingContentReviewer,
     capabilities: snapshot.capabilities,
+    signedInAt: snapshot.signedInAt,
     orgAdminOrgIds,
     activeOrgIds,
   };
@@ -225,6 +245,18 @@ export async function getOptionalAuthContext(): Promise<AuthContext | null> {
 
 export function isGlobalAdmin(role: GlobalRole): boolean {
   return role === "admin" || role === "super_admin";
+}
+
+/**
+ * Did this person sign in (password, link or recovery) within the last few
+ * minutes — not merely hold a long-lived session?
+ *
+ * ⛔ The proof the desk asks for before setting a new PIN without the old one
+ * ("forgot my PIN": sign in again, then choose a new one). A session refreshed
+ * all day does not count; only a real authentication does.
+ */
+export function signedInRecently(ctx: AuthContext, minutes = 15, now: number = Date.now()): boolean {
+  return ctx.signedInAt !== null && now / 1000 - ctx.signedInAt <= minutes * 60;
 }
 
 export function isSuperAdmin(role: GlobalRole): boolean {
@@ -340,61 +372,106 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   return auth;
 }
 
+/**
+ * May this person run THIS conference's desk today? Answers QUIETLY.
+ *
+ * Global admins, or anyone appointed `conference.desk_staff` for this
+ * conference on the Access page, for today (in the conference's time zone).
+ * See lib/conference/desk-staff.ts.
+ *
+ * ⛔ For deciding what a page SHOWS, or as a fallback inside another check.
+ * requireConferenceDeskAccess writes an "auth_guard_denied" row on every no,
+ * which feeds the Ops Health denial gauge and its >25/hour alarm; asking it to
+ * decide whether to show a company picker would log every browsing member.
+ */
+export async function isConferenceDeskStaff(
+  ctx: AuthContext,
+  conferenceId: string,
+): Promise<boolean> {
+  if (isGlobalAdmin(ctx.globalRole)) return true;
+  return holdsDeskStaff(ctx.userId, conferenceId);
+}
+
+/**
+ * The door to a conference's desk, war room and roster. Logs a refusal.
+ */
+export async function requireConferenceDeskAccess(conferenceId: string): Promise<GuardResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return auth;
+  if (await isConferenceDeskStaff(auth.ctx, conferenceId)) return auth;
+
+  await logAuditEventSafe({
+    action: "auth_guard_denied",
+    entityType: "auth_guard",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      guard: "requireConferenceDeskAccess",
+      reason: "no_desk_staff_appointment_for_today",
+      status: 403,
+      conferenceId,
+      role: auth.ctx.globalRole,
+    },
+  });
+  return { ok: false, status: 403, error: "Conference desk access required" };
+}
+
+/**
+ * Conference DESIGN and back-office work: badges, catalogue, schedule ops,
+ * legal, the scheduler. Global admins only.
+ *
+ * ⛔ Desk staff never pass this. They operate a conference, they do not design
+ * it — their door is requireConferenceDeskAccess. This used to also admit org
+ * admins of an allowlisted "masthead" organisation; that list was never filled
+ * in, and per-conference appointments replaced it.
+ */
 export async function requireConferenceOpsAccess(): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;
+  if (isGlobalAdmin(auth.ctx.globalRole)) return auth;
 
-  if (isGlobalAdmin(auth.ctx.globalRole)) {
-    return auth;
-  }
-
-  try {
-    const integration = await getIntegrationConfig();
-    const allowlist = integration.conference_ops_masthead_org_ids ?? [];
-    const hasAllowedOpsOrg = auth.ctx.orgAdminOrgIds.some((orgId) =>
-      allowlist.includes(orgId),
-    );
-    if (!hasAllowedOpsOrg) {
-      await logAuditEventSafe({
-        action: "auth_guard_denied",
-        entityType: "auth_guard",
-        actorId: auth.ctx.userId,
-        actorType: "user",
-        details: {
-          guard: "requireConferenceOpsAccess",
-          reason: "missing_masthead_ops_allowlist_membership",
-          status: 403,
-          role: auth.ctx.globalRole,
-          orgAdminOrgIds: auth.ctx.orgAdminOrgIds,
-        },
-      });
-      return {
-        ok: false,
-        status: 403,
-        error: "Conference ops access required",
-      };
-    }
-    return auth;
-  } catch (error) {
-    unstable_rethrow(error);
-    console.error("[auth/guards] requireConferenceOpsAccess failed", error);
-    await logAuditEventSafe({
-      action: "auth_guard_error",
-      entityType: "auth_guard",
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        guard: "requireConferenceOpsAccess",
-        status: 403,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-    return {
-      ok: false,
+  await logAuditEventSafe({
+    action: "auth_guard_denied",
+    entityType: "auth_guard",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      guard: "requireConferenceOpsAccess",
+      reason: "not_global_admin",
       status: 403,
-      error: "Conference ops access required",
-    };
+      role: auth.ctx.globalRole,
+    },
+  });
+  return { ok: false, status: 403, error: "Conference ops access required" };
+}
+
+/**
+ * May this person buy for, or manage the conference cart of, this organisation?
+ *
+ * ⛔ ONE ANSWER for every storefront action — offers, cart, attendee naming,
+ * checkout. Global admins, members of that organisation, and THIS
+ * conference's desk staff, who sell to walk-ups through the same offers page
+ * and cart everybody else uses.
+ *
+ * ⚠️ This is not the invoicing check. Deferring payment needs desk access
+ * inside createConferenceCheckout, because an org admin buying for their own
+ * org passes this and must still fail that.
+ */
+export async function requireOrgCommerceAccess(
+  organizationId: string,
+  conferenceId: string,
+): Promise<GuardResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return auth;
+  if (isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(organizationId)) {
+    return auth;
   }
+  if (await isConferenceDeskStaff(auth.ctx, conferenceId)) return auth;
+  return {
+    ok: false,
+    status: 403,
+    error: "You are not authorized to manage commerce for this organization.",
+  };
 }
 
 export async function requireReviewerOrAdmin(): Promise<GuardResult> {

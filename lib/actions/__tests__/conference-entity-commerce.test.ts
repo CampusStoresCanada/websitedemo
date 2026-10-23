@@ -7,6 +7,7 @@ const {
   createAdminClientMock,
   resolveAssigneeForEmailMock,
   logAuditEventSafeMock,
+  isConferenceDeskStaffMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
   canManageOrganizationMock: vi.fn(),
@@ -14,11 +15,14 @@ const {
   createAdminClientMock: vi.fn(),
   resolveAssigneeForEmailMock: vi.fn(),
   logAuditEventSafeMock: vi.fn(),
+  // Not conference ops unless a test says so.
+  isConferenceDeskStaffMock: vi.fn(async () => false),
 }));
 
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   requireAdmin: vi.fn(),
+  isConferenceDeskStaff: isConferenceDeskStaffMock,
   canManageOrganization: canManageOrganizationMock,
   isGlobalAdmin: isGlobalAdminMock,
 }));
@@ -35,7 +39,11 @@ vi.mock("@/lib/ops/audit", () => ({
   logAuditEventSafe: logAuditEventSafeMock,
 }));
 
-import { addConferenceAttendee, removeConferenceAttendee } from "../conference-entity-commerce";
+// addConferenceAttendee reuses resolveChosenPerson from registration-mint,
+// which also sends the registration confirmation.
+vi.mock("@/lib/comms/conference-triggers", () => ({ triggerConferenceRegistrationConfirmation: vi.fn() }));
+
+import { addConferenceAttendee } from "../conference-entity-commerce";
 
 const AUTH_OK = { ok: true, ctx: { userId: "admin-1", globalRole: "org_admin", activeOrgIds: ["org-1"] } };
 
@@ -96,47 +104,6 @@ function fakeClientForAdd(
                 }),
               };
             },
-          };
-        }
-        throw new Error(`Unexpected table: ${table}`);
-      },
-    },
-  };
-}
-
-function fakeClientForRemove(opts: { sourceType?: string; organizationId?: string | null }) {
-  const deleteSpy = vi.fn();
-  const seatUpdateSpy = vi.fn();
-  return {
-    spy: { deleteSpy, seatUpdateSpy },
-    client: {
-      from: (table: string) => {
-        if (table === "conference_people") {
-          return {
-            select: () => ({
-              eq: () => ({
-                single: async () => ({
-                  data: { organization_id: opts.organizationId ?? "org-1", source_type: opts.sourceType ?? "manual" },
-                  error: null,
-                }),
-              }),
-            }),
-            delete: () => ({
-              eq: (_col: string, id: string) => {
-                deleteSpy(id);
-                return { error: null };
-              },
-            }),
-          };
-        }
-        if (table === "entity_balance_seats") {
-          return {
-            update: (values: Record<string, unknown>) => ({
-              eq: (_col: string, id: string) => {
-                seatUpdateSpy(values, id);
-                return Promise.resolve({ error: null });
-              },
-            }),
           };
         }
         throw new Error(`Unexpected table: ${table}`);
@@ -292,28 +259,21 @@ describe("conference-entity-commerce attendees", () => {
     expect(fake.spy.insertSpy).not.toHaveBeenCalled();
   });
 
-  it("removeConferenceAttendee frees seats and deletes a manual-source row", async () => {
-    const fake = fakeClientForRemove({ sourceType: "manual" });
+  // ⛔ The check-in desk names a walk-up to their company's open seat. Desk
+  // staff are conference ops, not that company's admin.
+  it("lets conference ops add an attendee for a company they do not manage", async () => {
+    canManageOrganizationMock.mockReturnValue(false);
+    isGlobalAdminMock.mockReturnValue(false);
+    isConferenceDeskStaffMock.mockResolvedValueOnce(true);
+    const fake = fakeClientForAdd();
     createAdminClientMock.mockReturnValue(fake.client);
 
-    const result = await removeConferenceAttendee("person-1");
+    const result = await addConferenceAttendee("conf-1", "org-1", {
+      displayName: "Walk Up",
+      contactEmail: null,
+    });
 
     expect(result.success).toBe(true);
-    expect(fake.spy.seatUpdateSpy).toHaveBeenCalledWith({ holder_person_id: null }, "person-1");
-    expect(fake.spy.deleteSpy).toHaveBeenCalledWith("person-1");
-    expect(logAuditEventSafeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "conference_attendee_removed", entityId: "person-1" })
-    );
-  });
-
-  it("removeConferenceAttendee rejects rows that aren't source_type 'manual'", async () => {
-    const fake = fakeClientForRemove({ sourceType: "registration" });
-    createAdminClientMock.mockReturnValue(fake.client);
-
-    const result = await removeConferenceAttendee("person-1");
-
-    expect(result.success).toBe(false);
-    expect(fake.spy.deleteSpy).not.toHaveBeenCalled();
-    expect(logAuditEventSafeMock).not.toHaveBeenCalled();
+    expect(fake.spy.insertSpy).toHaveBeenCalled();
   });
 });
