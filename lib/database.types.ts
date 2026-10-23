@@ -4109,6 +4109,7 @@ export type Database = {
           created_at: string
           deadline_at: string | null
           description: string
+          document_ids: string[]
           hardens_because: string | null
           id: string
           name: string
@@ -4128,6 +4129,7 @@ export type Database = {
           created_at?: string
           deadline_at?: string | null
           description: string
+          document_ids?: string[]
           hardens_because?: string | null
           id?: string
           name: string
@@ -4147,6 +4149,7 @@ export type Database = {
           created_at?: string
           deadline_at?: string | null
           description?: string
+          document_ids?: string[]
           hardens_because?: string | null
           id?: string
           name?: string
@@ -4482,6 +4485,7 @@ export type Database = {
           bursary_goal_cents: number | null
           cart_reservation_minutes: number
           catering_cutoff: string | null
+          circle_spaces: Json
           created_at: string
           created_by: string | null
           documents: Json
@@ -4524,6 +4528,7 @@ export type Database = {
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
+          circle_spaces?: Json
           created_at?: string
           created_by?: string | null
           documents?: Json
@@ -4566,6 +4571,7 @@ export type Database = {
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
+          circle_spaces?: Json
           created_at?: string
           created_by?: string | null
           documents?: Json
@@ -8260,10 +8266,45 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "legal_acceptances_legal_version_id_fkey"
             columns: ["legal_version_id"]
             isOneToOne: false
             referencedRelation: "conference_legal_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
