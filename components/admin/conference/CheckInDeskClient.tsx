@@ -5,8 +5,10 @@ import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { listDeskCompanyContacts, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
 import {
+  listPrintStations,
   loadReprintPreview,
   sendReprintToQueue,
+  type PrintStationRow,
   type BadgeReprintReason,
   type ReprintPreview,
 } from "@/lib/actions/conference-badges";
@@ -301,6 +303,13 @@ const FAILED_SCAN_STATES = new Set([
 
 
 
+/** What a desk says when its sticker went to a printer nobody is running. */
+function offlineNote(label: string | null): string {
+  return label
+    ? `Sent, but ${label} is offline. Start CSC Print Station on that laptop.`
+    : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.";
+}
+
 interface CheckInDeskClientProps {
   conferenceId: string;
   initialRows: ConferencePerson[];
@@ -414,6 +423,44 @@ export default function CheckInDeskClient({
   );
   // The + menu and the camera picker under it.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
+  /**
+   * This device's printer (Stephen, 2026-10-22: one printer is today, desks
+   * must be able to keep their own). Picked once from the toolkit, kept on the
+   * device; null = whichever station claims it first, which with one printer
+   * is that printer. The picker only appears once there are two.
+   */
+  const [printStations, setPrintStations] = useState<PrintStationRow[]>([]);
+  const [deskPrinterId, setDeskPrinterId] = useState<string | null>(null);
+  const [printerPickerOpen, setPrinterPickerOpen] = useState(false);
+  const deskPrinterRef = useRef<string | null>(null);
+  const deskPrinterKey = `desk-printer:${conferenceId}`;
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(deskPrinterKey);
+      deskPrinterRef.current = saved;
+      setDeskPrinterId(saved);
+    } catch {
+      // No storage (private mode): every print goes to any printer.
+    }
+    void listPrintStations(conferenceId).then((res) => {
+      if (res.success) setPrintStations(res.data);
+    });
+  }, [conferenceId, deskPrinterKey]);
+  const chooseDeskPrinter = useCallback(
+    (stationId: string | null) => {
+      deskPrinterRef.current = stationId;
+      setDeskPrinterId(stationId);
+      setPrinterPickerOpen(false);
+      try {
+        if (stationId) window.localStorage.setItem(deskPrinterKey, stationId);
+        else window.localStorage.removeItem(deskPrinterKey);
+      } catch {
+        // Kept for this page load only.
+      }
+    },
+    [deskPrinterKey]
+  );
+
   const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
   // A panel is over the camera: drop the guide, soften the feed, stop reading.
   const panelOpen = lookupOpen || cameraPanelOpen;
@@ -1204,7 +1251,11 @@ export default function CheckInDeskClient({
         if (payload.labelPrintable === true && payload.badgePrintJobId) {
           // ⛔ One tap prints (Stephen, 2026-10-21): the reprint goes straight
           // to the print station, no second "Send to printer".
-          const sent = await sendReprintToQueue({ conferenceId, jobId: payload.badgePrintJobId });
+          const sent = await sendReprintToQueue({
+            conferenceId,
+            jobId: payload.badgePrintJobId,
+            stationId: deskPrinterRef.current,
+          });
           pushScanCard(
             sent.success ? "badge_reprinted" : "scan_failed",
             personId,
@@ -1212,7 +1263,7 @@ export default function CheckInDeskClient({
               ? sent.error
               : sent.data.stationOnline
                 ? null
-                : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.",
+                : offlineNote(sent.data.stationLabel),
             { jobId: payload.badgePrintJobId, labelPrintable: true, queued: sent.success }
           );
           setReprintOpenId(null);
@@ -1384,7 +1435,7 @@ export default function CheckInDeskClient({
   // "Send to print queue": the laptop beside the QL prints it (print station).
   const sendToPrintQueue = useCallback(
     async (cardId: string, jobId: string) => {
-      const res = await sendReprintToQueue({ conferenceId, jobId });
+      const res = await sendReprintToQueue({ conferenceId, jobId, stationId: deskPrinterRef.current });
       if (!res.success) {
         pushScanCard("scan_failed", null, res.error);
         return;
@@ -1396,9 +1447,7 @@ export default function CheckInDeskClient({
                 ...card,
                 printJob: { ...card.printJob, queued: true },
                 // Nothing will print it until a station is running.
-                detail: res.data.stationOnline
-                  ? card.detail
-                  : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.",
+                detail: res.data.stationOnline ? card.detail : offlineNote(res.data.stationLabel),
               }
             : card
         )
@@ -1617,6 +1666,14 @@ export default function CheckInDeskClient({
             // camera, not whatever iOS left of the old one.
             void startCameraScanner();
           }}
+        />
+      ) : null}
+      {printerPickerOpen ? (
+        <PrinterPicker
+          stations={printStations}
+          activeId={deskPrinterId}
+          onPick={chooseDeskPrinter}
+          onClose={() => setPrinterPickerOpen(false)}
         />
       ) : null}
       {/* ⛔ The door picker comes AFTER the PIN: it only shows once the desk is
@@ -2373,6 +2430,23 @@ export default function CheckInDeskClient({
                 }}
               />
             ) : null}
+            {printStations.length > 1 ? (
+              <ToolButton
+                size="lg"
+                showLabel
+                icon={<PrintIcon />}
+                label={`This desk prints to: ${
+                  printStations.find((s) => s.id === deskPrinterId)?.label ?? "any printer"
+                }`}
+                onClick={() => {
+                  setDeskMenuOpen(false);
+                  void listPrintStations(conferenceId).then((res) => {
+                    if (res.success) setPrintStations(res.data);
+                  });
+                  setPrinterPickerOpen(true);
+                }}
+              />
+            ) : null}
             <ToolButton
               size="lg"
               showLabel
@@ -2500,6 +2574,52 @@ function wallTime(hhmm: string): string {
  * event's window is open; reopened from the toolkit, where every event is
  * listed (reconciling afterwards, or an uncapped one like an AGM).
  */
+/** Which printer this desk device prints to. Kept on the device. */
+function PrinterPicker({
+  stations,
+  activeId,
+  onPick,
+  onClose,
+}: {
+  stations: PrintStationRow[];
+  activeId: string | null;
+  onPick: (stationId: string | null) => void;
+  onClose: () => void;
+}) {
+  const row = (id: string | null, label: string, detail: string) => (
+    <button
+      key={id ?? "any"}
+      type="button"
+      onClick={() => onPick(id)}
+      className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-xl px-5 py-3 text-left text-base font-semibold ${
+        id === activeId ? "bg-emerald-400 text-black" : "bg-white text-black"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="shrink-0 text-sm font-normal text-gray-600">{detail}</span>
+    </button>
+  );
+  return (
+    <div className="fixed inset-0 z-[90] flex flex-col items-center overflow-y-auto bg-gray-950 px-5 py-10 text-white">
+      <div className="w-full max-w-lg space-y-4">
+        <p className="text-2xl font-bold">Which printer does this desk use?</p>
+        <p className="text-sm text-gray-300">Reprints from this device print there. Each desk picks its own.</p>
+        <div className="space-y-2">
+          {stations.map((station) => row(station.id, station.label, station.online ? "online" : "offline"))}
+          {row(null, "Any printer", "whichever is free")}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="min-h-12 w-full rounded-xl border border-white/40 px-5 text-base font-semibold text-white"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DoorPicker({
   events,
   openNow,

@@ -80,6 +80,13 @@ describe("sending a sticker to the print station", () => {
     expect(updates).toHaveLength(0);
   });
 
+  it("refuses a printer that was removed, rather than print somewhere else", async () => {
+    const { sendReprintToQueue } = await actions();
+    const res = await sendReprintToQueue({ conferenceId: "conf-1", jobId: "job-1", stationId: "gone" });
+    expect(res.success).toBe(false);
+    expect(updates).toHaveLength(0);
+  });
+
   it("never touches a pre-printed run — only on-site reprints", async () => {
     jobRow = { ...jobRow, pipeline_type: "preprinted" };
     const { sendReprintToQueue } = await actions();
