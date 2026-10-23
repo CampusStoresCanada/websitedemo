@@ -4469,6 +4469,7 @@ export type Database = {
           bursary_goal_cents: number | null
           cart_reservation_minutes: number
           catering_cutoff: string | null
+          circle_spaces: Json
           created_at: string
           created_by: string | null
           documents: Json
@@ -4511,6 +4512,7 @@ export type Database = {
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
+          circle_spaces?: Json
           created_at?: string
           created_by?: string | null
           documents?: Json
@@ -4553,6 +4555,7 @@ export type Database = {
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
+          circle_spaces?: Json
           created_at?: string
           created_by?: string | null
           documents?: Json

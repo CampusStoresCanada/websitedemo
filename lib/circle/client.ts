@@ -289,19 +289,42 @@ export class CircleAdminClient {
     return result.records ?? (Array.isArray(result) ? result : []);
   }
 
-  async addMemberToSpace(spaceId: number, memberId: number): Promise<void> {
-    await this.request<void>("POST", `/spaces/${spaceId}/members`, {
-      body: { community_member_id: memberId },
+  /**
+   * Circle addresses space membership by email (`POST /space_members`). The
+   * previous `/spaces/{id}/members` + community_member_id shape is not an
+   * admin v2 endpoint; nothing had ever successfully queued through it.
+   */
+  async addMemberToSpace(spaceId: number, email: string): Promise<void> {
+    await this.request<void>("POST", "/space_members", {
+      body: { email, space_id: spaceId },
     });
   }
 
-  async removeMemberFromSpace(
-    spaceId: number,
-    memberId: number
-  ): Promise<void> {
-    await this.request<void>("DELETE", `/spaces/${spaceId}/members`, {
-      body: { community_member_id: memberId },
+  async removeMemberFromSpace(spaceId: number, email: string): Promise<void> {
+    await this.request<void>("DELETE", "/space_members", {
+      params: { email, space_id: spaceId },
     });
+  }
+
+  /** Community member ids of a space's active members (paginated, 100/page). */
+  async listSpaceMemberIds(spaceId: number): Promise<number[]> {
+    const ids: number[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.request<{
+        records: { community_member_id: number }[];
+        has_next_page: boolean;
+      }>("GET", "/space_members", {
+        params: { space_id: spaceId, status: "active", per_page: 100, page },
+      });
+      const records = result.records ?? [];
+      for (const row of records) {
+        if (typeof row.community_member_id === "number") ids.push(row.community_member_id);
+      }
+      if (!result.has_next_page || records.length === 0) break;
+      page++;
+    }
+    return ids;
   }
 
   // ---- Access Groups ------------------------------------------------------
