@@ -6,8 +6,10 @@ import {
   isGlobalAdmin,
   requireAdmin,
   requireAuthenticated,
+  requireConferenceDeskAccess,
   requireConferenceOpsAccess,
 } from "@/lib/auth/guards";
+import { logAuditEventSafe } from "@/lib/ops/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 // Imported via relative path (not the "@/" alias) so the Vitest suite, which
 // has no path-alias resolution, can load this module in unit tests.
@@ -20,7 +22,7 @@ import {
   type PolicyAcceptBy,
 } from "../constants/conference";
 import { requiredPolicyEntityIds, type Registrant } from "../conference/legal-policies";
-import { loadPolicyTargeting, computeMissingLegal } from "../conference/legal-acceptance";
+import { loadPolicyTargeting, computeMissingLegal, personOwedAgreements } from "../conference/legal-acceptance";
 import type { Database } from "@/lib/database.types";
 
 type LegalVersionRow = Database["public"]["Tables"]["conference_legal_versions"]["Row"];
@@ -688,70 +690,66 @@ export async function getPersonAssigneeLegalGate(
 ): Promise<{ success: boolean; error?: string; data?: { allAccepted: boolean; missing: string[] } }> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
+  // One rule, shared with the check-in desk (lib/conference/legal-acceptance.ts).
+  const owed = await personOwedAgreements(createAdminClient(), conferenceId, personId);
+  return { success: true, data: { allAccepted: owed.length === 0, missing: owed.map((o) => o.documentType) } };
+}
 
+/**
+ * Agreements accepted on the check-in desk's device (Stephen, 2026-10-23). The
+ * desk scanned their badge, showed what they owe, and they tapped I accept.
+ *
+ * ⛔ Recorded for the PERSON (their contact) so someone with no login can
+ * consent at all, and with their login too when they have one, so every other
+ * surface counts it. `recorded_by` is whose desk it was. Only what they still
+ * owe RIGHT NOW is recorded: the server recomputes it, the desk's list is not
+ * trusted.
+ */
+export async function acceptAgreementsAtDesk(params: {
+  conferenceId: string;
+  personId: string;
+  versionIds: string[];
+}): Promise<{ success: true; data: { stillOwed: number } } | { success: false; error: string }> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
   const db = createAdminClient();
   const { data: person } = await db
     .from("conference_people")
-    .select("user_id, organization_id")
-    .eq("conference_id", conferenceId)
-    .eq("id", personId)
+    .select("id, user_id, canonical_person_id")
+    .eq("conference_id", params.conferenceId)
+    .eq("id", params.personId)
     .maybeSingle();
-  if (!person) return { success: false, error: "Person not found." };
-
-  let audienceSourceRoles = ["member"];
-  if (person.organization_id) {
-    const { data: org } = await db
-      .from("organizations")
-      .select("type")
-      .eq("id", person.organization_id)
-      .maybeSingle();
-    // ⛔ Resolve through the CONFIGURED membership programs, never a string
-    // literal. `organizations.type` is capitalised and human-readable
-    // ("Vendor Partner"), so the old `=== "vendor_partner"` matched 0 of 210
-    // rows and every partner was silently evaluated against MEMBER documents.
-    // A comparator would have fixed today's spelling and left the trap armed;
-    // `programs.definitions` owns the org-type → tier mapping, so renaming a
-    // type or adding a third program keeps working without touching this file.
-    //
-    // ⚠️⚠️ THE FALLBACK IS `public`, NOT `member`. resolveConferenceTier returns
-    // 'public' for any org type the programs list does not name. 📏 As of
-    // 2026-09-08 `policy_values` has ZERO `programs.definitions` rows, so
-    // getProgramsConfig() falls through to defaultMembershipPrograms(), which
-    // maps Member → member and Vendor Partner → partner. **The correct answer
-    // here currently depends on that policy being UNSET.** The day somebody
-    // configures it through the admin UI and omits Vendor Partner, this line
-    // silently returns 'public' and partners lose their partner documents
-    // again — with no literal anywhere to grep for. That is the policy engine's
-    // design rather than something this call introduced, but it is the kind of
-    // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
-    // had before the vendor-partner fix — that bug was partners being swept into
-    // the member audience, and correcting it must not move anybody else.
-    //
-    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
-    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
-    // "member" here silently defeats it — CSC's own officers would be asked to
-    // accept a Member Code of Conduct again, with nothing failing loudly.
-    //
-    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
-    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site.
-    const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
+  if (!person) return { success: false, error: "That person is not on this conference." };
+  const contactId = (person.canonical_person_id as string | null) ?? null;
+  const userId = (person.user_id as string | null) ?? null;
+  if (!contactId && !userId) {
+    return { success: false, error: "There is no record to attach their acceptance to. Please see a staff lead." };
   }
-  const { data: seats } = await db
-    .from("entity_balance_seats")
-    .select("entity_id")
-    .eq("conference_id", conferenceId)
-    .eq("holder_person_id", personId);
-  const heldEntityIds = [...new Set((seats ?? []).map((s) => s.entity_id))];
 
-  const data = await computeMissingLegal(db, conferenceId, person.user_id ?? null, {
-    audienceSourceRoles,
-    heldEntityIds,
-    role: "assignee",
-  });
-  return { success: true, data };
+  const owed = await personOwedAgreements(db, params.conferenceId, params.personId);
+  const toAccept = owed.filter((o) => params.versionIds.includes(o.versionId));
+  for (const doc of toAccept) {
+    const { error } = await db.from("legal_acceptances").insert({
+      user_id: userId,
+      contact_id: contactId,
+      legal_version_id: doc.versionId,
+      accepted_via: "desk",
+      recorded_by: auth.ctx.userId,
+    });
+    // Already accepted (a race, or by their login meanwhile) is not a failure.
+    if (error && error.code !== "23505") return { success: false, error: error.message };
+  }
+  if (toAccept.length > 0) {
+    await logAuditEventSafe({
+      action: "conference_agreements_accepted_at_desk",
+      entityType: "conference_people",
+      entityId: params.personId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { conferenceId: params.conferenceId, documents: toAccept.map((d) => d.documentType) },
+    });
+  }
+  return { success: true, data: { stillOwed: owed.length - toAccept.length } };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -802,7 +800,8 @@ export async function getLegalAcceptanceStats(
   const acceptedUsers = new Set(
     (acceptancesRes.data ?? [])
       .map((row) => row.user_id)
-      .filter((userId) => requiredUsers.has(userId))
+      // A desk acceptance for someone with no login has no user to count.
+      .filter((userId): userId is string => !!userId && requiredUsers.has(userId))
   );
   const total = requiredUsers.size;
   const accepted = acceptedUsers.size;

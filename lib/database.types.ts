@@ -8230,24 +8230,33 @@ export type Database = {
       legal_acceptances: {
         Row: {
           accepted_at: string
+          accepted_via: string
+          contact_id: string | null
           id: string
           ip_address: string | null
           legal_version_id: string
-          user_id: string
+          recorded_by: string | null
+          user_id: string | null
         }
         Insert: {
           accepted_at?: string
+          accepted_via?: string
+          contact_id?: string | null
           id?: string
           ip_address?: string | null
           legal_version_id: string
-          user_id: string
+          recorded_by?: string | null
+          user_id?: string | null
         }
         Update: {
           accepted_at?: string
+          accepted_via?: string
+          contact_id?: string | null
           id?: string
           ip_address?: string | null
           legal_version_id?: string
-          user_id?: string
+          recorded_by?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {

@@ -692,7 +692,8 @@ async function evaluateLegalAcceptanceGap(): Promise<CandidateAlert | null> {
 
   const acceptedByVersion = new Map<string, Set<string>>();
   for (const row of acceptanceRows ?? []) {
-    if (!requiredUsers.has(row.user_id)) continue;
+    // A desk acceptance for someone with no login has no user to count.
+    if (!row.user_id || !requiredUsers.has(row.user_id)) continue;
     const set =
       acceptedByVersion.get(row.legal_version_id) ?? new Set<string>();
     set.add(row.user_id);

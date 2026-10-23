@@ -79,5 +79,7 @@ export async function POST(
     state: result.data?.state ?? "invalid_token",
     person_id: result.data?.personId ?? null,
     checked_in_at: result.data?.checkedInAt ?? null,
+    // What they must accept at the desk before they are checked in.
+    owed: result.data?.owed ?? [],
   });
 }

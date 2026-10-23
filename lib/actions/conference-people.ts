@@ -25,6 +25,7 @@ import {
 } from "@/lib/actions/conference-badges";
 import { createKnownPerson, ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
 import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
+import { personOwedAgreements, type OwedAgreement } from "@/lib/conference/legal-acceptance";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
@@ -981,7 +982,7 @@ export async function markConferencePersonCheckedInManual(
 ): Promise<{
   success: boolean;
   error?: string;
-  data?: { checkedInAt: string; state?: CheckInScanResultState };
+  data?: { checkedInAt: string | null; state?: CheckInScanResultState; owed?: OwedAgreement[] };
 }> {
   const signedIn = await requireAuthenticated();
   if (!signedIn.ok) return { success: false, error: signedIn.error };
@@ -1048,6 +1049,26 @@ export async function markConferencePersonCheckedInManual(
       details: { conferenceId: person.conference_id, eventEntityId: doorEntity.id, resultState: state },
     });
     return { success: true, data: { checkedInAt: at, state } };
+  }
+
+  // Agreements first, as at a badge scan (scanConferenceCheckInToken): the desk
+  // collects what they owe, then checks them in.
+  if (!person.checked_in_at) {
+    const owed = await personOwedAgreements(db, person.conference_id, person.id).catch(() => []);
+    if (owed.length > 0) {
+      await db.from("conference_check_in_events").insert({
+        conference_id: person.conference_id,
+        person_id: person.id,
+        checked_in_at: new Date().toISOString(),
+        checked_in_by: auth.ctx.userId,
+        check_in_source: "manual",
+        scan_token_id: null,
+        device_id: null,
+        result_state: "legal_not_accepted",
+        is_test: options?.testMode === true,
+      });
+      return { success: true, data: { checkedInAt: null, state: "legal_not_accepted", owed } };
+    }
   }
 
   const checkedInAt = person.checked_in_at ?? new Date().toISOString();
@@ -1588,6 +1609,8 @@ export async function scanConferenceCheckInToken(params: {
     state: CheckInScanResultState;
     personId: string | null;
     checkedInAt: string | null;
+    /** `legal_not_accepted`: what they must accept at the desk, with the text. */
+    owed?: OwedAgreement[];
   };
 }> {
   const auth = await requireConferenceDeskAccess(params.conferenceId);
@@ -1834,22 +1857,22 @@ export async function scanConferenceCheckInToken(params: {
     };
   }
 
-  // ⛔ NO DOCUMENT GATE HERE, deliberately.
-  //
-  // Checking in is an ADMINISTRATIVE act — handing a person the badge that is
-  // already theirs — not a grant of access to anything. Refusing it because a
-  // waiver is unsigned turns the busiest queue of the conference into a
-  // paperwork desk, and punishes the attendee for a gap they cannot close while
-  // standing there.
-  //
-  // The documents are enforced where they actually mean something, and were
-  // already enforced there before this gate existed: registration
-  // (conference-registration), buying a day pass (DayPassOfferCard), and the
-  // welcome/acceptance surface the conference hub pushes people to. This was a
-  // fifth copy of that rule in the one place it did not belong.
-  //
-  // ⚠️ Historical `legal_not_accepted` rows remain in conference_check_in_events
-  // and the desk still renders their copy. Nothing produces new ones.
+  // ⛔ AGREEMENTS ARE COLLECTED HERE (Stephen, 2026-10-23): "if we haven't
+  // gotten them to do it by the time they are at the door, that is our last
+  // shot." Not a refusal: the desk shows what they owe, they read and accept
+  // on the desk's device (acceptAgreementsAtDesk), and the scan runs again.
+  // The 2026-09-08 removal was right that turning people away makes the queue
+  // a paperwork desk; collecting consent on the spot does not.
+  // ⚠️ If what they owe cannot be read, the scan goes through: a database
+  // hiccup must not stop the queue (same rule as the day check above).
+  const owed = await personOwedAgreements(createAdminClient(), conferenceId, personRow.id).catch(() => []);
+  if (owed.length > 0) {
+    await insertEvent("legal_not_accepted", personRow.id, resolvedTokenRow.id);
+    return {
+      success: true,
+      data: { state: "legal_not_accepted", personId: personRow.id, checkedInAt: null, owed },
+    };
+  }
 
   const done = await checkInToConference();
   if ("error" in done) return { success: false, error: done.error };
