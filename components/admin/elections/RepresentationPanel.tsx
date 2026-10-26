@@ -125,18 +125,28 @@ export default function RepresentationPanel({
                 </tbody>
               </table>
 
+              {/* ⚠️ The denominator belongs on this line. Without it a zero
+                  reads as a shortfall whatever its size, and most of these
+                  buckets are tiny: on a nine-seat board three members is half
+                  a seat, so a zero there is arithmetic rather than absence.
+                  Stating the size says that without the panel having to
+                  editorialise about it — the reader can see a zero against
+                  three and a zero against thirty are different facts. */}
               {d.unrepresented.length > 0 && (
                 <p className="mt-2 text-xs text-gray-500">
                   No nominee from:{" "}
                   <span className="text-gray-700">
                     {d.unrepresented
-                      .map((u) =>
-                        u === "unknown"
-                          ? "not recorded"
-                          : d.key === "province"
-                            ? titleCaseProvince(u)
-                            : u
-                      )
+                      .map((u) => {
+                        const name =
+                          u === "unknown"
+                            ? "not recorded"
+                            : d.key === "province"
+                              ? titleCaseProvince(u)
+                              : u;
+                        const members = d.membership[u] ?? 0;
+                        return `${name} (${members} member${members === 1 ? "" : "s"})`;
+                      })
                       .join(", ")}
                   </span>
                 </p>
