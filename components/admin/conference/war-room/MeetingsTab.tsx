@@ -159,10 +159,25 @@ export function MeetingsView({ conferenceId }: { conferenceId: string }) {
             tone={draftBroken ? "blocked" : "neutral"}
             edit={{ href: `${base}/schedule`, label: "Days & suites" }}
             preview={
-              draft && runFindings(draft.diagnostics).findings.length > 0
+              draft
                 ? {
-                    title: draftBroken ? "Why the draft failed" : "What the draft could not do",
-                    content: <DraftFindings diagnostics={draft.diagnostics} broken={draftBroken} />,
+                    // The draft itself, as a grid (exhibitors × the day's
+                    // times), with what it could not do above it.
+                    title: draftBroken ? "The draft, and why it failed" : "The draft",
+                    size: "full",
+                    content: (
+                      <div className="space-y-4">
+                        {runFindings(draft.diagnostics).findings.length > 0 ? (
+                          <DraftFindings diagnostics={draft.diagnostics} broken={draftBroken} />
+                        ) : null}
+                        <MeetingMatrix
+                          conferenceId={conferenceId}
+                          data={overview.matrix}
+                          show="draft"
+                          onChanged={() => void load()}
+                        />
+                      </div>
+                    ),
                   }
                 : null
             }

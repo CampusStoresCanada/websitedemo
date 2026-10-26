@@ -26,7 +26,7 @@ import ConfirmAction, { type ConfirmActionResult } from "@/components/ui/Confirm
 type Lens = "grid" | "exhibitor" | "delegate" | "coverage";
 
 const LENSES: Array<{ key: Lens; label: string }> = [
-  { key: "grid", label: "Suite × slot" },
+  { key: "grid", label: "Exhibitor × time" },
   { key: "exhibitor", label: "By exhibitor" },
   { key: "delegate", label: "By delegate" },
   { key: "coverage", label: "Coverage" },
@@ -53,18 +53,21 @@ export default function MeetingMatrix({
   conferenceId,
   data,
   onChanged,
+  show,
 }: {
   conferenceId: string;
   data: ScheduleMatrixData;
   /** After a meeting changes: reload whatever loaded `data` (default: the page). */
   onChanged?: () => void;
+  /** "draft": the newest draft even when a schedule is live (Generate's Preview). */
+  show?: "draft";
 }) {
   const { summary } = data;
   const router = useRouter();
   const [lens, setLens] = useState<Lens>("grid");
   const [editing, setEditing] = useState<EditingCell | null>(null);
 
-  const usingActive = summary.activeAssignments.length > 0;
+  const usingActive = show !== "draft" && summary.activeAssignments.length > 0;
   const assignments = usingActive ? summary.activeAssignments : summary.selectedAssignments;
   // Edits target the run whose assignments are on screen.
   const editRunId = usingActive ? summary.activeRunId : summary.selectedRunId;
@@ -188,24 +191,78 @@ function GridLens({
   assignmentBySlot: Map<string, ScheduleOpsAssignment>;
   onEditCell?: (cell: EditingCell) => void;
 }) {
-  const rows = useMemo(() => {
-    const map = new Map<string, ScheduleOpsSlot[]>();
+  /**
+   * Exhibitors down the side, the day's times across the top, the delegates
+   * meeting them in each cell — one day at a time (Stephen, 2026-10-26). Read a
+   * row to see an exhibitor's day; read a column to see who is meeting whom at
+   * 9:30. A suite belongs to one company, so a row is that company's room.
+   */
+  const days = useMemo(() => [...new Set(slots.map((s) => s.dayNumber))].sort((a, b) => a - b), [slots]);
+  const [day, setDay] = useState<number | null>(null);
+  const [showEmptySuites, setShowEmptySuites] = useState(false);
+  const activeDay = day ?? days[0] ?? 1;
+
+  const daySlots = useMemo(() => slots.filter((s) => s.dayNumber === activeDay), [slots, activeDay]);
+  // The day's times, in order, from whichever suite has them.
+  const times = useMemo(() => {
+    const bySlot = new Map<number, ScheduleOpsSlot>();
+    for (const s of daySlots) if (!bySlot.has(s.slotNumber)) bySlot.set(s.slotNumber, s);
+    return [...bySlot.values()].sort((a, b) => a.slotNumber - b.slotNumber);
+  }, [daySlots]);
+  const slotAt = useMemo(
+    () => new Map(daySlots.map((s) => [`${s.suiteId}|${s.slotNumber}`, s] as const)),
+    [daySlots]
+  );
+  // Each suite's company, from any meeting held in it on any day.
+  const companyBySuite = useMemo(() => {
+    const m = new Map<string, string>();
     for (const s of slots) {
-      const key = `${s.dayNumber}:${s.slotNumber}`;
-      const list = map.get(key) ?? [];
-      list.push(s);
-      map.set(key, list);
+      const a = assignmentBySlot.get(s.id);
+      if (a && !m.has(s.suiteId)) m.set(s.suiteId, a.exhibitorOrganizationName);
     }
-    return [...map.values()]
-      .map((list) => list)
-      .sort((a, b) => byDaySlot(a[0], b[0]));
-  }, [slots]);
+    return m;
+  }, [slots, assignmentBySlot]);
+  const rows = useMemo(
+    () =>
+      suites
+        .filter((suite) => showEmptySuites || companyBySuite.has(suite.id))
+        .sort(
+          (a, b) =>
+            (companyBySuite.get(a.id) ?? "~").localeCompare(companyBySuite.get(b.id) ?? "~") ||
+            a.suiteNumber - b.suiteNumber
+        ),
+    [suites, companyBySuite, showEmptySuites]
+  );
+  const emptySuiteCount = suites.length - companyBySuite.size;
 
   return (
     <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Day">
+          {days.map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => setDay(d)}
+              aria-pressed={d === activeDay}
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                d === activeDay ? "border-accent bg-red-50 text-accent" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              Day {d}
+            </button>
+          ))}
+        </div>
+        {emptySuiteCount > 0 ? (
+          <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
+            <input type="checkbox" checked={showEmptySuites} onChange={(e) => setShowEmptySuites(e.target.checked)} />
+            Show {emptySuiteCount} suite{emptySuiteCount === 1 ? "" : "s"} with no meetings
+          </label>
+        ) : null}
+      </div>
       {onEditCell && (
         <p className="mb-2 text-[11px] text-gray-500">
-          Click any cell to assign, change, or clear its meeting. Hand edits are marked{" "}
+          Click any cell to assign, change, or cancel its meeting. Hand edits are marked{" "}
           <span className="rounded bg-amber-200 px-1 text-[9px] font-semibold uppercase text-amber-800">
             manual
           </span>
@@ -216,39 +273,34 @@ function GridLens({
         <table className="min-w-full border-separate border-spacing-0 text-xs">
         <thead>
           <tr>
-            <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left font-semibold text-gray-700">
-              Day / Slot
-            </th>
-            {suites.map((s) => (
-              <th key={s.id} className="px-2 py-2 text-left font-semibold text-gray-700">
-                Suite {s.suiteNumber}
+            <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left font-semibold text-gray-700">Exhibitor</th>
+            {times.map((t) => (
+              <th key={t.slotNumber} className="whitespace-nowrap px-2 py-2 text-left font-semibold text-gray-700">
+                {hm(t.startTime)}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((rowSlots) => {
-            const first = rowSlots[0];
-            const bySuite = new Map(rowSlots.map((s) => [s.suiteId, s] as const));
+          {rows.map((suite) => {
+            const company = companyBySuite.get(suite.id) ?? null;
             return (
-              <tr key={`${first.dayNumber}:${first.slotNumber}`}>
-                <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-2 py-1.5 align-top text-gray-700">
-                  <div className="font-medium">
-                    Day {first.dayNumber} · Slot {first.slotNumber}
-                  </div>
-                  <div className="text-[10px] text-gray-400">
-                    {hm(first.startTime)}–{hm(first.endTime)}
-                  </div>
+              <tr key={suite.id}>
+                <td className="sticky left-0 z-10 min-w-40 bg-white px-2 py-1.5 align-top text-gray-700">
+                  <div className="font-medium text-gray-900">{company ?? "No meetings"}</div>
+                  <div className="text-[10px] text-gray-400">Suite {suite.suiteNumber}</div>
                 </td>
-                {suites.map((suite) => {
-                  const slot = bySuite.get(suite.id);
+                {times.map((t) => {
+                  const slot = slotAt.get(`${suite.id}|${t.slotNumber}`);
                   const assignment = slot ? assignmentBySlot.get(slot.id) : undefined;
                   const content = assignment ? (
                     <>
                       <div className="flex items-center gap-1">
-                        <span className="font-medium text-emerald-900">
-                          {assignment.exhibitorOrganizationName}
-                        </span>
+                        {/* The row names the company; say so only if a hand
+                            edit put a different one in this room. */}
+                        {assignment.exhibitorOrganizationName !== company ? (
+                          <span className="font-medium text-emerald-900">{assignment.exhibitorOrganizationName}</span>
+                        ) : null}
                         {assignment.isManual && (
                           <span className="rounded bg-amber-200 px-1 text-[9px] font-semibold uppercase text-amber-800">
                             manual
@@ -278,10 +330,10 @@ function GridLens({
                       </div>
                     </>
                   ) : (
-                    <span className="text-gray-300">empty</span>
+                    <span className="text-gray-300">·</span>
                   );
                   return (
-                    <td key={suite.id} className="px-1 py-1 align-top">
+                    <td key={t.slotNumber} className="min-w-28 px-1 py-1 align-top">
                       {onEditCell && slot ? (
                         <button
                           type="button"

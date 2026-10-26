@@ -42,7 +42,7 @@ export default function OperateRow({
    * What will happen: a page to frame (`src`) or rendered content. `printable`:
    * the framed page is a print sheet, and Print prints exactly what is shown.
    */
-  preview?: { title: string; src?: string; content?: ReactNode; printable?: boolean } | null;
+  preview?: { title: string; src?: string; content?: ReactNode; printable?: boolean; size?: "lg" | "full" } | null;
   /** The thing itself. Absent when the row is blocked or only informs. */
   action?: {
     label: string;
@@ -107,7 +107,7 @@ export default function OperateRow({
           open={previewOpen}
           onClose={() => setPreviewOpen(false)}
           title={preview.title}
-          size={preview.src ? "full" : "lg"}
+          size={preview.size ?? (preview.src ? "full" : "lg")}
           footer={
             preview.src && preview.printable ? (
               <button
