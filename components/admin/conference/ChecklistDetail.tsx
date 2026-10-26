@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import {
   saveChecklist,
   saveChecklistTask,
@@ -195,18 +196,16 @@ export default function ChecklistDetail({
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!window.confirm(`Delete task "${task.name}"?`)) return;
+                  <ConfirmAction
+                    label="Delete"
+                    tone="danger"
+                    consequence={`Deletes the task "${task.name}" and every organization's answer to it.`}
+                    onConfirm={async () => {
                       const res = await deleteChecklistTask(task.id);
                       if (res.success) router.refresh();
-                      else window.alert(res.error);
+                      return res.success ? { success: true } : { success: false, error: res.error };
                     }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
+                  />
                 </div>
               </div>
             )
@@ -689,17 +688,16 @@ function CheckpointList({
                 <td className="px-4 py-2 text-gray-900">{cp.days_before_deadline}</td>
                 <td className="px-4 py-2 text-gray-500">{targetDate(cp.days_before_deadline)}</td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={async () => {
+                  <ConfirmAction
+                    label="Remove"
+                    tone="danger"
+                    consequence={`Stops the reminder ${cp.days_before_deadline} days before the deadline.`}
+                    onConfirm={async () => {
                       const res = await deleteChecklistCheckpoint(cp.id);
                       if (res.success) onChanged();
-                      else window.alert(res.error);
+                      return res.success ? { success: true } : { success: false, error: res.error };
                     }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Remove
-                  </button>
+                  />
                 </td>
               </tr>
             ))}

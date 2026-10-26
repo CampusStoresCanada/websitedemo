@@ -94,8 +94,12 @@ export default function ConfirmAction({
         >
           {busy ? "Working…" : confirmLabel ?? `Yes, ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
         </button>
+        {/* Focus lands on Cancel: a row that shows its buttons on hover stays
+            open while the question is up (focus-within), and a stray Enter
+            backs out rather than confirming. */}
         <button
           type="button"
+          autoFocus
           disabled={busy}
           onClick={() => setArmed(false)}
           className={`rounded-md border border-gray-300 bg-white font-medium text-gray-700 hover:bg-gray-50 ${pad}`}

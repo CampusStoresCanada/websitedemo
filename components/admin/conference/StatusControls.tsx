@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { duplicateConference, deleteConference } from "@/lib/actions/conference";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import type { Database } from "@/lib/database.types";
 
 type ConferenceRow = Database["public"]["Tables"]["conference_instances"]["Row"];
@@ -54,13 +55,9 @@ export default function StatusControls({ conference }: StatusControlsProps) {
     setError(null);
     const result = await deleteConference(conference.id);
     setIsLoading(false);
-    setConfirmAction(null);
-
-    if (result.success) {
-      router.push("/admin/conference");
-    } else {
-      setError(result.error ?? "Failed to delete");
-    }
+    if (!result.success) return { success: false, error: result.error ?? "Failed to delete" };
+    router.push("/admin/conference");
+    return { success: true };
   };
 
   return (
@@ -128,28 +125,14 @@ export default function StatusControls({ conference }: StatusControlsProps) {
       {currentStatus === "draft" && (
         <div className="bg-white border border-red-200 rounded-lg p-4">
           <h3 className="text-sm font-medium text-red-700 mb-3">Danger Zone</h3>
-          {confirmAction === "delete" ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-red-700">Permanently delete this conference?</span>
-              <button
-                onClick={handleDelete}
-                disabled={isLoading}
-                className="px-3 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
-              >
-                Yes, Delete
-              </button>
-              <button onClick={() => setConfirmAction(null)} className="px-3 py-1 text-xs text-gray-500">
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmAction("delete")}
-              className="px-4 py-2 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50"
-            >
-              Delete Conference
-            </button>
-          )}
+          <ConfirmAction
+            label="Delete Conference"
+            tone="danger"
+            size="md"
+            disabled={isLoading}
+            consequence={`Permanently deletes ${conference.name}. This cannot be undone.`}
+            onConfirm={handleDelete}
+          />
         </div>
       )}
     </div>

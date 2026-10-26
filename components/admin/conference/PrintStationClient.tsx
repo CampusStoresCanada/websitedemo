@@ -9,6 +9,7 @@ import {
   type PrintStationRow,
   type QueuedLabel,
 } from "@/lib/actions/conference-badges";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 /**
  * The desk's print stations: the laptops that print the sticker queue.
@@ -66,11 +67,11 @@ export default function PrintStationClient({
     void refresh();
   };
 
+  // Asked twice by ConfirmAction; a failure is said at the button.
   const revoke = async (station: PrintStationRow) => {
-    if (!window.confirm(`Stop "${station.label}" printing? Its key stops working at once.`)) return;
     const res = await revokePrintStation({ conferenceId, stationId: station.id });
-    if (!res.success) setError(res.error);
     void refresh();
+    return res.success ? { success: true } : { success: false, error: res.error };
   };
 
   return (
@@ -105,9 +106,12 @@ export default function PrintStationClient({
                     </p>
                   ) : null}
                 </div>
-                <button type="button" onClick={() => void revoke(station)} className="shrink-0 text-xs font-medium text-red-600">
-                  Remove
-                </button>
+                <ConfirmAction
+                  label="Remove"
+                  tone="danger"
+                  consequence={`Stops "${station.label}" printing. Its key stops working at once.`}
+                  onConfirm={() => revoke(station)}
+                />
               </li>
             ))}
           </ul>

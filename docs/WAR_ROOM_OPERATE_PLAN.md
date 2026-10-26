@@ -271,6 +271,13 @@ Each phase ships on its own and leaves the site working.
    conference collects travel. Still live and unlinked: the old
    `/conference/[year]/[edition]/register` form, which writes that dead table.
 7. **Manage clean-up.** One lifecycle panel; confirmations on every Manage delete.
+   **Landed 2026-10-26.** The lifecycle panel is on Overview only; Status keeps
+   duplicate and delete and points there. ConfirmAction now guards deleting a
+   catalogue item, a day, a schedule item, a document, a checklist task or
+   reminder point, a desk-staff member (and their PIN reset), the floor-plan
+   image, a print station and the conference itself; each failure shows at its
+   button instead of an alert or nothing. ConfirmAction focuses Cancel when it
+   opens. Left as is: the desk's rehearsal reset (Operate, already asks).
 
 ## 10. Open questions
 
