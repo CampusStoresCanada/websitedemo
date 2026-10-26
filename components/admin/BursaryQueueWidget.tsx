@@ -51,10 +51,12 @@ function Row({
   row,
   busy,
   onSetStatus,
+  conferenceId,
 }: {
   row: BursaryApplicationRow;
   busy: boolean;
   onSetStatus: (id: string, status: BursaryStatus) => void;
+  conferenceId: string;
 }) {
   const style = isBursaryStatus(row.status) ? STATUS_STYLE[row.status] : { bg: TRACK, fg: "#555" };
 
@@ -113,7 +115,18 @@ function Row({
         {waited}
       </span>
 
-      {/* The decision — a select dressed as the pill it sets */}
+      {/* A new application is decided in one place: the War Room's Waiting on
+          us, beside everyone else waiting on CSC. A decided one keeps the
+          select for what comes after (fulfilled) and for corrections. */}
+      {row.status === "submitted" ? (
+        <a
+          href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
+          className="justify-self-end text-[12px] font-medium hover:underline"
+          style={{ color: NAVY }}
+        >
+          Decide →
+        </a>
+      ) : (
       <label className="relative cursor-pointer justify-self-end">
         <span
           className="flex h-[22px] w-[118px] items-center justify-center rounded-full text-[11px] font-medium"
@@ -139,6 +152,7 @@ function Row({
           ))}
         </select>
       </label>
+      )}
     </div>
   );
 }
@@ -220,7 +234,7 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
           </div>
         ) : (
           visible.map((row) => (
-            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} />
+            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} conferenceId={data.conferenceId} />
           ))
         )}
       </div>

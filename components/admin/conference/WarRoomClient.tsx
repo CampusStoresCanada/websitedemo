@@ -9,7 +9,10 @@ import { formatCalendarDate, formatDayMonth } from "@/lib/time/supabase-timestam
 import { useRouter } from "next/navigation";
 import type { ConferenceAnswer } from "@/lib/conference/agenda";
 import { submitFlag } from "@/lib/actions/submit-flag";
-import { resolveFlag, type ConferenceAsk } from "@/lib/actions/flags";
+import { resolveFlag } from "@/lib/actions/flags";
+import { decideSwapCapIncreaseRequest } from "@/lib/actions/conference-swaps";
+import { setBursaryApplicationStatus } from "@/lib/actions/conference-bursary";
+import type { WaitingItem, WaitingOnUs } from "@/lib/conference/waiting-on-us";
 import { PRINT_SORT_KEYS, type PrintSortKey } from "@/lib/conference/badges/arrangement";
 import { setMyPrintSort } from "@/lib/actions/profile";
 import { sendDocumentToPrinter } from "@/lib/actions/conference-badges";
@@ -206,7 +209,8 @@ interface WarRoomClientProps {
   whatsNext: WhatsNext;
   answers: ConferenceAnswer[];
   menus: WarRoomMenu[];
-  asks: ConferenceAsk[];
+  /** Everyone waiting on CSC (loadWaitingOnUs). */
+  waiting: WaitingOnUs;
   /** `?tab=` from the address, unchecked (the status line links to tabs). */
   requestedTab: string | null;
   /** Rebuilds the people index — the only tab it affects is People. */
@@ -219,7 +223,7 @@ export default function WarRoomClient({
   whatsNext,
   answers,
   menus,
-  asks,
+  waiting,
   requestedTab,
   syncPeopleIndex,
 }: WarRoomClientProps) {
@@ -236,11 +240,12 @@ export default function WarRoomClient({
   const [checkIn, setCheckIn] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [lastSuccessAt, setLastSuccessAt] = useState<number>(Date.now());
-  const openAsks = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
+  const waitingCount = waiting.items.length;
+  const anyUrgent = waiting.items.some((item) => item.urgent);
   // A tab the address names; otherwise whatever has someone waiting, then the
   // run-sheet.
   const [activeOpsTab, setActiveOpsTabState] = useState<OpsTab>(
-    isOpsTab(requestedTab) ? requestedTab : openAsks.length > 0 ? "waiting" : "whats_next"
+    isOpsTab(requestedTab) ? requestedTab : waitingCount > 0 ? "waiting" : "whats_next"
   );
   // In the address so the status line can link straight to a tab, and a
   // refresh lands where you were.
@@ -331,7 +336,7 @@ export default function WarRoomClient({
         <div className="flex gap-5">
           {OPS_TABS.map((tab) => {
             const active = activeOpsTab === tab.id;
-            const count = tab.id === "waiting" ? openAsks.length : 0;
+            const count = tab.id === "waiting" ? waitingCount : 0;
             return (
               <button
                 key={tab.id}
@@ -346,7 +351,7 @@ export default function WarRoomClient({
                 {count > 0 ? (
                   <span
                     className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
-                      openAsks.some((a) => a.priority === "high") ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"
+                      anyUrgent ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"
                     }`}
                   >
                     {count}
@@ -363,7 +368,7 @@ export default function WarRoomClient({
       ) : null}
 
       {activeOpsTab === "waiting" ? (
-        <AsksView conferenceId={conferenceId} asks={asks} canResolve={canEditAdminNotes} />
+        <WaitingView conferenceId={conferenceId} waiting={waiting} />
       ) : null}
 
       {activeOpsTab === "answers" ? (
@@ -601,26 +606,23 @@ export default function WarRoomClient({
 }
 
 /**
- * Asks: what people need from us, kept in one place so none is dropped.
+ * Waiting on us: everyone waiting on CSC, in one list (loadWaitingOnUs) — asks,
+ * extra meeting swaps, bursary decisions. Urgent first, then longest waiting.
  *
- * Stephen, 2026-10-22: no owners — one shared list; anyone adds one, whoever
- * handles it ticks it off. Each is an ordinary site flag (see
- * loadConferenceAsks), so one raised with the toolkit on the desk lands here too.
+ * Stephen, 2026-10-22: no owners — anyone adds an ask, whoever handles it ticks
+ * it off. Every action here is asked twice and says what it does.
  */
-function AsksView({
+function WaitingView({
   conferenceId,
-  asks,
-  canResolve,
+  waiting,
 }: {
   conferenceId: string;
-  asks: ConferenceAsk[];
-  canResolve: boolean;
+  waiting: WaitingOnUs;
 }) {
   const router = useRouter();
   const [note, setNote] = useState("");
   const [urgent, setUrgent] = useState(false);
-  const open = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
-  const done = asks.filter((a) => !open.includes(a));
+  const { items, doneAsks } = waiting;
 
   return (
     <div className="space-y-4">
@@ -658,21 +660,26 @@ function AsksView({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Open · {open.length}</h2>
-        {open.length === 0 ? <p className="text-sm text-gray-500">Nothing waiting.</p> : null}
-        {open.map((ask) => (
-          <AskRow key={ask.id} ask={ask} canResolve={canResolve} />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Waiting · {items.length}</h2>
+        {items.length === 0 ? <p className="text-sm text-gray-500">Nobody is waiting on us.</p> : null}
+        {items.map((item) => (
+          <WaitingRow key={`${item.kind}:${item.id}`} item={item} />
         ))}
       </section>
 
-      {done.length > 0 ? (
+      {doneAsks.length > 0 ? (
         <details>
           <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Done · {done.length}
+            Handled asks · {doneAsks.length}
           </summary>
           <div className="mt-2 space-y-2">
-            {done.map((ask) => (
-              <AskRow key={ask.id} ask={ask} canResolve={false} />
+            {doneAsks.map((ask) => (
+              <div key={ask.id} className="rounded-xl border border-gray-200 bg-white px-[18px] py-3 text-sm text-gray-600">
+                {ask.note || "(no note)"}
+                <span className="ml-2 text-xs text-gray-400">
+                  {ask.flaggerName ?? "Someone"} · {whenMountain(ask.createdAt)}
+                </span>
+              </div>
             ))}
           </div>
         </details>
@@ -681,47 +688,84 @@ function AsksView({
   );
 }
 
-function AskRow({ ask, canResolve }: { ask: ConferenceAsk; canResolve: boolean }) {
+/** A moment, in the operator's zone (Mountain): "22 October 2:04 p.m.". */
+function whenMountain(iso: string): string {
+  return `${formatDayMonth(iso, "America/Edmonton") ?? ""} ${new Date(iso).toLocaleTimeString("en-CA", {
+    timeZone: "America/Edmonton",
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
+const KIND_LABEL: Record<WaitingItem["kind"], string> = {
+  ask: "Ask",
+  swap_cap: "Meeting swaps",
+  bursary: "Travel bursary",
+};
+
+/** One person waiting, and the actions that answer them. */
+function WaitingRow({ item }: { item: WaitingItem }) {
   const router = useRouter();
-  // "Ask CSC" from their own page, or raised by staff on one of ours.
-  const page = ask.pageUrl.includes("war-room?ask=")
-    ? "Ask CSC"
-    : ask.pageUrl.split("/").slice(4).join("/").split("?")[0] || "war-room";
+  const name = item.who ?? "Someone";
+  const after = (result: { success: boolean; error?: string }) => {
+    if (result.success) router.refresh();
+    return result;
+  };
+
+  const actions =
+    item.kind === "ask" ? (
+      <ConfirmAction
+        label="Done"
+        consequence={`Marks ${name}'s ask as handled. Reply to them in Circle first if they need an answer.`}
+        onConfirm={async () => after(await resolveFlag(item.id))}
+      />
+    ) : item.kind === "swap_cap" ? (
+      <>
+        <ConfirmAction
+          label="Approve"
+          consequence={`Gives ${name} ${item.extraSwaps ?? "the"} more meeting swap${item.extraSwaps === 1 ? "" : "s"}. They can use them on their own page straight away.`}
+          onConfirm={async () => after(await decideSwapCapIncreaseRequest(item.id, "approved"))}
+        />
+        <ConfirmAction
+          label="Deny"
+          tone="danger"
+          consequence={`Declines ${name}'s request for more swaps. Their current schedule stays as it is.`}
+          onConfirm={async () => after(await decideSwapCapIncreaseRequest(item.id, "denied"))}
+        />
+      </>
+    ) : (
+      <>
+        <ConfirmAction
+          label="Approve"
+          consequence={`Records the travel bursary for ${item.org ?? name} as approved. No email is sent.`}
+          onConfirm={async () => after(await setBursaryApplicationStatus({ applicationId: item.id, status: "approved" }))}
+        />
+        <ConfirmAction
+          label="Decline"
+          tone="danger"
+          consequence={`Records the travel bursary for ${item.org ?? name} as declined. No email is sent.`}
+          onConfirm={async () => after(await setBursaryApplicationStatus({ applicationId: item.id, status: "denied" }))}
+        />
+      </>
+    );
+
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-[18px] py-3 odd:bg-white/60">
-      <div className="min-w-0">
-        <p className="text-sm text-gray-900">
-          {ask.priority === "high" ? (
-            <span className="mr-2 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700">Urgent</span>
+    <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-gray-200 bg-white px-[18px] py-3">
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+          {item.urgent ? (
+            <span className="rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-semibold text-white">Urgent</span>
           ) : null}
-          {ask.note || <span className="text-gray-500">(no note)</span>}
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-700">{KIND_LABEL[item.kind]}</span>
+          <span className="font-medium text-gray-800">{name}</span>
+          {item.org ? <span>{item.org}</span> : null}
+          <span>· {whenMountain(item.since)}</span>
+          {item.source ? <span>· from {item.source}</span> : null}
         </p>
-        {ask.details ? (
-          <p className="mt-1 whitespace-pre-line text-xs text-gray-600">{ask.details}</p>
-        ) : null}
-        <p className="mt-0.5 text-xs text-gray-500">
-          {ask.flaggerName ?? "Someone"} · {formatDayMonth(ask.createdAt, "America/Edmonton")}{" "}
-          {new Date(ask.createdAt).toLocaleTimeString("en-CA", {
-            timeZone: "America/Edmonton",
-            hour: "numeric",
-            minute: "2-digit",
-          })}{" "}
-          · from {page}
-        </p>
+        <p className="mt-1 text-sm text-gray-900">{item.what}</p>
+        {item.details ? <p className="mt-1 whitespace-pre-line text-xs text-gray-600">{item.details}</p> : null}
       </div>
-      {canResolve ? (
-        <span className="shrink-0">
-          <ConfirmAction
-            label="Done"
-            consequence={`Marks ${ask.flaggerName ?? "their"}${ask.flaggerName ? "'s" : ""} ask as handled and moves it to Done.`}
-            onConfirm={async () => {
-              const result = await resolveFlag(ask.id);
-              if (result.success) router.refresh();
-              return result;
-            }}
-          />
-        </span>
-      ) : null}
+      <div className="flex shrink-0 flex-wrap items-start gap-2">{actions}</div>
     </div>
   );
 }

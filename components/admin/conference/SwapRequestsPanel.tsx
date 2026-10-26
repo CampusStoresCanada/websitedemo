@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import {
   adminGrantSwapCapIncrease,
-  decideSwapCapIncreaseRequest,
   listSwapCapIncreaseRequests,
   listSwapRequests,
 } from "@/lib/actions/conference-swaps";
@@ -63,22 +62,6 @@ export default function SwapRequestsPanel({
     setSwapRequests(swapResult.data);
     setCapRequests(capResult.data);
     setIsLoading(false);
-  }
-
-  async function decideCapRequest(requestId: string, decision: "approved" | "denied") {
-    setError(null);
-    const adminNote =
-      decision === "approved"
-        ? "Approved by admin dashboard."
-        : "Denied by admin dashboard.";
-
-    const result = await decideSwapCapIncreaseRequest(requestId, decision, adminNote);
-    if (!result.success) {
-      setError(result.error);
-      return;
-    }
-
-    await refresh();
   }
 
   async function grantDirectOverride(delegateSeatId: string) {
@@ -237,22 +220,15 @@ export default function SwapRequestsPanel({
                     </td>
                     <td className="px-4 py-3 text-right">
                       {row.status === "requested" ? (
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void decideCapRequest(row.id, "approved")}
-                            className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:border-green-400"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void decideCapRequest(row.id, "denied")}
-                            className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:border-red-400"
-                          >
-                            Deny
-                          </button>
-                        </div>
+                        // Decided in one place: the War Room's Waiting on us,
+                        // beside everyone else waiting on CSC. This page keeps
+                        // the history.
+                        <a
+                          href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
+                          className="text-xs font-medium text-accent hover:underline"
+                        >
+                          Decide in the War Room →
+                        </a>
                       ) : (
                         <span className="text-xs text-gray-500">
                           {row.decided_at ? <Timestamp iso={row.decided_at} format="compact" /> : "resolved"}

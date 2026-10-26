@@ -22,7 +22,7 @@ import { arrangeStaffChecklists, calendarDayIn, describeUrgency } from "@/lib/co
 import { readPreferences } from "@/lib/profile/preferences";
 import { ENTITY_SELECT, buildEntityGraph } from "@/lib/conference/seats";
 import { deriveAgenda, deriveAnswers } from "@/lib/conference/agenda";
-import { loadConferenceAsks } from "@/lib/actions/flags";
+import { loadWaitingOnUs } from "@/lib/conference/waiting-on-us";
 import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
 import { stationOnline } from "@/lib/conference/badges/print-station";
 import { meetingsSoFar } from "@/lib/conference/checklist-checks";
@@ -121,10 +121,10 @@ export default async function ConferenceWarRoomPage({
   const timeZone = ((conference as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
 
   const db = createAdminClient();
-  const [entityRes, refRes, asks, answeringOrgId, preferences, stationsRes, waitingJobs, meetings] = await Promise.all([
+  const [entityRes, refRes, waiting, answeringOrgId, preferences, stationsRes, waitingJobs, meetings] = await Promise.all([
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
     db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", id),
-    loadConferenceAsks(id),
+    loadWaitingOnUs(id),
     loadStaffAnsweringOrgId(db),
     readPreferences(auth.ctx.userId),
     db.from("print_stations").select("last_seen_at").eq("conference_id", id).is("revoked_at", null),
@@ -162,8 +162,8 @@ export default async function ConferenceWarRoomPage({
   const whatsNext: WhatsNext = { answeringOrgId, timeZone, groups, controlsByTaskId, printSort };
 
   // ── The status line: only what is live ──────────────────────────────────
-  const openAsks = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
-  const urgentAsks = openAsks.filter((a) => a.priority === "high").length;
+  const waitingCount = waiting.items.length;
+  const urgentCount = waiting.items.filter((item) => item.urgent).length;
   const stations = stationsRes.data ?? [];
   const online = stations.some((s) => stationOnline(s.last_seen_at as string | null));
   const queued = waitingJobs.count ?? 0;
@@ -205,10 +205,10 @@ export default async function ConferenceWarRoomPage({
       </header>
 
       <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
-        <StatusItem tone={urgentAsks > 0 ? "alert" : openAsks.length > 0 ? "warn" : "quiet"} href="?tab=waiting">
-          {openAsks.length === 0
+        <StatusItem tone={urgentCount > 0 ? "alert" : waitingCount > 0 ? "warn" : "quiet"} href="?tab=waiting">
+          {waitingCount === 0
             ? "Nobody waiting on us"
-            : `${openAsks.length} waiting on us${urgentAsks ? `, ${urgentAsks} urgent` : ""}`}
+            : `${waitingCount} waiting on us${urgentCount ? `, ${urgentCount} urgent` : ""}`}
         </StatusItem>
         <StatusItem
           tone={stations.length === 0 ? "quiet" : online ? "ok" : "alert"}
@@ -237,7 +237,7 @@ export default async function ConferenceWarRoomPage({
         whatsNext={whatsNext}
         answers={answers}
         menus={menus}
-        asks={asks}
+        waiting={waiting}
         requestedTab={tabParam}
         syncPeopleIndex={async () => {
           "use server";

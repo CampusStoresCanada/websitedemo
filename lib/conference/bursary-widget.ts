@@ -43,6 +43,8 @@ export interface BursaryApplicationRow {
   status: string;
   /** "24 September", in Mountain time. Null if the timestamp won't parse. */
   submittedOn: string | null;
+  /** When it arrived (ISO), for ordering beside other things people wait on. */
+  createdAt: string;
   /** Whole days since it arrived. */
   daysWaiting: number;
 }
@@ -104,6 +106,7 @@ export async function loadBursaryApplications(
     notes: r.notes,
     status: r.status,
     submittedOn: formatDayMonth(r.created_at, "America/Edmonton"),
+    createdAt: r.created_at,
     daysWaiting: daysSince(r.created_at),
   }));
 }
