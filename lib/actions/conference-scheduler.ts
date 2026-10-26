@@ -790,7 +790,24 @@ export async function createSchedulerDraftRun(
 
       const optimized = search.best.result.improved;
       generateResult.assignments = optimized.assignments;
-      generateResult.diagnostics = search.best.result.draw.diagnostics;
+      /**
+       * ⛔ Judged on what is SAVED, not on the greedy draw it started from. The
+       * draw's diagnostics described a schedule that was never persisted, so a
+       * draw-only fault (or a clean draw the optimizer then changed) decided
+       * whether the run was usable. Same recompute as the late-add path above.
+       */
+      generateResult.diagnostics = validateScheduleConstraints({
+        meetingSlots: generateInput.meetingSlots,
+        assignments: optimized.assignments,
+        delegates: generateInput.delegates,
+        exhibitors: generateInput.exhibitors,
+        delegateTargetMeetings: search.best.result.draw.diagnostics.delegateTargetMeetings,
+        exhibitorTargetMeetings: Math.max(
+          1,
+          Math.floor(generateInput.meetingSlots.length / Math.max(1, generateInput.exhibitors.length))
+        ),
+        policy: generateInput.policy,
+      });
       restartSpread = {
         restarts: search.spread.restarts,
         best: search.spread.best,

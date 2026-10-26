@@ -118,6 +118,7 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     input.delegates.map((delegate) => [delegate.registrationId, delegate])
   );
   const exhibitorOrgByRegistration = exhibitorOrganizationByRegistration(input.exhibitors);
+  const exhibitorByRegistration = new Map(input.exhibitors.map((exhibitor) => [exhibitor.registrationId, exhibitor]));
 
   /**
    * ⛔ A DELEGATE'S CEILING IS TIMES, NOT SUITES.
@@ -306,8 +307,17 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
         const slot = slotById.get(assignment.meetingSlotId);
         if (slot && delegateBusyAt.get(delegateId)?.has(slotKeyOf(slot))) return false;
 
+        // ⛔ The parties' own refusals, exactly as the main loop checks them —
+        // never the score record's isBlackout (lib/scheduler/blackout.ts). This
+        // pass trusted the score and put a delegate back in with an exhibitor
+        // they had refused, which the run then reported as a hard BLACKOUT and
+        // threw away (2026-10-26).
+        const delegate = delegateById.get(delegateId);
+        const exhibitor = exhibitorByRegistration.get(assignment.exhibitorSeatId);
+        if (!delegate || !exhibitor || isBlackedOut(delegate, exhibitor)) return false;
+
         const score = scoreByKey.get(buildScoreKey(delegateId, assignment.exhibitorSeatId));
-        return Boolean(score && !score.isBlackout && Number.isFinite(score.totalScore));
+        return Boolean(score && Number.isFinite(score.totalScore));
       })
       .sort((left, right) => {
         const leftScore =
