@@ -12,13 +12,15 @@ import {
   clearMeetingAssignment,
   setMeetingAssignment,
 } from "@/lib/actions/conference-schedule-assign";
+import Modal from "@/components/ui/Modal";
+import ConfirmAction, { type ConfirmActionResult } from "@/components/ui/ConfirmAction";
 
 /**
  * The meeting matrix — review how the buyer/seller meeting blocks are filling
  * in, from whichever lens answers the question in front of you: the suite×slot
  * grid (is the room full), per-exhibitor and per-delegate itineraries (what
- * does X's day look like), and coverage (who isn't scheduled yet). Read-only;
- * bulk run generation lives in Schedule Ops, manual cell overrides are next.
+ * does X's day look like), and coverage (who isn't scheduled yet). A cell opens
+ * the hand editor. It lives in the War Room's Meetings tab: Operate.
  */
 
 type Lens = "grid" | "exhibitor" | "delegate" | "coverage";
@@ -50,9 +52,12 @@ function byDaySlot(a: { dayNumber: number; slotNumber: number }, b: { dayNumber:
 export default function MeetingMatrix({
   conferenceId,
   data,
+  onChanged,
 }: {
   conferenceId: string;
   data: ScheduleMatrixData;
+  /** After a meeting changes: reload whatever loaded `data` (default: the page). */
+  onChanged?: () => void;
 }) {
   const { summary } = data;
   const router = useRouter();
@@ -93,25 +98,18 @@ export default function MeetingMatrix({
             {assignments.length > 0 ? ` · ${assignments.length} meeting${assignments.length === 1 ? "" : "s"}` : ""}
           </p>
         </div>
-        <Link
-          href={`/admin/conference/${conferenceId}/schedule-ops`}
-          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Generate / promote in Schedule Ops
-        </Link>
       </div>
 
       {!hasGrid ? (
         <div className="px-4 py-6 text-sm text-gray-600">
-          No meeting grid yet. Set meeting days + suites in <strong>Meeting setup</strong> above, then
-          generate a run in{" "}
+          No meeting grid yet. Set meeting days and suites on the{" "}
           <Link
-            href={`/admin/conference/${conferenceId}/schedule-ops`}
+            href={`/admin/conference/${conferenceId}/schedule`}
             className="font-medium text-accent hover:underline"
           >
-            Schedule Ops
+            Schedule page
           </Link>
-          .
+          , then generate a draft.
         </div>
       ) : (
         <>
@@ -134,8 +132,8 @@ export default function MeetingMatrix({
 
           {!usingActive && assignments.length === 0 && (
             <div className="mx-4 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              The grid scaffolding exists but no run has been promoted. Showing empty cells — generate
-              and promote a run in Schedule Ops to populate it.
+              The grid exists but nothing is published yet. Showing empty cells: generate a draft and
+              publish it to fill them.
             </div>
           )}
 
@@ -166,10 +164,12 @@ export default function MeetingMatrix({
           cell={editing}
           exhibitors={data.exhibitors}
           delegates={data.delegates}
+          live={usingActive}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            router.refresh();
+            if (onChanged) onChanged();
+            else router.refresh();
           }}
         />
       )}
@@ -567,12 +567,15 @@ function CellEditor({
   cell,
   exhibitors,
   delegates,
+  live,
   onClose,
   onSaved,
 }: {
   conferenceId: string;
   runId: string;
   cell: EditingCell;
+  /** Editing the published schedule, not a draft. */
+  live: boolean;
   exhibitors: MatrixParticipant[];
   delegates: MatrixParticipant[];
   onClose: () => void;
@@ -596,11 +599,8 @@ function CellEditor({
     );
   }, [delegates, q]);
 
-  async function save() {
-    if (!exhibitorId) {
-      setError("Pick an exhibitor.");
-      return;
-    }
+  async function save(): Promise<{ success: boolean; error?: string }> {
+    if (!exhibitorId) return { success: false, error: "Pick an exhibitor." };
     setBusy(true);
     setError(null);
     const res = await setMeetingAssignment(conferenceId, {
@@ -611,41 +611,68 @@ function CellEditor({
     });
     setBusy(false);
     if (res.success) onSaved();
-    else setError(res.error);
+    return res.success ? { success: true } : { success: false, error: res.error };
   }
 
-  async function clear() {
-    setBusy(true);
-    setError(null);
+  async function clear(): Promise<ConfirmActionResult> {
     const res = await clearMeetingAssignment(conferenceId, {
       runId,
       meetingSlotId: cell.meetingSlotId,
     });
-    setBusy(false);
     if (res.success) onSaved();
-    else setError(res.error);
+    return res.success ? { success: true } : { success: false, error: res.error };
   }
 
+  const who = cell.assignment
+    ? `${cell.assignment.exhibitorOrganizationName} and ${cell.assignment.delegateSeatIds.length} delegate${
+        cell.assignment.delegateSeatIds.length === 1 ? "" : "s"
+      }`
+    : "";
+  // ⛔ In the live schedule an edit is a change to somebody's day: asked twice,
+  // and it says nobody is told (no email goes out after a hand edit).
+  const liveNote = live ? " This is the live schedule; nobody is emailed about the change." : "";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-lg border border-gray-200 bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+    <Modal
+      open
+      onClose={onClose}
+      title={`Suite ${cell.suiteNumber} · Day ${cell.dayNumber} · Slot ${cell.slotNumber}`}
+      footer={
+        <div className="flex w-full items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">
-              Suite {cell.suiteNumber} · Day {cell.dayNumber} · Slot {cell.slotNumber}
-            </h3>
-            <p className="text-xs text-gray-500">
-              {hm(cell.startTime)}–{hm(cell.endTime)} · hand-editing this meeting
-            </p>
+            {cell.assignment ? (
+              <ConfirmAction
+                label="Cancel meeting"
+                tone="danger"
+                consequence={`Cancels the meeting for ${who}.${liveNote}`}
+                onConfirm={clear}
+              />
+            ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
-          >
-            Close
-          </button>
+          {exhibitors.length > 0 ? (
+            live ? (
+              <ConfirmAction
+                label="Save meeting"
+                consequence={`${cell.assignment ? "Replaces" : "Adds"} this meeting.${liveNote}`}
+                onConfirm={save}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => void save().then((res) => !res.success && setError(res.error ?? null))}
+                disabled={busy}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Save meeting"}
+              </button>
+            )
+          ) : null}
         </div>
+      }
+    >
+      <p className="px-4 pt-3 text-xs text-gray-500">
+        {hm(cell.startTime)}–{hm(cell.endTime)} · {live ? "the live schedule" : "the draft"}
+      </p>
 
         {exhibitors.length === 0 ? (
           <div className="px-4 py-6 text-sm text-gray-600">
@@ -716,36 +743,7 @@ function CellEditor({
             {error && <p className="text-xs text-red-600">{error}</p>}
           </div>
         )}
-
-        <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-4 py-3">
-          <div>
-            {cell.assignment && (
-              <button
-                type="button"
-                onClick={() => void clear()}
-                disabled={busy}
-                className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                Clear cell
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={busy || exhibitors.length === 0}
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Save meeting"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

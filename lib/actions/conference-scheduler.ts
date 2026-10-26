@@ -1,6 +1,9 @@
 "use server";
 
-import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
+import { isSuperAdmin, requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
+import type { ScheduleMatrixData } from "@/lib/conference/schedule-coverage";
+import type { ScheduleDiffRow, ScheduleOpsRun } from "@/lib/conference/schedule-ops";
+import type { meetingsSoFar } from "@/lib/conference/checklist-checks";
 import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
@@ -1121,6 +1124,173 @@ export async function promoteSchedulerRun(
   };
 }
 
+/** The published (active) run and every seat with a meeting in it. */
+async function activeRunSeats(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<{ run: { id: string }; seatIds: string[] } | { error: string }> {
+  const { data: run } = await db
+    .from("scheduler_runs")
+    .select("id")
+    .eq("conference_id", conferenceId)
+    .eq("run_mode", "active")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!run) return { error: "There is no published (active) schedule to send." };
+
+  const { data: rows, error } = await db
+    .from("schedules")
+    .select("exhibitor_seat_id, delegate_seat_ids")
+    .eq("conference_id", conferenceId)
+    .eq("scheduler_run_id", run.id)
+    .neq("status", "canceled");
+  if (error) return { error: error.message };
+  const seatIds = [
+    ...new Set((rows ?? []).flatMap((r) => [r.exhibitor_seat_id, ...(r.delegate_seat_ids ?? [])]).filter(Boolean)),
+  ] as string[];
+  if (seatIds.length === 0) return { error: "The published schedule has no meetings in it." };
+  return { run, seatIds };
+}
+
+export type MeetingsOverview = {
+  matrix: ScheduleMatrixData;
+  /** The live schedule, if there is one. */
+  live: { runId: string; meetings: number; people: number; handEdits: number } | null;
+  /** The newest draft, and what publishing it would change. */
+  draft: {
+    runId: string;
+    status: ScheduleOpsRun["status"];
+    startedAt: string;
+    meetings: number;
+    diagnostics: Json | null;
+    changes: ScheduleDiffRow[];
+  } | null;
+  /** Who "Email everyone their schedule" reaches, without sending. Null with no live schedule. */
+  email: {
+    toSend: Array<{ name: string; email: string; orgName: string; meetingCount: number }>;
+    alreadyTold: number;
+    noEmail: number;
+    /** The email as the first of them gets it (the template, with their values). */
+    sample: { to: string; subject: string; bodyHtml: string } | null;
+    templateId: string | null;
+  } | null;
+  meetings: Awaited<ReturnType<typeof meetingsSoFar>> | null;
+  /** Publishing and emailing are super-admin acts (promoteSchedulerRun, emailActiveSchedule). */
+  canPublish: boolean;
+};
+
+/**
+ * The War Room's Meetings tab, in one read (WAR_ROOM_OPERATE_PLAN §5): the
+ * matrix, the newest draft against the live schedule, who the email would
+ * reach, and the meetings so far. Loaded when the tab opens.
+ */
+export async function loadMeetingsOverview(
+  conferenceId: string
+): Promise<{ success: true; data: MeetingsOverview } | { success: false; error: string }> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const [{ loadScheduleMatrixData }, { diffAgainstActive }, { meetingsSoFar }] = await Promise.all([
+    import("@/lib/conference/schedule-matrix"),
+    import("@/lib/conference/schedule-ops"),
+    import("@/lib/conference/checklist-checks"),
+  ]);
+  const [matrix, meetings] = await Promise.all([
+    loadScheduleMatrixData(conferenceId),
+    meetingsSoFar(db, conferenceId).catch(() => null),
+  ]);
+  const { summary } = matrix;
+
+  const liveRun = summary.activeRunId;
+  const draftRun = summary.runs.find((run) => run.runMode === "draft") ?? null;
+  const peopleIn = (rows: typeof summary.activeAssignments) =>
+    new Set(rows.flatMap((a) => [a.exhibitorSeatId, ...a.delegateSeatIds])).size;
+
+  let email: MeetingsOverview["email"] = null;
+  if (liveRun) {
+    const found = await activeRunSeats(db, conferenceId);
+    if (!("error" in found)) {
+      const { planScheduleDelivery } = await import("@/lib/conference/schedule-delivery");
+      const [{ targets, result }, { data: told }] = await Promise.all([
+        planScheduleDelivery({ db, conferenceId, runId: found.run.id, delegateSeatIds: found.seatIds }),
+        db
+          .from("message_automation_runs")
+          .select("trigger_event_key")
+          .like("trigger_event_key", `conference_schedule_ready:%:${found.run.id}`),
+      ]);
+      // The send is keyed per (person, run): whoever already has this run's key is skipped.
+      const toldKeys = new Set((told ?? []).map((row) => row.trigger_event_key as string));
+      const fresh = targets.filter((t) => !toldKeys.has(`conference_schedule_ready:${t.personKey}:${found.run.id}`));
+
+      // The real mail for one of them: the send's own values (scheduleReadyVariables)
+      // through the send's own renderer. Conditional blocks render as off; the
+      // send resolves them per recipient.
+      const first = fresh[0] ?? targets[0] ?? null;
+      let sample: NonNullable<MeetingsOverview["email"]>["sample"] = null;
+      const [{ getTemplate, renderTemplateContent }, { scheduleReadyVariables }] = await Promise.all([
+        import("@/lib/comms/templates"),
+        import("@/lib/comms/conference-triggers"),
+      ]);
+      const template = await getTemplate("conference_schedule_ready");
+      if (first && template) {
+        const variables = await scheduleReadyVariables({
+          db,
+          conferenceId,
+          attendeeName: first.name,
+          orgName: first.orgName,
+          meetingCount: first.meetingCount,
+          dayCount: first.dayCount,
+        });
+        if (variables) {
+          const { subject, bodyHtml } = renderTemplateContent(template, {
+            app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
+            ...variables,
+          });
+          sample = { to: `${first.name} <${first.email}>`, subject, bodyHtml };
+        }
+      }
+
+      email = {
+        sample,
+        templateId: template?.id ?? null,
+        toSend: fresh.map((t) => ({ name: t.name, email: t.email, orgName: t.orgName, meetingCount: t.meetingCount })),
+        alreadyTold: targets.length - fresh.length,
+        noEmail: result.noEmail.length,
+      };
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      matrix,
+      live: liveRun
+        ? {
+            runId: liveRun,
+            meetings: summary.activeAssignments.length,
+            people: peopleIn(summary.activeAssignments),
+            handEdits: summary.activeRunManualCount,
+          }
+        : null,
+      draft: draftRun
+        ? {
+            runId: draftRun.id,
+            status: draftRun.status,
+            startedAt: draftRun.startedAt,
+            meetings: summary.selectedRunId === draftRun.id ? summary.selectedAssignments.length : draftRun.totalMeetingsCreated ?? 0,
+            diagnostics: draftRun.diagnostics,
+            changes: summary.selectedRunId === draftRun.id ? diffAgainstActive(summary) : [],
+          }
+        : null,
+      email,
+      meetings,
+      canPublish: isSuperAdmin(auth.ctx.globalRole),
+    },
+  };
+}
+
 /**
  * Tell everyone in the published schedule that it's ready — the last stage of
  * the pipeline, which existed (sendSchedulesForRun) and had no caller.
@@ -1140,27 +1310,9 @@ export async function emailActiveSchedule(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
-  const { data: run } = await db
-    .from("scheduler_runs")
-    .select("id")
-    .eq("conference_id", conferenceId)
-    .eq("run_mode", "active")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!run) return { success: false, error: "There is no published (active) schedule to send." };
-
-  const { data: rows, error } = await db
-    .from("schedules")
-    .select("exhibitor_seat_id, delegate_seat_ids")
-    .eq("conference_id", conferenceId)
-    .eq("scheduler_run_id", run.id)
-    .neq("status", "canceled");
-  if (error) return { success: false, error: error.message };
-  const seatIds = [
-    ...new Set((rows ?? []).flatMap((r) => [r.exhibitor_seat_id, ...(r.delegate_seat_ids ?? [])]).filter(Boolean)),
-  ];
-  if (seatIds.length === 0) return { success: false, error: "The published schedule has no meetings in it." };
+  const found = await activeRunSeats(db, conferenceId);
+  if ("error" in found) return { success: false, error: found.error };
+  const { run, seatIds } = found;
 
   const { count: before } = await db
     .from("message_automation_runs")

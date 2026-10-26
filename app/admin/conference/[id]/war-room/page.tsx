@@ -225,7 +225,7 @@ export default async function ConferenceWarRoomPage({
           </StatusItem>
         ) : null}
         {meetingsRunning ? (
-          <StatusItem tone={meetings.confirmed < meetings.started ? "warn" : "ok"} href={`/admin/conference/${id}/schedule`}>
+          <StatusItem tone={meetings.confirmed < meetings.started ? "warn" : "ok"} href="?tab=meetings">
             {meetings.confirmed} of {meetings.started} meetings confirmed
           </StatusItem>
         ) : null}

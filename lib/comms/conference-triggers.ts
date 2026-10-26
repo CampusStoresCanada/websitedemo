@@ -227,32 +227,9 @@ export async function triggerConferenceScheduleReady(params: {
   meetingCount: number;
   dayCount: number;
 }): Promise<void> {
-  const {
-    db, conferenceId, runId, personKey, attendeeName, attendeeEmail, orgName,
-    meetingCount, dayCount,
-  } = params;
-
-  const { data: conference, error } = await db
-    .from("conference_instances")
-    .select("year, start_date, end_date, location_city, location_province, location_venue")
-    .eq("id", conferenceId)
-    .single();
-
-  if (error || !conference) {
-    console.error(
-      `triggerConferenceScheduleReady: conference ${conferenceId} not found: ${error?.message}`
-    );
-    return;
-  }
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  const conferenceLocation = [
-    conference.location_venue,
-    conference.location_city,
-    conference.location_province,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const { conferenceId, runId, personKey, attendeeName, attendeeEmail } = params;
+  const variableValues = await scheduleReadyVariables(params);
+  if (!variableValues) return;
 
   await triggerAutomation({
     triggerSource: "conference",
@@ -264,27 +241,66 @@ export async function triggerConferenceScheduleReady(params: {
       type: "custom_emails",
       filters: { emails: [attendeeEmail], conference_instance_id: conferenceId },
     },
-    variableValues: {
-      contact_name: attendeeName,
-      org_name: orgName,
-      conference_year: String(conference.year),
-      conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
-      conference_location: conferenceLocation,
-      /**
-       * ⚠️ These three names are what the TEMPLATE reads. It previously got
-       * `my_conference_url` and no counts at all, so the button rendered with an
-       * empty href and the body read "You have  meetings scheduled across
-       * days". An unknown variable renders as nothing and raises nothing, so the
-       * automation log said `sent` and the mail was useless — only opening the
-       * inbox or reading the template catches it.
-       *
-       * The link is deliberately the live agenda, not a rendering of the
-       * schedule. A late add or a swap changes what they are looking at; a link
-       * stays correct where a pasted table goes stale the moment anybody moves.
-       */
-      meeting_count: String(meetingCount),
-      day_count: String(dayCount),
-      schedule_url: `${appUrl}/me#my_schedule`,
-    },
+    variableValues,
   });
+}
+
+/**
+ * What the schedule-ready email says for one person: the trigger's values, and
+ * the War Room's Preview of the email, so the preview is the mail.
+ */
+export async function scheduleReadyVariables(params: {
+  db: AdminClient;
+  conferenceId: string;
+  attendeeName: string;
+  orgName: string;
+  meetingCount: number;
+  dayCount: number;
+}): Promise<Record<string, string> | null> {
+  const { db, conferenceId, attendeeName, orgName, meetingCount, dayCount } = params;
+
+  const { data: conference, error } = await db
+    .from("conference_instances")
+    .select("year, start_date, end_date, location_city, location_province, location_venue")
+    .eq("id", conferenceId)
+    .single();
+
+  if (error || !conference) {
+    console.error(
+      `triggerConferenceScheduleReady: conference ${conferenceId} not found: ${error?.message}`
+    );
+    return null;
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const conferenceLocation = [
+    conference.location_venue,
+    conference.location_city,
+    conference.location_province,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    contact_name: attendeeName,
+    org_name: orgName,
+    conference_year: String(conference.year),
+    conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
+    conference_location: conferenceLocation,
+    /**
+     * ⚠️ These three names are what the TEMPLATE reads. It previously got
+     * `my_conference_url` and no counts at all, so the button rendered with an
+     * empty href and the body read "You have  meetings scheduled across
+     * days". An unknown variable renders as nothing and raises nothing, so the
+     * automation log said `sent` and the mail was useless — only opening the
+     * inbox or reading the template catches it.
+     *
+     * The link is deliberately the live agenda, not a rendering of the
+     * schedule. A late add or a swap changes what they are looking at; a link
+     * stays correct where a pasted table goes stale the moment anybody moves.
+     */
+    meeting_count: String(meetingCount),
+    day_count: String(dayCount),
+    schedule_url: `${appUrl}/me#my_schedule`,
+  };
 }

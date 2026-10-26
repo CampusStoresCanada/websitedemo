@@ -5,9 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 
 /**
- * Manual per-cell overrides on the Schedule matrix. Writes directly to the
+ * Manual per-cell overrides on the meeting grid (War Room, Meetings). Writes directly to the
  * displayed run's `schedules` rows, marking them `is_manual` so a later
- * re-promote in Schedule Ops can warn before replacing hand edits. Blocks the
+ * publish can warn before replacing hand edits. Blocks the
  * one thing that's physically impossible — the same exhibitor or delegate in
  * two suites at the same time — but otherwise trusts the admin's intent.
  */

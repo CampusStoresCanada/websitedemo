@@ -40,7 +40,18 @@ export type ScheduleDeliveryResult = {
   unknownSeat: string[];
 };
 
-export async function sendSchedulesForRun(params: {
+/** One person the schedule email would go to, as it would be addressed. */
+export type ScheduleDeliveryTarget = {
+  seatId: string;
+  personKey: string;
+  name: string;
+  email: string;
+  orgName: string;
+  meetingCount: number;
+  dayCount: number;
+};
+
+type DeliveryParams = {
   db: AdminClient;
   conferenceId: string;
   /** The run whose schedule is being announced. Part of the idempotency key. */
@@ -52,7 +63,35 @@ export async function sendSchedulesForRun(params: {
    * and only the people whose day actually changed hear from us.
    */
   delegateSeatIds?: readonly string[];
-}): Promise<ScheduleDeliveryResult> {
+};
+
+/**
+ * Send people the schedule a run produced: the plan, then the send. The War
+ * Room's Preview reads the plan alone, so what it shows is who the send emails.
+ */
+export async function sendSchedulesForRun(params: DeliveryParams): Promise<ScheduleDeliveryResult> {
+  const { targets, result } = await planScheduleDelivery(params);
+  for (const target of targets) {
+    await triggerConferenceScheduleReady({
+      db: params.db,
+      conferenceId: params.conferenceId,
+      runId: params.runId,
+      personKey: target.personKey,
+      attendeeName: target.name,
+      attendeeEmail: target.email,
+      orgName: target.orgName,
+      meetingCount: target.meetingCount,
+      dayCount: target.dayCount,
+    });
+    result.sent.push(target.seatId);
+  }
+  return result;
+}
+
+/** Who would be emailed, with what, and who cannot be — without sending. */
+export async function planScheduleDelivery(
+  params: DeliveryParams
+): Promise<{ targets: ScheduleDeliveryTarget[]; result: ScheduleDeliveryResult }> {
   const { db, conferenceId, runId, delegateSeatIds } = params;
 
   // Canonical reader — one answer to "who has a seat". Not a 20th query shape.
@@ -124,6 +163,7 @@ export async function sendSchedulesForRun(params: {
     for (const o of data ?? []) orgNameById.set((o as { id: string }).id, (o as { name: string }).name);
   }
 
+  const planned: ScheduleDeliveryTarget[] = [];
   for (const seat of targets) {
     const contact = seat.holderContactId ? emailByContact.get(seat.holderContactId) : undefined;
     const email = contact?.email ?? null;
@@ -133,19 +173,16 @@ export async function sendSchedulesForRun(params: {
     }
 
     const tally = meetingsBySeat.get(seat.seatId);
-    await triggerConferenceScheduleReady({
-      db,
-      conferenceId,
-      runId,
+    planned.push({
+      seatId: seat.seatId,
       personKey: seat.holderPersonId ?? seat.seatId,
-      attendeeName: contact?.name ?? seat.holderName ?? "there",
-      attendeeEmail: email,
+      name: contact?.name ?? seat.holderName ?? "there",
+      email,
       orgName: orgNameById.get(seat.organizationId) ?? "your store",
       meetingCount: tally?.meetings ?? 0,
       dayCount: tally?.days.size ?? 0,
     });
-    result.sent.push(seat.seatId);
   }
 
-  return result;
+  return { targets: planned, result };
 }

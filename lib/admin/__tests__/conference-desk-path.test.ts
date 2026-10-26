@@ -17,7 +17,7 @@ describe("conferenceDeskPathId", () => {
   });
 
   it("keeps the War Room and design pages shut to desk staff", () => {
-    for (const segment of ["war-room", "badges", "schedule-ops", "details", "build", "registrations", "legal", "overview"]) {
+    for (const segment of ["war-room", "badges", "schedule", "details", "build", "registrations", "legal", "overview"]) {
       expect(conferenceDeskPathId(`/admin/conference/abc-123/${segment}`)).toBeNull();
     }
     expect(conferenceDeskPathId("/admin/conference/abc-123")).toBeNull();

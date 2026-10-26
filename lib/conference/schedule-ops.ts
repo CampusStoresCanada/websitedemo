@@ -326,3 +326,55 @@ export async function loadScheduleOpsSummary(
   };
 }
 
+export type ScheduleDiffRow = {
+  slotId: string;
+  dayNumber: number;
+  slotNumber: number;
+  startTime: string;
+  suiteNumber: number | null;
+  change: "added" | "removed" | "replaced";
+  live: string;
+  draft: string;
+};
+
+function assignmentLabel(assignment: ScheduleOpsAssignment | undefined): string {
+  if (!assignment) return "—";
+  return `${assignment.exhibitorOrganizationName} (${assignment.delegateNames.join(", ") || "no delegates"})`;
+}
+
+function assignmentSignature(assignment: ScheduleOpsAssignment | undefined): string {
+  if (!assignment) return "";
+  return `${assignment.exhibitorSeatId}|${[...assignment.delegateSeatIds].sort().join(",")}`;
+}
+
+/**
+ * What publishing the selected run would change, meeting by meeting: added,
+ * removed or replaced against the live (active) run. Moved from Schedule Ops,
+ * which worked it out in the browser, so the War Room's Publish preview reads
+ * the same answer.
+ */
+export function diffAgainstActive(summary: ScheduleOpsSummary): ScheduleDiffRow[] {
+  const live = new Map(summary.activeAssignments.map((a) => [a.meetingSlotId, a] as const));
+  const draft = new Map(summary.selectedAssignments.map((a) => [a.meetingSlotId, a] as const));
+  const suiteNumber = new Map(summary.suites.map((s) => [s.id, s.suiteNumber] as const));
+  const rows: ScheduleDiffRow[] = [];
+  for (const slot of summary.slots) {
+    const before = live.get(slot.id);
+    const after = draft.get(slot.id);
+    if (assignmentSignature(before) === assignmentSignature(after)) continue;
+    rows.push({
+      slotId: slot.id,
+      dayNumber: slot.dayNumber,
+      slotNumber: slot.slotNumber,
+      startTime: slot.startTime,
+      suiteNumber: suiteNumber.get(slot.suiteId) ?? null,
+      change: !before ? "added" : !after ? "removed" : "replaced",
+      live: assignmentLabel(before),
+      draft: assignmentLabel(after),
+    });
+  }
+  return rows.sort(
+    (a, b) => a.dayNumber - b.dayNumber || a.slotNumber - b.slotNumber || (a.suiteNumber ?? 0) - (b.suiteNumber ?? 0)
+  );
+}
+

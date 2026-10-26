@@ -160,6 +160,17 @@ task documents (speeches) stay on their task in What's next.
 Schedule Ops' Operate content moves here; the Schedule page keeps days, suites and
 cadence.
 
+**Landed 2026-10-26 (phase 4).** One read (`loadMeetingsOverview`): the matrix, the
+newest draft diffed against the live run (`diffAgainstActive`, moved server-side
+from Schedule Ops), who the email reaches (`planScheduleDelivery`, the send's own
+plan) with the real mail rendered for one of them, and `meetingsSoFar` with its
+unconfirmed list. The grid opens in a full modal; cancelling or changing a live
+meeting is confirmed and says nobody is emailed. Publish and Send are super-admin
+only on the server, and the rows say so instead of failing. Schedule Ops is gone;
+its address redirects here. **Not yet:** a real move (it is still cancel + add),
+notifying people after a hand edit, the late-add run (`extendRunId`), and a
+readable failure report (diagnostics are still raw JSON).
+
 ### Messages
 **Comms remains where things are sent and tracked** (so they stay in the calendar).
 The War Room shows this conference's messages **in context** and sends through Comms:

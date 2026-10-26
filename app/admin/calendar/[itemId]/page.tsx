@@ -32,7 +32,7 @@ function entityHref(
     case "conference_legal_version":
       return confId ? `/admin/conference/${confId}/legal` : `/admin/ops`;
     case "conference_program_item":
-      return confId ? `/admin/conference/${confId}/schedule-ops` : `/admin/ops`;
+      return confId ? `/admin/conference/${confId}/schedule` : `/admin/ops`;
     default:                       return null;
   }
 }

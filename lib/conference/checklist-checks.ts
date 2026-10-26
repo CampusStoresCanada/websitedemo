@@ -399,7 +399,14 @@ type StaffCheck = (args: { db: AdminClient; conferenceId: string }) => Promise<S
 export async function meetingsSoFar(
   db: AdminClient,
   conferenceId: string
-): Promise<{ total: number; started: number; confirmed: number; firstStartsLocal: string | null }> {
+): Promise<{
+  total: number;
+  started: number;
+  confirmed: number;
+  firstStartsLocal: string | null;
+  /** Meetings that have started and nobody has confirmed: the War Room's list to chase. */
+  unconfirmed: Array<{ scheduleId: string; startsAtLocal: string; suiteNumber: number | null; exhibitorName: string }>;
+}> {
   const { getConferenceScheduleTimeline } = await import("./schedule-service");
   const { loadMeetingConfirmations } = await import("./schedule-ops");
   const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
@@ -414,6 +421,14 @@ export async function meetingsSoFar(
     started: started.length,
     confirmed: started.filter((m) => confirmations.has(m.meetingAssignment!.scheduleId)).length,
     firstStartsLocal: meetings[0]?.startsAtLocal ?? null,
+    unconfirmed: started
+      .filter((m) => !confirmations.has(m.meetingAssignment!.scheduleId))
+      .map((m) => ({
+        scheduleId: m.meetingAssignment!.scheduleId,
+        startsAtLocal: m.startsAtLocal,
+        suiteNumber: m.meetingAssignment!.suiteNumber,
+        exhibitorName: m.meetingAssignment!.exhibitorName,
+      })),
   };
 }
 
@@ -455,7 +470,7 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
 
   /** Promoting a run is what publishes it: /me reads only the active run. */
   async schedule_promoted({ db, conferenceId }) {
-    const actions = [{ label: "Open Schedule Ops", href: `/admin/conference/${conferenceId}/schedule-ops` }];
+    const actions = [{ label: "Open Meetings", href: `/admin/conference/${conferenceId}/war-room?tab=meetings` }];
     const { data: run } = await db
       .from("scheduler_runs")
       .select("started_at, activated_at, total_meetings_created")
@@ -588,7 +603,7 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
    * schedule reads as not sent, which is true.
    */
   async schedule_emailed({ db, conferenceId }) {
-    const actions = [{ label: "Open Schedule Ops", href: `/admin/conference/${conferenceId}/schedule-ops` }];
+    const actions = [{ label: "Open Meetings", href: `/admin/conference/${conferenceId}/war-room?tab=meetings` }];
     const { data: run } = await db
       .from("scheduler_runs")
       .select("id")

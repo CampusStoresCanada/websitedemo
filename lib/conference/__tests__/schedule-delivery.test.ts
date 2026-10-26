@@ -110,6 +110,14 @@ describe("schedule delivery", () => {
     expect(triggerSpy.mock.calls[0][0]).toMatchObject({ attendeeEmail: "ann@example.test" });
   });
 
+  it("plans without sending: the War Room's preview names who the send would email", async () => {
+    const { planScheduleDelivery } = await import("../schedule-delivery");
+    const { targets, result } = await planScheduleDelivery({ db: fakeDb(CONTACTS), conferenceId: "conf", runId: "run-1" });
+    expect(triggerSpy).not.toHaveBeenCalled();
+    expect(targets.map((t) => t.email)).toEqual(["ann@example.test", "cy@example.test"]);
+    expect(result.noEmail).toEqual(["s2"]);
+  });
+
   it("carries the runId, so a new run re-sends and the same run does not", async () => {
     await sendSchedulesForRun({
       db: fakeDb(CONTACTS),
