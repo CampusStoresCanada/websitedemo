@@ -77,7 +77,7 @@ export default async function DoorListPage({
         </p>
       ) : null}
       <p className="mb-4 text-xs text-gray-500 print:hidden">
-        Sorted {SORT_WORDS[sort]}: your own choice, set in the War Room under What&apos;s next.
+        Sorted {SORT_WORDS[sort]}: your own choice, set in the War Room&apos;s Me menu.
       </p>
       <table className="w-full border-collapse text-sm">
         <thead>

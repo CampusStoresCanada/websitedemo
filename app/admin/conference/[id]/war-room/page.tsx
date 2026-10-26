@@ -212,7 +212,7 @@ export default async function ConferenceWarRoomPage({
         </StatusItem>
         <StatusItem
           tone={stations.length === 0 ? "quiet" : online ? "ok" : "alert"}
-          href={`/admin/conference/${id}/check-in/print-station`}
+          href="?tab=print"
         >
           {stations.length === 0 ? "No print station" : online ? "Print station online" : "Print station offline"}
           {queued ? ` · ${queued} waiting` : ""}
@@ -239,6 +239,7 @@ export default async function ConferenceWarRoomPage({
         menus={menus}
         waiting={waiting}
         requestedTab={tabParam}
+        printStation={{ stations: stations.length, online, queued }}
         syncPeopleIndex={async () => {
           "use server";
           await syncConferencePeopleIndex(id);

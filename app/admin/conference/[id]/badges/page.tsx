@@ -4,11 +4,7 @@ import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  advanceBadgePrintJob,
-  createPreprintedBadgeJob,
-  deleteBadgePrintJob,
   getBadgeSetupSession,
-  listBadgePrintJobs,
   listBadgeTemplateConfigs,
   saveBadgeSetupSession,
   saveBadgeTemplateConfig,
@@ -29,8 +25,6 @@ import {
   normalizeArrangement,
   type BadgeArrangement,
 } from "@/lib/conference/badges/arrangement";
-import BadgeQuickReprint from "@/components/admin/conference/BadgeQuickReprint";
-import BadgeJobsAutoRefresh from "@/components/admin/conference/BadgeJobsAutoRefresh";
 import BadgeTemplateEditor from "@/components/admin/conference/BadgeTemplateEditor";
 import BadgeSetupWizardStub from "@/components/admin/conference/BadgeSetupWizardStub";
 import {
@@ -41,9 +35,14 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type BadgeOpsMode = "setup" | "reset" | "studio" | "make";
+/**
+ * Badge Ops is Manage: what a badge is. Making and reprinting badges is Operate
+ * and lives in the War Room's Print tab (WAR_ROOM_OPERATE_PLAN §6), so the old
+ * "Make Badges" mode is gone and its address goes there.
+ */
+type BadgeOpsMode = "setup" | "reset" | "studio";
 
-function parseBadgeOpsMode(value: string | string[] | undefined): BadgeOpsMode {
+function parseBadgeOpsMode(value: string | string[] | undefined): BadgeOpsMode | "make" {
   const mode = Array.isArray(value) ? value[0] : value;
   if (mode === "setup" || mode === "reset" || mode === "studio" || mode === "make") {
     return mode;
@@ -66,7 +65,9 @@ export default async function ConferenceBadgeOpsPage({
   const { id: conferenceId } = await params;
   const canRunCanonicalFixes = isGlobalAdmin(auth.ctx.globalRole);
   const query = await searchParams;
-  const mode = parseBadgeOpsMode(query.mode);
+  const requestedMode = parseBadgeOpsMode(query.mode);
+  if (requestedMode === "make") redirect(`/admin/conference/${conferenceId}/war-room?tab=print`);
+  const mode: BadgeOpsMode = requestedMode;
   const actionStatusRaw = Array.isArray(query.action_status)
     ? query.action_status[0]
     : query.action_status;
@@ -80,7 +81,6 @@ export default async function ConferenceBadgeOpsPage({
   const adminClient = createAdminClient();
   const [
     { data: conference },
-    jobsResult,
     scanRulesResult,
     printStockResult,
     configsResult,
@@ -94,7 +94,6 @@ export default async function ConferenceBadgeOpsPage({
         .select("id, name, year, edition_code")
         .eq("id", conferenceId)
         .maybeSingle(),
-      listBadgePrintJobs(conferenceId),
       // Enumerated from live data so an admin assigns what exists rather than
       // typing an organisation type from memory.
       loadBadgeScanRuleOptions(conferenceId),
@@ -139,10 +138,6 @@ export default async function ConferenceBadgeOpsPage({
   const scanRuleOptions = scanRulesResult.ok ? scanRulesResult.data : null;
   const printStockOptions = printStockResult.ok ? printStockResult.data : null;
 
-  const jobs = jobsResult.success ? jobsResult.data ?? [] : [];
-  // The most recently created package — shown next to the Generate button so
-  // the result of pressing it is visible without scrolling anywhere.
-  const latestJob = (jobs as Array<Record<string, unknown>>)[0] ?? null;
   const configs = configsResult.success ? configsResult.data ?? [] : [];
   const setupSession = setupSessionResult.success ? setupSessionResult.data ?? null : null;
   const requestedTemplateVersion = Number(
@@ -168,28 +163,6 @@ export default async function ConferenceBadgeOpsPage({
   const unnamed = unnamedSeats(badgeRun);
   const soldTypes = badgeRun.types.filter((type) => type.seats.length > 0);
   const unallocatedSeatOrgCount = new Set(unnamed.map((s) => s.seat.organizationId)).size;
-  // Who owes you names, and how many. The same list serves both jobs this panel
-  // has: it is the chase list for the weeks before the print run, and it is
-  // exactly what the blank stack will contain if you print one.
-  const unnamedByOrg = [
-    ...unnamed
-      .reduce((acc, { type, seat }) => {
-        const existing = acc.get(seat.organizationId);
-        if (existing) {
-          existing.count += 1;
-          existing.types.set(type.name, (existing.types.get(type.name) ?? 0) + 1);
-        } else {
-          acc.set(seat.organizationId, {
-            id: seat.organizationId,
-            name: seat.organizationName,
-            count: 1,
-            types: new Map([[type.name, 1]]),
-          });
-        }
-        return acc;
-      }, new Map<string, { id: string; name: string; count: number; types: Map<string, number> }>())
-      .values(),
-  ].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   // The editor's tabs are this conference's registration types. It stores
   // layouts by entity id; these are the names a human recognises from Catalog.
   const variantLabels = Object.fromEntries(
@@ -417,76 +390,6 @@ export default async function ConferenceBadgeOpsPage({
     revalidatePath(`/admin/conference/${conferenceId}/badges`);
   }
 
-  async function preprintedJobAction(formData: FormData) {
-    "use server";
-    const templateVersionRaw = String(formData.get("template_version") ?? "").trim();
-    const templateVersion =
-      templateVersionRaw.length > 0 && Number.isFinite(Number(templateVersionRaw))
-        ? Number(templateVersionRaw)
-        : null;
-    // Order comes from the arrangement (step 2), which the job snapshots. The
-    // form used to carry delegate/exhibitor sort modes; those fields no longer
-    // exist, and parsing them here only manufactured defaults nothing read.
-    const result = await createPreprintedBadgeJob({
-      conferenceId,
-      templateVersion,
-      includeBlanks: String(formData.get("include_blanks") ?? "") === "on",
-    });
-    if (!result.success) {
-      redirect(
-        `/admin/conference/${conferenceId}/badges?mode=${mode}&action_status=error&action_message=${encodeURIComponent(
-          result.error ??
-            "Failed to create preprinted badge job. Open Setup or Studio and set both front overlays."
-        )}`
-      );
-    }
-    const warningCount = result.data?.warningCount ?? 0;
-    const warningSuffix =
-      warningCount > 0
-        ? ` Preflight flagged ${warningCount} text-fit warning(s). Open job events/Studio to fix before final print.`
-        : "";
-    revalidatePath(`/admin/conference/${conferenceId}/badges`);
-    redirect(
-      `/admin/conference/${conferenceId}/badges?mode=${mode}&action_status=success&action_message=${encodeURIComponent(
-        `Print package queued and artifact generated.${warningSuffix}`
-      )}`
-    );
-  }
-
-  async function advanceJobAction(formData: FormData) {
-    "use server";
-    const jobId = String(formData.get("job_id") ?? "").trim();
-    const nextStatus = String(formData.get("next_status") ?? "").trim();
-    if (!jobId || !nextStatus) return;
-    await advanceBadgePrintJob({
-      jobId,
-      nextStatus: nextStatus as
-        | "queued"
-        | "rendering"
-        | "rendered"
-        | "pdf_generated"
-        | "sent_to_printer"
-        | "printed"
-        | "failed"
-        | "canceled"
-        | "delivered",
-    });
-    revalidatePath(`/admin/conference/${conferenceId}/badges`);
-  }
-
-  async function deleteJobAction(formData: FormData) {
-    "use server";
-    const jobId = String(formData.get("job_id") ?? "").trim();
-    const reason = String(formData.get("delete_reason") ?? "").trim();
-    if (!jobId) return;
-    await deleteBadgePrintJob({
-      conferenceId,
-      jobId,
-      reason,
-    });
-    revalidatePath(`/admin/conference/${conferenceId}/badges`);
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Supabase infers `never` for wide selects
   const people = (peopleRows ?? []) as Record<string, any>[];
   const organizationIds = Array.from(
@@ -702,7 +605,7 @@ export default async function ConferenceBadgeOpsPage({
         <p className="mt-1 text-sm text-gray-600">
           Move between setup, reset, studio work, and badge operations without losing progress.
         </p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
           <Link
             href={`/admin/conference/${conferenceId}/badges?mode=setup`}
             className={`rounded-md border px-3 py-2 text-sm font-medium ${
@@ -732,16 +635,6 @@ export default async function ConferenceBadgeOpsPage({
             }`}
           >
             Working Studio
-          </Link>
-          <Link
-            href={`/admin/conference/${conferenceId}/badges?mode=make`}
-            className={`rounded-md border px-3 py-2 text-sm font-medium ${
-              mode === "make"
-                ? "border-accent bg-red-50 text-accent"
-                : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            Make Badges
           </Link>
         </div>
       </section>
@@ -785,39 +678,7 @@ export default async function ConferenceBadgeOpsPage({
         </section>
       ) : null}
 
-      {mode === "make" ? (
-        <BadgeQuickReprint
-          conferenceId={conferenceId}
-          people={people.map((row) => ({
-            id: row.id as string,
-            displayName:
-              ((row.canonical_person_id as string | null)
-                ? (() => {
-                    const canonical = canonicalById.get(row.canonical_person_id as string);
-                    if (!canonical) return null;
-                    return `${canonical.firstName ?? ""} ${canonical.lastName ?? ""}`.trim() || null;
-                  })()
-                : null) ??
-              ((row.display_name as string | null) ?? null),
-            contactEmail:
-              ((row.canonical_person_id as string | null)
-                ? (canonicalById.get(row.canonical_person_id as string)?.email ?? null)
-                : null) ||
-              ((row.contact_email as string | null) ?? null) ||
-              ((row.assigned_email_snapshot as string | null) ?? null) ||
-              ((row.organization_id as string | null)
-                ? (organizationEmailById.get(row.organization_id as string) ?? null)
-                : null),
-            roleTitle:
-              ((row.canonical_person_id as string | null)
-                ? (canonicalById.get(row.canonical_person_id as string)?.title ?? null)
-                : null) ?? ((row.role_title as string | null) ?? null),
-            registrationType: variantNameByPersonId.get(row.id as string) ?? "No registration seat",
-          }))}
-        />
-      ) : null}
-
-      {(mode === "studio" || mode === "make") && missingCanonicalCount > 0 ? (
+      {mode === "studio" && missingCanonicalCount > 0 ? (
         <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-medium">
             Badge preflight blocked: {missingCanonicalCount} conference people are missing
@@ -957,17 +818,13 @@ export default async function ConferenceBadgeOpsPage({
           is a preflight step for generation, so it comes after you have
           decided what a badge looks like, not before. Design → arrange →
           generate. */}
-      {(mode === "studio" || mode === "make") ? (
+      {mode === "studio" ? (
       <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-gray-900">Print Package (Pre-Event)</h2>
+        <h2 className="text-base font-semibold text-gray-900">Print package: rules, stock and order</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Generate a PDF package for pre-printing badges in deterministic order.
+          What the pre-printed package says, what blank stock comes with it, and how the file is stacked.
         </p>
         <div className="mt-2 text-sm text-gray-700">
-          Template: <span className="font-medium">v{String((selectedConfigRow?.config_version as number | undefined) ?? "—")}</span>{" "}
-          ({String((selectedConfigRow?.name as string | undefined) ?? "Unnamed")} /{" "}
-          {String((selectedConfigRow?.status as string | undefined) ?? "draft")})
-          <span className="mx-2 text-gray-400">•</span>
           Badges to print: <span className="font-medium">{named.length}</span>
           {soldTypes.length > 0 ? (
             <span className="ml-1 text-gray-500">
@@ -988,18 +845,7 @@ export default async function ConferenceBadgeOpsPage({
             </>
           ) : null}
         </div>
-        <form action={preprintedJobAction} className="mt-3 space-y-3">
-          {/* The template is chosen ONCE, above the editor — you pick a version,
-              edit that version, then preflight and print that version. A second
-              picker here let you print something other than what you had just
-              been looking at, which is the sort of near-miss nobody catches
-              until the box is open. The version prints as a hidden field so the
-              job still records which one it was. */}
-          <input
-            type="hidden"
-            name="template_version"
-            value={String((selectedConfigRow?.config_version as number | undefined) ?? "")}
-          />
+        <div className="mt-3 space-y-3">
 
           {/* Rules come first because they change what the badge SAYS — which
               days appear on the schedule — and what a scan of it does. Arranging
@@ -1053,224 +899,18 @@ export default async function ConferenceBadgeOpsPage({
             </div>
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              3. Generate
-            </p>
-            {/* Seats nobody has been named to.
-                ⛔ Shown whether or not you print blanks for them, because the
-                list is the more useful half: these are the organisations that
-                still owe you names, and the count is the size of the problem.
-                A blank stack is the fallback for the ones that never arrive —
-                the desk writes the name on at check-in — not a substitute for
-                chasing them. */}
-            {unnamed.length > 0 ? (
-              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-                <p className="text-sm font-medium text-gray-900">
-                  {unnamed.length} seat{unnamed.length === 1 ? " has" : "s have"} nobody
-                  named — across {unallocatedSeatOrgCount} organisation
-                  {unallocatedSeatOrgCount === 1 ? "" : "s"}
-                </p>
-                <label className="mt-2 flex items-start gap-2 text-sm text-gray-800">
-                  <input
-                    type="checkbox"
-                    name="include_blanks"
-                    defaultChecked={false}
-                    className="mt-1"
-                  />
-                  <span>
-                    Also print a blank card for each of them.
-                    <span className="block text-xs text-gray-600">
-                      The company&apos;s name, logo and listing code still print — only
-                      the person is left empty, for the desk to write in. There is no
-                      scan code on a blank: nobody is on it yet.
-                      {" "}Adds {unnamed.length} card{unnamed.length === 1 ? "" : "s"} to
-                      the end of the file, after the {named.length} named one
-                      {named.length === 1 ? "" : "s"}.
-                    </span>
-                  </span>
-                </label>
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs font-medium text-gray-700">
-                    Who still owes names
-                  </summary>
-                  <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
-                    {unnamedByOrg.map((org) => (
-                      <li
-                        key={org.id}
-                        className="flex items-baseline justify-between gap-3 text-xs text-gray-700"
-                      >
-                        <span className="truncate">{org.name}</span>
-                        <span className="shrink-0 text-gray-500">
-                          {org.count}{" · "}
-                          {[...org.types.entries()]
-                            .map(([typeName, count]) => `${count} ${typeName}`)
-                            .join(", ")}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </div>
-            ) : null}
-
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="submit"
-                disabled={missingCanonicalCount > 0}
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Generate Print Package (PDF)
-              </button>
-              <span className="text-xs text-gray-500">
-                Front and back for every named badge, in the order set above.
-              </span>
-            </div>
-
-            {/* ⛔ The outcome belongs WHERE THE ACTION IS. Generating redirects
-                with a success banner, but that banner renders at the top of the
-                page and this button is ~8,000px below it — and the jobs table
-                carrying the "Open" link was gated to `make` mode, so from the
-                studio you clicked Generate and nothing visibly happened at all.
-                The file it just made is the one thing you want next. */}
-            {latestJob ? (
-              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                <span className="font-medium text-gray-900">Latest package</span>
-                <span className="text-gray-600">{String(latestJob.status)}</span>
-                <span className="text-gray-400">·</span>
-                <span className="text-gray-600">
-                  template v{String(latestJob.template_version ?? "?")}
-                </span>
-                {/* Whether the file you just made has blanks in it is not
-                    recoverable from anywhere else on this page: the checkbox
-                    resets on every generate (the choice is snapshotted onto the
-                    job, deliberately, so it is a decision made per run), and
-                    two packages of very different lengths otherwise look
-                    identical here. */}
-                <span className="text-gray-400">·</span>
-                <span className="text-gray-600">
-                  {(latestJob.metadata as Record<string, unknown> | null)
-                    ?.includeBlanks === true
-                    ? "with blanks"
-                    : "named only"}
-                </span>
-                {latestJob.output_artifact_url ? (
-                  <Link
-                    href={String(latestJob.output_artifact_url)}
-                    target="_blank"
-                    className="ml-auto rounded border border-gray-300 bg-white px-2 py-1 font-medium text-gray-800 hover:bg-gray-100"
-                  >
-                    Open the file ↗
-                  </Link>
-                ) : (
-                  <span className="ml-auto text-gray-500">no artifact yet</span>
-                )}
-              </div>
-            ) : null}
-          </div>
-        </form>
-      </section>
-      ) : null}
-
-      {mode === "make" ? (
-      <>
-      <BadgeJobsAutoRefresh conferenceId={conferenceId} intervalMs={4000} />
-      <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-gray-900">Jobs</h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Created</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Pipeline</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Status</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Transport</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Reason</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Artifact</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Advance</th>
-                <th className="px-3 py-2 text-left font-semibold text-gray-700">Delete</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {jobs.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-gray-500" colSpan={8}>
-                    No badge jobs yet.
-                  </td>
-                </tr>
-              ) : (
-                jobs.map((job) => (
-                  <tr key={String(job.id)}>
-                    <td className="px-3 py-2 text-gray-700">{String(job.created_at)}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(job.pipeline_type)}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(job.status)}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(job.transport_method)}</td>
-                    <td className="px-3 py-2 text-gray-700">{String(job.reprint_reason ?? "—")}</td>
-                    <td className="px-3 py-2 text-gray-700">
-                      {job.output_artifact_url ? (
-                        <Link
-                          href={String(job.output_artifact_url)}
-                          target="_blank"
-                          className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        >
-                          Open
-                        </Link>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <form action={advanceJobAction} className="flex items-center gap-2">
-                        <input type="hidden" name="job_id" value={String(job.id)} />
-                        <select
-                          name="next_status"
-                          defaultValue="rendering"
-                          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-                        >
-                          <option value="rendering">rendering</option>
-                          <option value="rendered">rendered</option>
-                          <option value="pdf_generated">pdf_generated</option>
-                          <option value="sent_to_printer">sent_to_printer</option>
-                          <option value="printed">printed</option>
-                          <option value="delivered">delivered</option>
-                          <option value="failed">failed</option>
-                          <option value="canceled">canceled</option>
-                        </select>
-                        <button
-                          type="submit"
-                          className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        >
-                          Apply
-                        </button>
-                      </form>
-                    </td>
-                    <td className="px-3 py-2">
-                      <form action={deleteJobAction} className="flex flex-col gap-2">
-                        <input type="hidden" name="job_id" value={String(job.id)} />
-                        <input
-                          name="delete_reason"
-                          type="text"
-                          required
-                          minLength={8}
-                          placeholder="Reason for deletion"
-                          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-                        />
-                        <button
-                          type="submit"
-                          className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-                        >
-                          Delete Job
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          {/* Making the package is Operate: it happens in the War Room's Print
+              tab, which reads this arrangement, these rules and this stock
+              (WAR_ROOM_OPERATE_PLAN §6). Badge Ops says what a badge is. */}
+          <p className="text-sm text-gray-600">
+            Ready to print? Make the package in the{" "}
+            <Link href={`/admin/conference/${conferenceId}/war-room?tab=print`} className="font-medium text-accent hover:underline">
+              War Room&apos;s Print tab
+            </Link>
+            .
+          </p>
         </div>
       </section>
-      </>
       ) : null}
     </main>
   );

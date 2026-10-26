@@ -2,12 +2,18 @@
 
 import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { stickersFor, type ReprintPlan, type StickerSide } from "@/lib/conference/badges/reprint-plan";
+import {
+  stickersFor,
+  type BadgeStock,
+  type CardsOnHand,
+  type ReprintPlan,
+  type StickerSide,
+} from "@/lib/conference/badges/reprint-plan";
 import { hashPrintStationKey, newPrintStationKey, stationOnline } from "@/lib/conference/badges/print-station";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { parseConferenceDocuments } from "@/lib/conference-documents";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
+import { namedSeats, resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
 import { normalizeArrangement, type BadgeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgeTemplateConfig,
@@ -796,6 +802,127 @@ export async function createPreprintedBadgeJob(params: {
   };
 }
 
+export type PrintOverviewJob = {
+  id: string;
+  createdAt: string;
+  pipeline: "preprinted" | "onsite_reprint";
+  status: string;
+  /** Who it is for (a reprint); null for a package. */
+  personName: string | null;
+  reason: string | null;
+  artifactUrl: string | null;
+  includeBlanks: boolean;
+  templateVersion: number | null;
+};
+
+export type PrintOverview = {
+  /** The template a package prints with: the active one, else the newest. */
+  template: { version: number; name: string; status: string } | null;
+  named: number;
+  /** Seats nobody is named to, by company: the chase list, and the blank stack. */
+  unnamed: number;
+  unnamedByOrg: Array<{ name: string; count: number; types: string }>;
+  /** What stops a package being made (preflight, without making one). */
+  blocking: string[];
+  blockingCount: number;
+  textWarnings: number;
+  latestPackage: PrintOverviewJob | null;
+  /** Newest first: packages and desk reprints, not documents. */
+  jobs: PrintOverviewJob[];
+  /** Events with a door, for their door lists (the desk's own door picker). */
+  doorEvents: Array<{ id: string; name: string; date: string }>;
+};
+
+/**
+ * The War Room's Print tab, in one read (WAR_ROOM_OPERATE_PLAN §5): the package
+ * as it would print now, what blocks it, and the jobs so far. Loaded when the
+ * tab opens, not with the page: it costs a badge run and a preflight.
+ */
+export async function loadPrintOverview(conferenceId: string): Promise<QueueResult<PrintOverview>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const [{ data: configs }, run, { data: jobRows }] = await Promise.all([
+    db
+      .from("badge_template_configs")
+      .select("config_version, name, status")
+      .eq("conference_id", conferenceId)
+      .order("config_version", { ascending: false }),
+    resolveBadgeRun(conferenceId),
+    db
+      .from("badge_print_jobs")
+      .select("id, created_at, pipeline_type, status, person_id, reprint_reason, output_artifact_url, metadata, template_version")
+      .eq("conference_id", conferenceId)
+      .in("pipeline_type", ["preprinted", "onsite_reprint"])
+      .order("created_at", { ascending: false })
+      .limit(40),
+  ]);
+
+  // The same template Badge Ops' Make Badges printed with: active, else newest.
+  const configRow = (configs ?? []).find((row) => row.status === "active") ?? (configs ?? [])[0] ?? null;
+  const template = configRow
+    ? { version: Number(configRow.config_version), name: String(configRow.name ?? "Unnamed"), status: String(configRow.status) }
+    : null;
+
+  const { loadDoorEvents } = await import("@/lib/conference/badges/checkin");
+  const [issues, door] = await Promise.all([
+    runBadgePreflight({ conferenceId, templateVersion: template?.version ?? null }),
+    // ⚠️ A failure here costs the door lists, never the tab.
+    loadDoorEvents(db, conferenceId).catch(() => ({ doorEvents: [] })),
+  ]);
+  const blocking = issues.filter((issue) => issue.code !== "TEXT_OVERFLOW");
+
+  const unnamed = unnamedSeats(run);
+  const byOrg = new Map<string, { name: string; count: number; types: Map<string, number> }>();
+  for (const { type, seat } of unnamed) {
+    const entry = byOrg.get(seat.organizationId) ?? { name: seat.organizationName, count: 0, types: new Map() };
+    entry.count += 1;
+    entry.types.set(type.name, (entry.types.get(type.name) ?? 0) + 1);
+    byOrg.set(seat.organizationId, entry);
+  }
+
+  const personIds = [...new Set((jobRows ?? []).map((j) => j.person_id as string | null).filter((id): id is string => Boolean(id)))];
+  const { data: people } = personIds.length
+    ? await db.from("conference_people").select("id, display_name").in("id", personIds)
+    : { data: [] as Array<{ id: string; display_name: string | null }> };
+  const nameById = new Map((people ?? []).map((p) => [p.id as string, (p.display_name as string | null) ?? null]));
+
+  const jobs: PrintOverviewJob[] = (jobRows ?? []).map((row) => ({
+    id: row.id as string,
+    createdAt: row.created_at as string,
+    pipeline: row.pipeline_type as "preprinted" | "onsite_reprint",
+    status: row.status as string,
+    personName: row.person_id ? nameById.get(row.person_id as string) ?? "Someone no longer on the roster" : null,
+    reason: (row.reprint_reason as string | null) ?? null,
+    artifactUrl: (row.output_artifact_url as string | null) ?? null,
+    includeBlanks: (row.metadata as Record<string, unknown> | null)?.includeBlanks === true,
+    templateVersion: (row.template_version as number | null) ?? null,
+  }));
+
+  return {
+    success: true,
+    data: {
+      template,
+      named: namedSeats(run).length,
+      unnamed: unnamed.length,
+      unnamedByOrg: [...byOrg.values()]
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+        .map((org) => ({
+          name: org.name,
+          count: org.count,
+          types: [...org.types.entries()].map(([name, count]) => `${count} ${name}`).join(", "),
+        })),
+      blocking: blocking.slice(0, 8).map((issue) => issue.message),
+      blockingCount: blocking.length,
+      textWarnings: issues.length - blocking.length,
+      latestPackage: jobs.find((job) => job.pipeline === "preprinted") ?? null,
+      jobs,
+      doorEvents: door.doorEvents.map((e) => ({ id: e.id, name: e.name, date: e.date })),
+    },
+  };
+}
+
 export async function advanceBadgePrintJob(params: {
   jobId: string;
   nextStatus: BadgeJobStatus;
@@ -1205,6 +1332,13 @@ export type ReprintPreview = {
   lastName: string;
   roleTitle: string;
   organizationName: string | null;
+  /**
+   * Asked for with includeCards (the War Room, which has no desk facts): the
+   * cards that exist for them and the run's suggestion, from the same facts
+   * the desk loads, so both offer the same choices.
+   */
+  cards?: CardsOnHand | null;
+  suggestedStock?: BadgeStock;
 };
 
 /**
@@ -1214,6 +1348,8 @@ export type ReprintPreview = {
 export async function loadReprintPreview(params: {
   conferenceId: string;
   personId: string;
+  /** Costs one badge run; the desk already holds these facts. */
+  includeCards?: boolean;
 }): Promise<QueueResult<ReprintPreview>> {
   const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
@@ -1228,6 +1364,11 @@ export async function loadReprintPreview(params: {
   const { loadBadgeIdentity } = await import("@/lib/conference/badges/label-document");
   const identity = await loadBadgeIdentity(db, person as Record<string, unknown>);
   const org = (person as { organizations?: { name?: string | null } | null }).organizations;
+  const facts = params.includeCards
+    ? (await (await import("@/lib/conference/badges/checkin")).loadCheckInFacts(params.conferenceId)).facts[
+        params.personId
+      ]
+    : undefined;
   return {
     success: true,
     data: {
@@ -1236,6 +1377,9 @@ export async function loadReprintPreview(params: {
       lastName: identity.names.lastName ?? "",
       roleTitle: identity.roleTitle ?? "",
       organizationName: org?.name ?? null,
+      ...(params.includeCards
+        ? { cards: facts?.reprintCards ?? null, suggestedStock: facts?.reprintStock ?? "none" }
+        : {}),
     },
   };
 }

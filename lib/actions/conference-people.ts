@@ -21,6 +21,7 @@ import {
 } from "@/lib/actions/conference-commerce";
 import {
   requestBadgeReprint,
+  sendReprintToQueue,
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
 import { createKnownPerson, ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
@@ -510,7 +511,7 @@ export async function updateConferencePersonOps(
     return {
       success: false,
       error:
-        "Identity fields must be edited through applyCanonicalConferencePersonIdentityEdit (canonical-first), not conference projection ops update.",
+        "Identity fields are edited on their contact record (updateField, as the desk and War Room reprints do), not conference projection ops update.",
     };
   }
 
@@ -539,145 +540,6 @@ export async function updateConferencePersonOps(
     actorId: auth.ctx.userId,
     actorType: "user",
     details: { fields: Object.keys(sanitized) },
-  });
-
-  return { success: true };
-}
-
-export async function applyCanonicalConferencePersonIdentityEdit(
-  personId: string,
-  patch: {
-    displayName?: string | null;
-    contactEmail?: string | null;
-    roleTitle?: string | null;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const db = createAdminClient();
-  const { data: person, error: personError } = await db
-    .from("conference_people")
-    .select(
-      "id, conference_id, organization_id, user_id, canonical_person_id, display_name, contact_email, role_title"
-    )
-    .eq("id", personId)
-    .maybeSingle();
-
-  if (personError || !person) {
-    return { success: false, error: personError?.message ?? "Conference person not found." };
-  }
-
-  const nextDisplayName = patch.displayName?.trim() || null;
-  const nextContactEmail = patch.contactEmail?.trim().toLowerCase() || null;
-  const nextRoleTitle = patch.roleTitle?.trim() || null;
-  const nowIso = new Date().toISOString();
-
-  const canonicalPersonId =
-    (person.canonical_person_id as string | null) ??
-    (person.user_id
-      ? (
-          await ensurePersonForUser({
-            userId: person.user_id,
-            organizationId: person.organization_id,
-            fallbackEmail: nextContactEmail ?? person.contact_email ?? null,
-          })
-        ).personId
-      : null);
-
-  if (person.user_id && nextDisplayName) {
-    await db
-      .from("profiles")
-      .update({ display_name: nextDisplayName, updated_at: nowIso })
-      .eq("id", person.user_id);
-
-    const { data: userRow } = await db
-      .from("users")
-      .select("person_id")
-      .eq("id", person.user_id)
-      .maybeSingle();
-    if (userRow?.person_id) {
-      const parts = splitName(nextDisplayName);
-      await db
-        .from("contacts")
-        .update({
-          first_name: parts.firstName || undefined,
-          last_name: parts.lastName || undefined,
-          updated_at: nowIso,
-        })
-        .eq("id", userRow.person_id);
-    }
-  }
-
-  if (canonicalPersonId && (nextContactEmail || nextRoleTitle || nextDisplayName)) {
-    const peoplePatch: Record<string, unknown> = { updated_at: nowIso };
-    if (nextDisplayName) {
-      const parts = splitName(nextDisplayName);
-      peoplePatch.first_name = parts.firstName || null;
-      peoplePatch.last_name = parts.lastName || null;
-    }
-    if (nextContactEmail) peoplePatch.work_email = nextContactEmail;
-    if (nextRoleTitle !== null) peoplePatch.role_title = nextRoleTitle;
-    await db.from("contacts").update(peoplePatch).eq("id", canonicalPersonId);
-  }
-
-  if (nextContactEmail || nextRoleTitle || nextDisplayName) {
-    const oldEmail = person.contact_email?.trim().toLowerCase() ?? null;
-    const contactPatch: Record<string, unknown> = { updated_at: nowIso };
-    if (nextDisplayName) contactPatch.name = nextDisplayName;
-    if (nextContactEmail) {
-      contactPatch.work_email = nextContactEmail;
-      contactPatch.email = nextContactEmail;
-    }
-    if (nextRoleTitle !== null) contactPatch.role_title = nextRoleTitle;
-
-    if (oldEmail) {
-      await db
-        .from("contacts")
-        .update(contactPatch)
-        .eq("organization_id", person.organization_id)
-        .or(`work_email.eq.${oldEmail},email.eq.${oldEmail}`);
-    } else if (person.display_name) {
-      await db
-        .from("contacts")
-        .update(contactPatch)
-        .eq("organization_id", person.organization_id)
-        .eq("name", person.display_name);
-    }
-  }
-
-  /**
-   * The write-back into conference_registrations (delegate_name, legal_name,
-   * delegate_email, delegate_title) is GONE with the column that reached it.
-   *
-   * It was mirroring identity into the v2 person-monolith — a table with 0 rows
-   * and no writer. `contacts` is the canonical identity store; conference_people
-   * carries the per-conference projection. Mirroring into a third place was the
-   * habit that made every one of these questions have three answers.
-   */
-
-  const projectionPatch: Record<string, unknown> = { updated_at: nowIso };
-  if (nextDisplayName) projectionPatch.display_name = nextDisplayName;
-  if (nextContactEmail) projectionPatch.contact_email = nextContactEmail;
-  if (nextRoleTitle !== null) projectionPatch.role_title = nextRoleTitle;
-  if (canonicalPersonId) projectionPatch.canonical_person_id = canonicalPersonId;
-  await db.from("conference_people").update(projectionPatch).eq("id", personId);
-
-  await logAuditEventSafe({
-    action: "conference_person_identity_edit_canonical",
-    entityType: "conference_people",
-    entityId: personId,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      conferenceId: person.conference_id,
-      organizationId: person.organization_id,
-      updated: {
-        displayName: Boolean(nextDisplayName),
-        contactEmail: Boolean(nextContactEmail),
-        roleTitle: patch.roleTitle !== undefined,
-      },
-    },
   });
 
   return { success: true };
@@ -1207,6 +1069,81 @@ export async function reprintConferenceBadge(
       qrPayload: reprintJob.data.qrPayload,
       labelPrintable: plan.transport === "ql_label",
     },
+  };
+}
+
+/**
+ * Print one person's badge: the one engine (WAR_ROOM_OPERATE_PLAN §7). The desk,
+ * the War Room and anything after them call this, never the two steps apart.
+ *
+ * It is the desk's own sequence, which was the only one that worked: plan the
+ * job for the card in hand, and when that makes a QL sticker, send it straight
+ * to the print station (one tap prints, Stephen 2026-10-21). Badge Ops' Quick
+ * Reprint and the War Room drawer did the first step only — every reprint was
+ * planned as a full colour badge and none reached the station.
+ *
+ * ⛔ `stockInHand` is required: "none" is a real answer (no card, full badge),
+ * and a caller that did not ask has not earned the guess.
+ */
+export async function printBadge(params: {
+  conferenceId: string;
+  personId: string;
+  reason: BadgeReprintReason;
+  note?: string | null;
+  stockInHand: BadgeStock;
+}): Promise<
+  | { success: false; error: string }
+  | {
+      success: true;
+      data: {
+        jobId: string;
+        /** A QL sticker. False: the full colour badge, which the QL cannot print. */
+        labelPrintable: boolean;
+        /** On the print station's queue. */
+        queued: boolean;
+        stationOnline: boolean;
+        /** Planned, but the queue refused it: the desk can retry the send. */
+        queueError: string | null;
+        /** The full colour badge's file, for a colour printer. Null for a sticker. */
+        artifactUrl: string | null;
+      };
+    }
+> {
+  const printed = await reprintConferenceBadge(
+    params.personId,
+    params.reason,
+    params.note ?? null,
+    params.stockInHand === "none" ? undefined : params.stockInHand
+  );
+  if (!printed.success || !printed.data) {
+    return { success: false, error: printed.error ?? "The badge could not be printed." };
+  }
+  const jobId = printed.data.badgePrintJobId;
+  if (!printed.data.labelPrintable) {
+    // requestBadgeReprint's own artifact for a "pdf" job.
+    const { data: job } = await createAdminClient()
+      .from("badge_print_jobs")
+      .select("output_artifact_url")
+      .eq("id", jobId)
+      .maybeSingle();
+    return {
+      success: true,
+      data: {
+        jobId,
+        labelPrintable: false,
+        queued: false,
+        stationOnline: false,
+        queueError: null,
+        artifactUrl: (job?.output_artifact_url as string | null) ?? null,
+      },
+    };
+  }
+  const sent = await sendReprintToQueue({ conferenceId: params.conferenceId, jobId });
+  return {
+    success: true,
+    data: sent.success
+      ? { jobId, labelPrintable: true, queued: true, stationOnline: sent.data.stationOnline, queueError: null, artifactUrl: null }
+      : { jobId, labelPrintable: true, queued: false, stationOnline: false, queueError: sent.error, artifactUrl: null },
   };
 }
 

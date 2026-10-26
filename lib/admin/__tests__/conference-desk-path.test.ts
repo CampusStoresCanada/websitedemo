@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conferenceDeskPathId, isCheckInDeskPath, isWarRoomPath } from "../nav";
+import { conferenceDeskPathId, isCheckInDeskPath, isEmbedded, isWarRoomPath } from "../nav";
 
 /**
  * ⛔ The /admin gate admits desk staff on this answer, then checks their
@@ -53,5 +53,14 @@ describe("isWarRoomPath", () => {
     expect(isWarRoomPath("/admin/conference/abc-123/war-room/")).toBe(true);
     expect(isWarRoomPath("/admin/conference/abc-123/war-roomy")).toBe(false);
     expect(isWarRoomPath("/admin/conference/abc-123/check-in")).toBe(false);
+  });
+});
+
+describe("isEmbedded", () => {
+  it("is only an explicit embed=1, how a print sheet shows inside a Preview", () => {
+    expect(isEmbedded("?embed=1")).toBe(true);
+    expect(isEmbedded("?entity=e1&embed=1")).toBe(true);
+    expect(isEmbedded("?embed=0")).toBe(false);
+    expect(isEmbedded("")).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
-import { isCheckInDeskPath, isWarRoomPath } from "@/lib/admin/nav";
-import { REQUEST_PATHNAME_HEADER } from "@/lib/auth/request-path";
+import { isCheckInDeskPath, isEmbedded, isWarRoomPath } from "@/lib/admin/nav";
+import { REQUEST_PATHNAME_HEADER, REQUEST_SEARCH_HEADER } from "@/lib/auth/request-path";
 import { getConference } from "@/lib/actions/conference";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import ConferenceSubNav from "@/components/admin/conference/ConferenceSubNav";
@@ -16,8 +16,13 @@ export default async function ConferenceDetailLayout({
   const { id } = await params;
   // ⛔ The check-in desk is a full-screen kiosk: no conference header or tabs.
   // The War Room is Operate, with its own header: the Manage tabs are not its.
-  const pathname = (await headers()).get(REQUEST_PATHNAME_HEADER) ?? "";
-  if (isCheckInDeskPath(pathname) || isWarRoomPath(pathname)) {
+  const requestHeaders = await headers();
+  const pathname = requestHeaders.get(REQUEST_PATHNAME_HEADER) ?? "";
+  if (
+    isCheckInDeskPath(pathname) ||
+    isWarRoomPath(pathname) ||
+    isEmbedded(requestHeaders.get(REQUEST_SEARCH_HEADER) ?? "")
+  ) {
     return <>{children}</>;
   }
   const [result, auth] = await Promise.all([getConference(id), requireAuthenticated()]);

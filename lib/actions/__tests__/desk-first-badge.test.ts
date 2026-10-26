@@ -18,8 +18,13 @@ vi.mock("@/lib/auth/guards", () => ({
   isGlobalAdmin: () => true,
 }));
 vi.mock("@/lib/ops/audit", () => ({ logAuditEventSafe: async () => undefined }));
+const queued: string[] = [];
 vi.mock("@/lib/actions/conference-badges", () => ({
   requestBadgeReprint: async () => ({ success: true, data: { jobId: "job-1", qrPayload: "qr" } }),
+  sendReprintToQueue: async ({ jobId }: { jobId: string }) => {
+    queued.push(jobId);
+    return { success: true, data: { stationOnline: true } };
+  },
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -39,11 +44,31 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-const { reprintConferenceBadge } = await import("../conference-people");
+const { printBadge, reprintConferenceBadge } = await import("../conference-people");
 
 beforeEach(() => {
   personRow = { id: "cp-1", conference_id: "conf-1", badge_reprint_count: 0, badge_print_status: "not_printed" };
   written = null;
+  queued.length = 0;
+});
+
+/**
+ * The one print engine (printBadge): every caller gets the desk's whole
+ * sequence. Badge Ops and the War Room drawer used to stop after planning, so
+ * nothing they reprinted ever reached the print station.
+ */
+describe("printing one badge", () => {
+  it("sends a sticker for a card in hand straight to the print station", async () => {
+    const res = await printBadge({ conferenceId: "conf-1", personId: "cp-1", reason: "damaged", stockInHand: "spare" });
+    expect(res).toMatchObject({ success: true, data: { labelPrintable: true, queued: true } });
+    expect(queued).toEqual(["job-1"]);
+  });
+
+  it("plans the full colour badge when no card is in hand, and queues nothing the label printer can't print", async () => {
+    const res = await printBadge({ conferenceId: "conf-1", personId: "cp-1", reason: "lost", stockInHand: "none" });
+    expect(res).toMatchObject({ success: true, data: { labelPrintable: false, queued: false } });
+    expect(queued).toEqual([]);
+  });
 });
 
 describe("the desk printing someone's badge", () => {

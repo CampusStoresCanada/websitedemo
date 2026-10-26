@@ -271,6 +271,28 @@ export function cardsOnHand(params: {
   };
 }
 
+/**
+ * "Which card are you holding?" — the choices, in the operator's words, for the
+ * desk and the War Room alike.
+ *
+ * ⛔ Only cards that EXIST for this person: a blank printed for their company
+ * AND their type, or a spare of their type. Another type's card carries another
+ * type's schedule on its back. `everyCard` is a rehearsal, where every card is
+ * offered so printing can be tried on the test badges.
+ */
+export function cardChoices(cards: CardsOnHand | null | undefined, everyCard = false): Array<[BadgeStock, string]> {
+  const type = cards?.typeName ? ` (${cards.typeName})` : "";
+  return [
+    ...(cards?.companyBlank || everyCard ? [["company_blank", `Company blank${type}`] as [BadgeStock, string]] : []),
+    // A spare fits anyone whose badge looks the same; the schedule prints on a
+    // sticker, so it is named by its stack, not a type.
+    ...((cards && cards.spareCount > 0) || everyCard
+      ? [["spare", cards?.spareLabel ? `Spare (${cards.spareLabel.toLowerCase()})` : "Spare"] as [BadgeStock, string]]
+      : []),
+    ["none", "No card"],
+  ];
+}
+
 export function suggestStock(params: {
   organizationId: string | null;
   /** blankCardKey for every unnamed seat in the run. */

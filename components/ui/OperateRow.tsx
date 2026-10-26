@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Modal from "@/components/ui/Modal";
 import ConfirmAction, { type ConfirmActionResult } from "@/components/ui/ConfirmAction";
 
@@ -38,8 +38,11 @@ export default function OperateRow({
   due?: string | null;
   /** The Manage page this depends on. */
   edit?: { href: string; label?: string } | null;
-  /** What will happen: a page to frame (`src`) or rendered content. */
-  preview?: { title: string; src?: string; content?: ReactNode } | null;
+  /**
+   * What will happen: a page to frame (`src`) or rendered content. `printable`:
+   * the framed page is a print sheet, and Print prints exactly what is shown.
+   */
+  preview?: { title: string; src?: string; content?: ReactNode; printable?: boolean } | null;
   /** The thing itself. Absent when the row is blocked or only informs. */
   action?: {
     label: string;
@@ -51,6 +54,7 @@ export default function OperateRow({
   extra?: ReactNode;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const stateClass =
     tone === "attention"
@@ -85,7 +89,7 @@ export default function OperateRow({
             onClick={() => setPreviewOpen(true)}
             className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
           >
-            Preview
+            {preview.printable ? "Preview & print" : "Preview"}
           </button>
         ) : null}
         {action ? (
@@ -104,9 +108,20 @@ export default function OperateRow({
           onClose={() => setPreviewOpen(false)}
           title={preview.title}
           size={preview.src ? "full" : "lg"}
+          footer={
+            preview.src && preview.printable ? (
+              <button
+                type="button"
+                onClick={() => frameRef.current?.contentWindow?.print()}
+                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+              >
+                Print
+              </button>
+            ) : undefined
+          }
         >
           {preview.src ? (
-            <iframe src={preview.src} title={preview.title} className="h-[75vh] w-full border-0 sm:h-full" />
+            <iframe ref={frameRef} src={preview.src} title={preview.title} className="h-[75vh] w-full border-0 sm:h-full" />
           ) : (
             <div className="p-5">{preview.content}</div>
           )}

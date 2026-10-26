@@ -139,6 +139,15 @@ Everything that comes out of a printer, in one place:
   ways of editing a name first; they become one.
 - Badge Ops keeps only the Manage half: design, types, rules, stock, arrangement.
 
+**Landed 2026-10-26 (phase 3).** `printBadge` is the engine (the desk's sequence:
+plan for the card in hand, a sticker straight to the station); the desk, the Print
+tab and the People drawer call it, and the PATCH route's reprint branch is gone.
+Sheets preview frameless (`?embed=1`) and print from the Preview. Badge Ops lost
+Make Badges, Quick Reprint, Generate and the jobs table; `?mode=make` goes to the
+Print tab. **Not yet:** a package for one type or a list (it is all, with or
+without blanks); print station keys stay on its own page, linked from the queue;
+task documents (speeches) stay on their task in What's next.
+
 ### Meetings
 | Row | Edit | Preview | Do it |
 |---|---|---|---|

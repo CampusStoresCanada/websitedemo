@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import { requireAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
-import { conferenceDeskPathId, isCheckInDeskPath, isWarRoomPath } from "@/lib/admin/nav";
+import { conferenceDeskPathId, isCheckInDeskPath, isEmbedded, isWarRoomPath } from "@/lib/admin/nav";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import PresentationBlock from "@/components/presentation/PresentationBlock";
 import { headers } from "next/headers";
-import { loginPathFromHeaders, REQUEST_PATHNAME_HEADER } from "@/lib/auth/request-path";
+import { loginPathFromHeaders, REQUEST_PATHNAME_HEADER, REQUEST_SEARCH_HEADER } from "@/lib/auth/request-path";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -68,8 +68,11 @@ export default async function AdminLayout({
   }
 
   // ⛔ The check-in desk is a full-screen kiosk: no sidebar, no breadcrumbs.
-  const requestPathname = (await headers()).get(REQUEST_PATHNAME_HEADER) ?? "";
+  const requestHeaderList = await headers();
+  const requestPathname = requestHeaderList.get(REQUEST_PATHNAME_HEADER) ?? "";
   if (isCheckInDeskPath(requestPathname)) return <>{children}</>;
+  // A print sheet inside a War Room Preview: the sheet alone.
+  if (isEmbedded(requestHeaderList.get(REQUEST_SEARCH_HEADER) ?? "")) return <>{children}</>;
   // The War Room has its own slim header; the Manage sidebar is noise there.
   if (isWarRoomPath(requestPathname)) return <div className="min-h-[calc(100vh-4rem)]">{children}</div>;
 

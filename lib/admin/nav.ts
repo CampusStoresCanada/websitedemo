@@ -309,6 +309,15 @@ export function isWarRoomPath(pathname: string): boolean {
 }
 
 /**
+ * `?embed=1`: the page alone, with no site header, footer, sidebar or tabs —
+ * how a print sheet shows inside the War Room's Preview (WAR_ROOM_OPERATE_PLAN
+ * §3). It only takes chrome away: every gate above the page still runs.
+ */
+export function isEmbedded(search: string): boolean {
+  return new URLSearchParams(search).get("embed") === "1";
+}
+
+/**
  * The conference id when the path is one of its desk pages
  * (/admin/conference/<id>/<desk page>[/...]), otherwise null.
  */
