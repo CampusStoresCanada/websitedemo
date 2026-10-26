@@ -661,6 +661,8 @@ export async function runChecklistReminders(
     }[];
     /** Only publication-scoped checklists contribute the consent note. */
     consentNote: string;
+    /** "Your list is always at …" footer; the same for every section of one org. */
+    whereToTrack: string;
     /** How many reminders this org has already had — rotates the subject. */
     remindersSoFar: number;
     log: { checklist_id: string; checkpoint_id: string; organization_id: string }[];
@@ -707,6 +709,7 @@ export async function runChecklistReminders(
           orgName: digest?.orgName ?? "",
           sections: [],
           consentNote: "",
+          whereToTrack: "",
           remindersSoFar: 0,
           log: [],
         };
@@ -726,6 +729,7 @@ export async function runChecklistReminders(
         });
         // Carried once even if several checklists would supply it.
         if (digest && !existing.orgName) existing.orgName = digest.orgName;
+        if (digest && !existing.whereToTrack) existing.whereToTrack = digest.variables.where_to_track;
         if (!existing.consentNote && framing.consent_note) existing.consentNote = framing.consent_note;
         existing.log.push({ checklist_id: checklist.id, checkpoint_id: checkpointId, organization_id: organizationId });
         pendingByOrg.set(organizationId, existing);
@@ -777,6 +781,7 @@ export async function runChecklistReminders(
         // The org's name may still be blank if the checklist that triggered
         // this send had nothing open — that path never saw a digest.
         if (!pending.orgName) pending.orgName = digest.orgName;
+      if (!pending.whereToTrack) pending.whereToTrack = digest.variables.where_to_track;
         const framing = renderFraming(
           { ...checklist, publicationTitle: publication?.title ?? null },
           conference.year
@@ -866,7 +871,10 @@ export async function runChecklistReminders(
         email: admin.email,
         name: admin.name,
         variableOverrides: {
-          contact_name: admin.name ?? admin.email,
+          // "there", never the address: a contact with no name used to be
+          // greeted "Hi lsukyas@crestar.ca,".
+          contact_name: admin.name?.trim() || "there",
+          where_to_track: pending.whereToTrack,
           org_name: pending.orgName,
           // Always the conference, never whichever list fired. The specific
           // list is the section heading inside; the email is the checklist.
