@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { isCheckInDeskPath, isEmbedded, isWarRoomPath } from "@/lib/admin/nav";
 import { REQUEST_PATHNAME_HEADER, REQUEST_SEARCH_HEADER } from "@/lib/auth/request-path";
 import { getConference } from "@/lib/actions/conference";
-import { requireAuthenticated, isGlobalAdmin, isSuperAdmin } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import ConferenceSubNav from "@/components/admin/conference/ConferenceSubNav";
 
 export default async function ConferenceDetailLayout({
@@ -41,7 +41,6 @@ export default async function ConferenceDetailLayout({
         year={conference.year}
         editionCode={conference.edition_code}
         opsOnly={!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)}
-        showWarRoom={auth.ok && isSuperAdmin(auth.ctx.globalRole)}
       />
       {children}
     </div>

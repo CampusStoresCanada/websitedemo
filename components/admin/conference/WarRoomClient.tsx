@@ -244,6 +244,11 @@ interface WarRoomClientProps {
   printStation: PrintStationState;
   messages: WarRoomMessages;
   dataCounts: WarRoomDataCounts;
+  /**
+   * Admins work the War Room; sending email to members and downloading their
+   * personal data stay super-admin acts, and the rows say so.
+   */
+  superAdmin: boolean;
   /** Comms' own send, checked for CSC staff and this conference by the page. */
   sendCampaign: (campaignId: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -260,6 +265,7 @@ export default function WarRoomClient({
   printStation,
   messages,
   dataCounts,
+  superAdmin,
   sendCampaign,
 }: WarRoomClientProps) {
   // The War Room is administrators only now (WAR_ROOM_OPERATE_PLAN §2).
@@ -396,10 +402,10 @@ export default function WarRoomClient({
 
       {activeOpsTab === "meetings" ? <MeetingsView conferenceId={conferenceId} /> : null}
 
-      {activeOpsTab === "data" ? <DataView conferenceId={conferenceId} counts={dataCounts} /> : null}
+      {activeOpsTab === "data" ? <DataView conferenceId={conferenceId} counts={dataCounts} canExport={superAdmin} /> : null}
 
       {activeOpsTab === "messages" ? (
-        <MessagesView conferenceId={conferenceId} messages={messages} sendCampaign={sendCampaign} />
+        <MessagesView conferenceId={conferenceId} messages={messages} sendCampaign={sendCampaign} canSend={superAdmin} />
       ) : null}
 
       {activeOpsTab === "print" ? (
@@ -1037,7 +1043,16 @@ function saveFile(filename: string, content: string) {
  * Data (WAR_ROOM_OPERATE_PLAN §5): files of the live roster. No travel import:
  * none until a conference collects travel (Stephen, 2026-10-26).
  */
-function DataView({ conferenceId, counts }: { conferenceId: string; counts: WarRoomDataCounts }) {
+function DataView({
+  conferenceId,
+  counts,
+  canExport,
+}: {
+  conferenceId: string;
+  counts: WarRoomDataCounts;
+  /** Members' personal data leaves the site only with a super admin. */
+  canExport: boolean;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<RosterExport | null>(null);
 
@@ -1053,7 +1068,10 @@ function DataView({ conferenceId, counts }: { conferenceId: string; counts: WarR
     saveFile(res.data.filename, res.data.csv);
     return { success: true };
   };
-  const button = (kind: RosterExport) => (
+  const button = (kind: RosterExport) =>
+    !canExport ? (
+      <span className="py-1.5 text-xs text-gray-500">Only a super admin can download this.</span>
+    ) : (
     <button
       type="button"
       disabled={busy !== null}
@@ -1091,8 +1109,9 @@ function DataView({ conferenceId, counts }: { conferenceId: string; counts: WarR
           <OperateRow
             title="Emergency contacts"
             state={`${plural(counts.emergency, "person")} gave an emergency contact.`}
+            extra={canExport ? null : button("emergency")}
             action={
-              counts.emergency > 0
+              counts.emergency > 0 && canExport
                 ? {
                     label: "Download CSV",
                     consequence: `Saves a file of ${plural(counts.emergency, "person")}'s emergency contacts and phone numbers to this computer. Keep it off shared drives, and delete it after the conference.`,
@@ -1149,10 +1168,13 @@ function MessagesView({
   conferenceId,
   messages,
   sendCampaign,
+  canSend,
 }: {
   conferenceId: string;
   messages: WarRoomMessages;
   sendCampaign: (campaignId: string) => Promise<{ success: boolean; error?: string }>;
+  /** Email to members goes only with a super admin; others see what there is. */
+  canSend: boolean;
 }) {
   const [reminders, setReminders] = useState<ChecklistRunResult | null>(null);
   const [reminderError, setReminderError] = useState<string | null>(null);
@@ -1166,6 +1188,7 @@ function MessagesView({
     else setReminderError(res.error);
   }, [conferenceId]);
   useEffect(() => {
+    if (!canSend) return;
     let live = true;
     void runConferenceRemindersNow(conferenceId, { dryRun: true }).then((res) => {
       if (!live) return;
@@ -1175,10 +1198,14 @@ function MessagesView({
     return () => {
       live = false;
     };
-  }, [conferenceId]);
+  }, [conferenceId, canSend]);
 
   const due = reminders?.preview ?? [];
-  const reminderState = reminderError
+  const reminderState = !canSend
+    ? `Only a super admin can check or send reminders${
+        messages.lastReminder ? ` (last sent ${whenMountain(messages.lastReminder)})` : ""
+      }.`
+    : reminderError
     ? reminderError
     : !reminders
       ? "Working out who is due a reminder (about half a minute)…"
@@ -1276,7 +1303,7 @@ function MessagesView({
                     ) : null
                   }
                   action={
-                    pending && c.recipients !== null && c.recipients > 0
+                    canSend && pending && c.recipients !== null && c.recipients > 0
                       ? {
                           label: "Send now",
                           consequence: `Emails ${plural(c.recipients, "person")} now${
@@ -1375,7 +1402,9 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
   }
 
   const base = `/admin/conference/${conferenceId}`;
-  const { live, draft, email, meetings } = overview;
+  const { live, draft, email, meetings, canPublish } = overview;
+  // Publishing and emailing stay super-admin acts on the server; an admin sees why.
+  const superOnly = "Only a super admin can do this.";
   const draftReady = draft?.status === "completed";
   const draftBroken = draft?.status === "failed" || draft?.status === "infeasible";
 
@@ -1427,7 +1456,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                   : "Nothing to publish: generate a draft first."
                 : `${draft.changes.length === 0 ? "No changes" : plural(draft.changes.length, "change")} against ${
                     live ? `the live schedule (${plural(live.meetings, "meeting")})` : "nothing: nothing is live yet"
-                  }.`
+                  }.${canPublish ? "" : ` ${superOnly}`}`
             }
             tone={draftReady && draft.changes.length > 0 ? "attention" : "neutral"}
             preview={
@@ -1465,7 +1494,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 : null
             }
             action={
-              draftReady && (draft.changes.length > 0 || !live)
+              draftReady && canPublish && (draft.changes.length > 0 || !live)
                 ? {
                     label: "Publish",
                     consequence: `Makes this draft the live schedule: ${plural(draft.meetings, "meeting")}.${
@@ -1487,7 +1516,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 ? "Nothing is live to send."
                 : `${email.toSend.length === 0 ? "Everyone has been told" : `${plural(email.toSend.length, "person")} to tell`}${
                     email.alreadyTold ? `, ${email.alreadyTold} already told` : ""
-                  }${email.noEmail ? `, ${email.noEmail} with no email address` : ""}.${
+                  }${email.noEmail ? `, ${email.noEmail} with no email address` : ""}.${canPublish ? "" : ` ${superOnly}`}${
                     sent ? ` ${sent}` : ""
                   }`
             }
@@ -1532,7 +1561,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 : null
             }
             action={
-              email && email.toSend.length > 0
+              email && canPublish && email.toSend.length > 0
                 ? {
                     label: "Send",
                     consequence: `Emails ${plural(email.toSend.length, "person")} that their meetings are ready. Anyone already told about this schedule is skipped.`,

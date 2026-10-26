@@ -5,7 +5,7 @@ import {
   listConferencePeople,
   syncConferencePeopleIndex,
 } from "@/lib/actions/conference-people";
-import { requireSuperAdmin } from "@/lib/auth/guards";
+import { isSuperAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import WarRoomClient, {
   MeMenu,
   SendToPrinterButton,
@@ -221,9 +221,8 @@ function StatusItem({ tone, href, children }: { tone: "alert" | "warn" | "ok" | 
  * aside (lib/admin/nav isWarRoomPath) — then a status line that answers "is
  * anything on fire?", then the tabs.
  *
- * ⛔ CSC staff only: super admins. Desk staff (temps) work the check-in desk
- * (Stephen, 2026-10-23), and the `admin` role is board and store people, who
- * must not see it either (Stephen, 2026-10-26).
+ * ⛔ Administrators only. Desk staff (temps) work the check-in desk; the War Room
+ * is not theirs (Stephen, 2026-10-23).
  */
 export default async function ConferenceWarRoomPage({
   params,
@@ -232,7 +231,7 @@ export default async function ConferenceWarRoomPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const auth = await requireSuperAdmin();
+  const auth = await requireConferenceOpsAccess();
   if (!auth.ok) {
     return <main className="p-6 text-sm text-red-700">The War Room is for CSC staff.</main>;
   }
@@ -370,6 +369,7 @@ export default async function ConferenceWarRoomPage({
         printStation={{ stations: stations.length, online, queued }}
         messages={messages}
         dataCounts={dataCounts}
+        superAdmin={isSuperAdmin(auth.ctx.globalRole)}
         sendCampaign={async (campaignId: string) => {
           "use server";
           // ⛔ Its own checks: CSC staff, and a campaign of THIS conference.

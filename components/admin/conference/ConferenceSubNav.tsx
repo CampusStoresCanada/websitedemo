@@ -11,8 +11,6 @@ interface ConferenceSubNavProps {
   editionCode: string;
   /** Desk staff who are not global admins: show only their pages. */
   opsOnly?: boolean;
-  /** The War Room is CSC staff's (super admins), not board or store admins'. */
-  showWarRoom?: boolean;
 }
 
 type Tab = { segment: string; label: string };
@@ -62,13 +60,13 @@ export default function ConferenceSubNav({
   year,
   editionCode,
   opsOnly = false,
-  showWarRoom = false,
 }: ConferenceSubNavProps) {
   const opsSegments = new Set<string>(CONFERENCE_DESK_SEGMENTS);
-  const visible = (t: Tab) => (t.segment !== "war-room" || showWarRoom) && (!opsOnly || opsSegments.has(t.segment));
-  const stages = STAGES.map((stage) => ({ ...stage, tabs: stage.tabs.filter(visible) })).filter(
-    (stage) => stage.tabs.length > 0
-  );
+  const stages = opsOnly
+    ? STAGES.map((stage) => ({ ...stage, tabs: stage.tabs.filter((t) => opsSegments.has(t.segment)) })).filter(
+        (stage) => stage.tabs.length > 0
+      )
+    : STAGES;
   const pathname = usePathname();
   const basePath = `/admin/conference/${conferenceId}`;
 

@@ -52,14 +52,11 @@ function Row({
   busy,
   onSetStatus,
   conferenceId,
-  canDecide,
 }: {
   row: BursaryApplicationRow;
   busy: boolean;
   onSetStatus: (id: string, status: BursaryStatus) => void;
   conferenceId: string;
-  /** Decisions are made in the War Room, which is CSC staff's (super admins). */
-  canDecide: boolean;
 }) {
   const style = isBursaryStatus(row.status) ? STATUS_STYLE[row.status] : { bg: TRACK, fg: "#555" };
 
@@ -122,19 +119,13 @@ function Row({
           us, beside everyone else waiting on CSC. A decided one keeps the
           select for what comes after (fulfilled) and for corrections. */}
       {row.status === "submitted" ? (
-        canDecide ? (
-          <a
-            href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
-            className="justify-self-end text-[12px] font-medium hover:underline"
-            style={{ color: NAVY }}
-          >
-            Decide →
-          </a>
-        ) : (
-          <span className="justify-self-end text-[12px]" style={{ color: MUTED }}>
-            With CSC
-          </span>
-        )
+        <a
+          href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
+          className="justify-self-end text-[12px] font-medium hover:underline"
+          style={{ color: NAVY }}
+        >
+          Decide →
+        </a>
       ) : (
       <label className="relative cursor-pointer justify-self-end">
         <span
@@ -166,7 +157,7 @@ function Row({
   );
 }
 
-export function BursaryQueueWidget({ data, canDecide }: { data: BursaryQueueData; canDecide: boolean }) {
+export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("review");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -243,7 +234,7 @@ export function BursaryQueueWidget({ data, canDecide }: { data: BursaryQueueData
           </div>
         ) : (
           visible.map((row) => (
-            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} conferenceId={data.conferenceId} canDecide={canDecide} />
+            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} conferenceId={data.conferenceId} />
           ))
         )}
       </div>
