@@ -132,6 +132,8 @@ type SpaceResult = {
   noCircleAccount: number;
   inSpace: number;
   queuedAdds: number;
+  /** Refused by Circle in the last day (usually an unaccepted invite). */
+  waitingOnInvite: number;
   queuedRemoves: number;
 };
 
@@ -210,7 +212,25 @@ async function syncOneSpace(
     return;
   }
 
-  const { toAdd, toRemove } = diffSpace(wanted, roster, [...added.values()]);
+  const { toAdd: diffAdds, toRemove } = diffSpace(wanted, roster, [...added.values()]);
+
+  // Circle refuses (422) to add someone who never accepted their community
+  // invite. Retrying every hour just repeats the refusal, so after one, wait a
+  // day: once they accept, the next day's run adds them.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: refused, error: refusedErr } = await db
+    .from("circle_sync_queue")
+    .select("entity_id")
+    .eq("status", "failed")
+    .eq("operation", "add_to_space")
+    .like("idempotency_key", `conf-space-add-${rule.spaceId}-%`)
+    .gte("created_at", since);
+  if (refusedErr) {
+    result.errors.push(`${where}: could not read recent refusals: ${refusedErr.message}`);
+    return;
+  }
+  const recentlyRefused = new Set((refused ?? []).map((r) => r.entity_id));
+  const toAdd = diffAdds.filter((w) => !recentlyRefused.has(w.contactId));
 
   for (const w of toAdd) {
     await enqueueCircleSync({
@@ -239,6 +259,7 @@ async function syncOneSpace(
     noCircleAccount,
     inSpace: roster.size,
     queuedAdds: toAdd.length,
+    waitingOnInvite: diffAdds.length - toAdd.length,
     queuedRemoves: toRemove.length,
   });
 }
