@@ -63,13 +63,6 @@ const PAGE_REGISTRY: PageRegistryRow[] = [
     requiredRole: "org_admin|admin|super_admin",
     health: "review",
   },
-  {
-    route: "/conference/[year]/[edition]/register",
-    owner: "Conference",
-    visibility: "authenticated",
-    requiredRole: "member/partner roles",
-    health: "review",
-  },
 ];
 
 export default function AdminPagesPermissionsPage() {
