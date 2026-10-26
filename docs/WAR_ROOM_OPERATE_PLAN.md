@@ -262,6 +262,14 @@ Each phase ships on its own and leaves the site working.
 5. **Messages.** Per-conference reminders; conference campaigns in context; Send Now
    confirmation.
 6. **Data.** One travel import (gated by travel); exports as rows.
+   **Landed 2026-10-26, changed by Stephen:** both travel imports, the six
+   Registrations exports and the travel-exception review all read
+   `conference_registrations` (0 rows; registrations are seats), so they were
+   deleted, with the Travel Import page. The Data tab exports the live roster
+   (`exportConferenceRoster`: everyone, dietary, accessibility, emergency
+   contacts behind a confirmation), audited as before. No travel import until a
+   conference collects travel. Still live and unlinked: the old
+   `/conference/[year]/[edition]/register` form, which writes that dead table.
 7. **Manage clean-up.** One lifecycle panel; confirmations on every Manage delete.
 
 ## 10. Open questions

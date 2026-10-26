@@ -13,6 +13,7 @@ import {
   isConferenceDeskStaff,
   requireConferenceDeskAccess,
   requireAuthenticated,
+  requireSuperAdmin,
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
 import {
@@ -1950,4 +1951,112 @@ export async function recordNameOnlyWalkUp(params: {
   }
 
   return { success: true, data: { canonicalPersonId: created.personId, adminsTold } };
+}
+
+export type RosterExport = "summary" | "dietary" | "accessibility" | "emergency";
+
+type RosterPersonFields = {
+  contact_email: string | null;
+  mobile_phone: string | null;
+  dietary_restrictions: string | null;
+  accessibility_needs: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  checked_in_at: string | null;
+  check_in_is_test: boolean | null;
+};
+
+/**
+ * The War Room's Data exports (WAR_ROOM_OPERATE_PLAN §5): a CSV of the live
+ * roster. The Registrations page's exports read `conference_registrations`,
+ * which nothing has written since registrations moved to seats, so every file
+ * they made was empty (2026-10-26).
+ *
+ * ⛔ Who is attending comes from loadDoorRoster, the attendee list's own
+ * reader, in the viewer's name order; the fields come from each person's
+ * conference record. Dietary, accessibility and emergency files hold only the
+ * people with something to say. Every export is audited, as before.
+ */
+export async function exportConferenceRoster(
+  conferenceId: string,
+  kind: RosterExport
+): Promise<{ success: true; data: { filename: string; csv: string; rows: number } } | { success: false; error: string }> {
+  const auth = await requireSuperAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const [{ loadDoorRoster }, { readPreferences }, { parsePrintSort, PRINT_SORT_PREFERENCE_KEY }] = await Promise.all([
+    import("@/lib/conference/attendance"),
+    import("@/lib/profile/preferences"),
+    import("@/lib/conference/badges/arrangement"),
+  ]);
+  const sort = parsePrintSort((await readPreferences(auth.ctx.userId))[PRINT_SORT_PREFERENCE_KEY]);
+  const roster = await loadDoorRoster(db, conferenceId, null, sort);
+
+  const { data: people, error } = await db
+    .from("conference_people")
+    .select(
+      "id, contact_email, mobile_phone, dietary_restrictions, accessibility_needs, emergency_contact_name, emergency_contact_phone, checked_in_at, check_in_is_test"
+    )
+    .eq("conference_id", conferenceId)
+    .neq("assignment_status", "canceled");
+  if (error) return { success: false, error: error.message };
+  // A seat's holder IS the conference_people row (loadSeatHoldings: holder_person_id = its id).
+  const byPerson = new Map((people ?? []).map((p) => [p.id as string, p as RosterPersonFields]));
+
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  type Row = { name: string; organizationName: string };
+  const columns: Record<RosterExport, { header: string[]; row: (r: Row, p: RosterPersonFields | undefined) => string[] | null }> = {
+    summary: {
+      header: ["Name", "Organization", "Email", "Mobile", "Checked in"],
+      row: (r, p) => [
+        r.name,
+        r.organizationName,
+        text(p?.contact_email),
+        text(p?.mobile_phone),
+        p?.checked_in_at && !p.check_in_is_test ? "Yes" : "No",
+      ],
+    },
+    dietary: {
+      header: ["Name", "Organization", "Dietary needs"],
+      row: (r, p) => (text(p?.dietary_restrictions) ? [r.name, r.organizationName, text(p?.dietary_restrictions)] : null),
+    },
+    accessibility: {
+      header: ["Name", "Organization", "Accessibility needs"],
+      row: (r, p) => (text(p?.accessibility_needs) ? [r.name, r.organizationName, text(p?.accessibility_needs)] : null),
+    },
+    emergency: {
+      header: ["Name", "Organization", "Mobile", "Emergency contact", "Emergency phone"],
+      row: (r, p) =>
+        text(p?.emergency_contact_name) || text(p?.emergency_contact_phone)
+          ? [r.name, r.organizationName, text(p?.mobile_phone), text(p?.emergency_contact_name), text(p?.emergency_contact_phone)]
+          : null,
+    },
+  };
+
+  // Quoted, and a leading = + - @ is defused so a spreadsheet never runs a cell.
+  const cell = (value: string) => `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replaceAll('"', '""')}"`;
+  const spec = columns[kind];
+  const lines = roster
+    .map((r) => spec.row(r, byPerson.get(r.personId)))
+    .filter((row): row is string[] => row !== null)
+    .map((row) => row.map(cell).join(","));
+
+  await logAuditEventSafe({
+    action: "conference_registration_exported",
+    entityType: "conference_instance",
+    entityId: conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { preset: kind, row_count: lines.length, source: "war_room_roster" },
+  });
+
+  return {
+    success: true,
+    data: {
+      filename: `conference-${kind}-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv: [spec.header.map(cell).join(","), ...lines].join("\n"),
+      rows: lines.length,
+    },
+  };
 }

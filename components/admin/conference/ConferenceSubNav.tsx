@@ -52,7 +52,6 @@ const STAGES: Array<{ label: string; tabs: Tab[] }> = [
       { segment: "swaps", label: "Swaps" },
       { segment: "war-room", label: "War Room" },
       { segment: "badges", label: "Badge Ops" },
-      { segment: "travel-import", label: "Travel Import" },
     ],
   },
 ];

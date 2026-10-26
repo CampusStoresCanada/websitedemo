@@ -21,7 +21,7 @@ const TAB_REDIRECTS: Record<string, string> = {
   "war-room": "war-room",
   badges: "badges",
   "schedule-ops": "war-room?tab=meetings",
-  "travel-import": "travel-import",
+  "travel-import": "war-room?tab=data",
   "check-in": "check-in",
 };
 

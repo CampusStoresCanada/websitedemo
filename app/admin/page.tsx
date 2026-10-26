@@ -464,7 +464,6 @@ export default async function AdminConsolePage() {
                 {isSA ? <QuickLink href={`/admin/conference/${conf.id}/war-room`} label="War Room" primary /> : null}
                 <QuickLink href={`/admin/conference/${conf.id}/registrations`} label="Registrations" />
                 <QuickLink href={`/admin/conference/${conf.id}/badges`}        label="Badge Ops"     />
-                <QuickLink href={`/admin/conference/${conf.id}/travel-import`} label="Travel Import" />
               </>
             ) : (
               <>

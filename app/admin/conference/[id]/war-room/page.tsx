@@ -9,6 +9,7 @@ import { requireSuperAdmin } from "@/lib/auth/guards";
 import WarRoomClient, {
   MeMenu,
   SendToPrinterButton,
+  type WarRoomDataCounts,
   type WarRoomMessages,
   type WhatsNext,
 } from "@/components/admin/conference/WarRoomClient";
@@ -29,6 +30,7 @@ import { loadWaitingOnUs } from "@/lib/conference/waiting-on-us";
 import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
 import { stationOnline } from "@/lib/conference/badges/print-station";
 import { meetingsSoFar } from "@/lib/conference/checklist-checks";
+import { loadDoorRoster } from "@/lib/conference/attendance";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
 export const metadata = {
@@ -169,6 +171,36 @@ async function loadConferenceMessages(
   return { broadcasts, automatic: [...automatic.values()], lastReminder };
 }
 
+/**
+ * How many people each Data export holds: the attendee list's own roster
+ * (loadDoorRoster), joined to each person's conference record exactly as
+ * exportConferenceRoster joins it, so a row's count is its file's length.
+ */
+async function loadDataCounts(db: ReturnType<typeof createAdminClient>, conferenceId: string): Promise<WarRoomDataCounts> {
+  const [roster, { data: people }] = await Promise.all([
+    loadDoorRoster(db, conferenceId, null),
+    db
+      .from("conference_people")
+      .select("id, dietary_restrictions, accessibility_needs, emergency_contact_name, emergency_contact_phone")
+      .eq("conference_id", conferenceId)
+      .neq("assignment_status", "canceled"),
+  ]);
+  // A seat's holder IS the conference_people row (loadSeatHoldings).
+  const byPerson = new Map((people ?? []).map((p) => [p.id as string, p]));
+  const has = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+  const count = (test: (p: NonNullable<typeof people>[number]) => boolean) =>
+    roster.filter((r) => {
+      const p = byPerson.get(r.personId);
+      return p ? test(p) : false;
+    }).length;
+  return {
+    attending: roster.length,
+    dietary: count((p) => has(p.dietary_restrictions)),
+    accessibility: count((p) => has(p.accessibility_needs)),
+    emergency: count((p) => has(p.emergency_contact_name) || has(p.emergency_contact_phone)),
+  };
+}
+
 /** One piece of the status line: a fact, coloured by how much it matters, linking to where you fix it. */
 function StatusItem({ tone, href, children }: { tone: "alert" | "warn" | "ok" | "quiet"; href: string; children: ReactNode }) {
   const dot =
@@ -215,7 +247,7 @@ export default async function ConferenceWarRoomPage({
   const timeZone = ((conference as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
 
   const db = createAdminClient();
-  const [entityRes, refRes, waiting, answeringOrgId, preferences, stationsRes, waitingJobs, meetings, messages] = await Promise.all([
+  const [entityRes, refRes, waiting, answeringOrgId, preferences, stationsRes, waitingJobs, meetings, messages, dataCounts] = await Promise.all([
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
     db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", id),
     loadWaitingOnUs(id),
@@ -229,6 +261,7 @@ export default async function ConferenceWarRoomPage({
       .in("status", ["sent_to_printer", "rendering"]),
     meetingsSoFar(db, id).catch(() => null),
     loadConferenceMessages(db, id),
+    loadDataCounts(db, id),
   ]);
 
   // Answers (Wi-Fi, coat check) and meal menus: the same graph and the same
@@ -336,6 +369,7 @@ export default async function ConferenceWarRoomPage({
         requestedTab={tabParam}
         printStation={{ stations: stations.length, online, queued }}
         messages={messages}
+        dataCounts={dataCounts}
         sendCampaign={async (campaignId: string) => {
           "use server";
           // ⛔ Its own checks: CSC staff, and a campaign of THIS conference.

@@ -23,7 +23,6 @@ const LABELS: Record<string, string> = {
   create: "Create",
   "war-room": "War Room",
   "check-in": "Check-in Desk",
-  "travel-import": "Travel Import",
   badges: "Badge Ops",
   legal: "Legal",
   details: "Edit",
