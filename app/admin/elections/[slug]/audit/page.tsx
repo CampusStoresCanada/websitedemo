@@ -57,6 +57,12 @@ export default async function ElectionAuditPage({
 
   const { election, roll, sealedCount, reconciled, count, certification } = audit;
   const sealed = election.status === "sealed" || election.status === "certified";
+  // An acclaimed slate never passes through balloting, so it is never sealed —
+  // and the Certify section below is gated on sealing. Without this the one act
+  // that unblocks telling the candidates and announcing the result had no
+  // button anywhere on the page.
+  const acclaimedAwaitingCertification =
+    election.outcome === "acclaimed" && election.status === "nominations_closed";
 
   async function seal(formData: FormData) {
     "use server";
@@ -238,6 +244,31 @@ export default async function ElectionAuditPage({
               className="rounded-lg bg-[#2B2E33] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a1d21]"
             >
               Record the resolution
+            </button>
+          </form>
+        </section>
+      )}
+
+      {acclaimedAwaitingCertification && (
+        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">Certify the acclamation</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            As many nominees stood as there were seats, so no ballot was circulated and there is
+            nothing to count or seal. Certifying records that the slate is final. By-Law Part V
+            S3(d) has the Chair announce the acclaimed candidates at the meeting, and this is the
+            record behind that.
+          </p>
+          <p className="mt-2 text-xs text-gray-500">
+            No scrutineer is recorded, because no ballots were cast for one to count. Nothing is
+            sent by this — it unlocks telling the candidates and announcing the result, both of
+            which stay separate acts.
+          </p>
+          <form action={certify} className="mt-3">
+            <button
+              type="submit"
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              Certify the acclaimed slate
             </button>
           </form>
         </section>

@@ -2534,8 +2534,71 @@ export async function certifyElection(
   const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return fail("That election does not exist.");
-  if (election.status !== "sealed")
+
+  // An ACCLAIMED slate is certified from `nominations_closed`, because it never
+  // passes through balloting and so can never be sealed. Without this branch
+  // the acclamation branch dead-ended: closing with as many nominees as seats
+  // dropped the whole ballot phase, left the election on a status nothing
+  // transitions out of, and both end-of-cycle sends refuse anything that is
+  // not "certified" — so the acclaimed directors could never be told and the
+  // result could never be announced, with no button anywhere to clear it.
+  //
+  // By-Law Part V S3(d) treats the two as one act: the Chair announces the
+  // ballot result OR "the acclaimed candidates where no additional nominations
+  // were received". One certification, two ways of reaching it.
+  const acclaimed = election.outcome === "acclaimed";
+  if (acclaimed) {
+    if (election.status !== "nominations_closed")
+      return fail(
+        `An acclaimed slate is certified once nominations are closed — this one is "${election.status}".`
+      );
+  } else if (election.status !== "sealed") {
     return fail(`Only a sealed election can be certified — this one is "${election.status}".`);
+  }
+
+  if (acclaimed) {
+    const outcomes = await getCandidateOutcomes(slug);
+    if (!outcomes) return fail("The acclaimed slate could not be read.");
+    if (outcomes.elected.length === 0)
+      return fail("No validated nominee stood, so there is nobody to acclaim.");
+
+    // ⛔ Zeroes, not placeholders. No ballot was circulated, none returned and
+    // none sealed, and "reconciled" is true because there is nothing to
+    // reconcile. A certification that implied a count had happened would be
+    // the one record nobody could later tell apart from a real one.
+    await db.from("election_certifications").upsert(
+      {
+        election_id: election.id,
+        scrutineer_contact_id: null,
+        ballots_returned: 0,
+        ballots_sealed: 0,
+        reconciled: true,
+        tie_at_cutoff: false,
+        tie_candidates: [],
+        certified_by_profile_id: input.certifiedByProfileId,
+        certified_at: new Date().toISOString(),
+      },
+      { onConflict: "election_id" }
+    );
+
+    await db
+      .from("elections")
+      .update({ status: "certified", updated_at: new Date().toISOString() })
+      .eq("id", election.id);
+
+    return ok({
+      elected: outcomes.elected.map((c, i) => ({
+        nominationId: c.nominationId,
+        displayName: c.name,
+        organizationName: c.organizationName,
+        votes: 0,
+        rank: i + 1,
+        elected: true,
+        tiedAtCutoff: false,
+      })),
+      reconciled: true,
+    });
+  }
 
   const counted = await countElection(slug);
   if (!counted.ok) return fail(counted.error);
@@ -3999,12 +4062,23 @@ export async function getResultsAnnouncement(slug: string): Promise<
   if (!election) return null;
 
   const report = await getNominatingCommitteeReport(slug);
-  const counted = election.status === "certified" ? await countElection(slug) : null;
+  const isAcclaimed = election.outcome === "acclaimed";
 
-  const elected = (counted?.ok ? counted.data.results.filter((r) => r.elected) : []).map((r) => ({
-    name: r.displayName,
-    institution: r.organizationName,
-  }));
+  // ⚠️ An acclamation has no count to read. getBallotCandidates returns an
+  // empty list for one, so going through countElection here produced an
+  // announcement that named NOBODY — a correctly worded message about an
+  // acclaimed board with the board missing from it.
+  const counted =
+    !isAcclaimed && election.status === "certified" ? await countElection(slug) : null;
+  const acclaimedSlate =
+    isAcclaimed && election.status === "certified" ? await getCandidateOutcomes(slug) : null;
+
+  const elected = acclaimedSlate
+    ? acclaimedSlate.elected.map((c) => ({ name: c.name, institution: c.organizationName }))
+    : (counted?.ok ? counted.data.results.filter((r) => r.elected) : []).map((r) => ({
+        name: r.displayName,
+        institution: r.organizationName,
+      }));
 
   const rosterFor = (needle: string) =>
     (report?.sections.find((s) => s.paragraphs[0]?.includes(needle))?.roster ?? []).map((d) => ({
