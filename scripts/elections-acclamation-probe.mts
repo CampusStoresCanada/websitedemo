@@ -151,7 +151,7 @@ try {
   check("status is nominations_closed", afterClose.status === "nominations_closed", String(afterClose.status));
 
   step("Sealing is refused — there is no ballot to seal");
-  const seal = await svc.sealElection(SLUG, { confirmedNoFurtherVotes: true });
+  const seal = await svc.sealElection(SLUG);
   check("seal refused", !seal.ok, seal.ok ? "SEALED AN ACCLAMATION" : seal.error);
 
   step("Certifying the acclamation");
