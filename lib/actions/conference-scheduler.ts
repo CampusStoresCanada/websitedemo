@@ -383,8 +383,10 @@ export async function createSchedulerDraftRun(
     const schedulingPolicy = await getSchedulingConfig();
     const scaffolding = await ensureMeetingScaffolding(conferenceId);
     const candidates = await loadEligibleCandidates(conferenceId);
-    const orderedExhibitors = [...candidates.exhibitors].sort((a, b) =>
-      a.registrationId.localeCompare(b.registrationId)
+    // A seat with someone named runs a suite first; an unnamed seat stands in
+    // for its company until a name arrives (meeting-candidates.ts).
+    const orderedExhibitors = [...candidates.exhibitors].sort(
+      (a, b) => Number(!a.userId) - Number(!b.userId) || a.registrationId.localeCompare(b.registrationId)
     );
     const exhibitorByOrg = new Map<string, ExhibitorProfile[]>();
     for (const exhibitor of orderedExhibitors) {
@@ -465,12 +467,19 @@ export async function createSchedulerDraftRun(
       };
     }
 
+    /**
+     * ⛔ The seats that RUN a suite, one per suite — not every seat at a
+     * suite-holding company. A company's other staff seats have no room of
+     * their own; counting them made each a phantom exhibitor "below target"
+     * and divided the per-exhibitor target by people instead of rooms. Now that
+     * unnamed seats stand in for their company this would be most of them.
+     */
+    const pinnedSeatIds = new Set(Object.values(suitePinnedExhibitorBySuiteId));
+    const schedulableExhibitors = candidates.exhibitors.filter((e) => pinnedSeatIds.has(e.registrationId));
     const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
-    const schedulableExhibitors = candidates.exhibitors.filter((e) =>
-      orgIdsHoldingSuites.has(e.organizationId)
-    );
-    const exhibitorsWithoutSuiteEntitlement =
-      candidates.exhibitors.length - schedulableExhibitors.length;
+    const exhibitorsWithoutSuiteEntitlement = candidates.exhibitors.filter(
+      (e) => !orgIdsHoldingSuites.has(e.organizationId)
+    ).length;
 
     /**
      * No exhibitor holds a suite → there is nothing to schedule, and saying
@@ -481,7 +490,7 @@ export async function createSchedulerDraftRun(
      */
     if (schedulableExhibitors.length === 0) {
       throw new Error(
-        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor(s) are named to seats, ` +
+        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor seat(s) are in meetings, ` +
           `but none is on a booth that includes a suite, so there is no room for a meeting to happen in. ` +
           `Meetings come with a suite; a booth without one does not get them.`
       );
@@ -823,49 +832,23 @@ export async function createSchedulerDraftRun(
       };
     }
 
-    // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
-    // → infeasible: discard assignments, nothing usable.
-    // Soft violations (targets/coverage) → completed_with_warnings: persist
-    // assignments so admins can review and promote if acceptable.
-    if (generateResult.status === "infeasible") {
-      await adminClient
-        .from("scheduler_runs")
-        .update({
-          status: "infeasible",
-          completed_at: new Date().toISOString(),
-          total_delegates: candidates.delegates.length,
-          total_exhibitors: candidates.exhibitors.length,
-          total_meetings_created: 0,
-          constraint_violations: generateResult.diagnostics as unknown as Json,
-        })
-        .eq("id", runRow.id);
+    /**
+     * ⛔ The status is the SAVED schedule's. It was set once, by the very first
+     * greedy draw before any restart or optimization, and never updated — so
+     * the run's verdict described a schedule nobody kept (2026-10-26).
+     */
+    generateResult.status = generateResult.diagnostics.status;
 
-      const { data: finalRun } = await adminClient
-        .from("scheduler_runs")
-        .select("*")
-        .eq("id", runRow.id)
-        .single();
-
-      await logAuditEventSafe({
-        action: "scheduler_run_create",
-        entityType: "scheduler_run",
-        entityId: runRow.id,
-        actorId: auth.ctx.userId,
-        actorType: "user",
-        details: {
-          success: true,
-          conferenceId,
-          runSeed,
-          status: "infeasible",
-          diagnostics: generateResult.diagnostics,
-        },
-      });
-
-      return {
-        success: true,
-        data: mapRunSummary((finalRun ?? runRow) as SchedulerRunRow),
-      };
-    }
+    /**
+     * Hard violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS) mark the
+     * draft `infeasible`, but it STILL SAVES what it placed: a draft is for
+     * looking at, and "it failed" with nothing to open answers nothing (Stephen,
+     * 2026-10-26). An infeasible draft can never be published: the
+     * promote_scheduler_run RPC raises SCHEDULER_RUN_NOT_COMPLETED for it.
+     * Soft violations (targets, coverage) save as `completed`, with the
+     * warnings in constraint_violations.
+     */
+    const draftInfeasible = generateResult.status === "infeasible";
 
     const schedulesInput: Database["public"]["Tables"]["schedules"]["Insert"][] =
       generateResult.assignments.map((assignment) => ({
@@ -895,13 +878,12 @@ export async function createSchedulerDraftRun(
 
     if (scheduleInsertError) throw new Error(scheduleInsertError.message);
 
-    // Both "completed" and "completed_with_warnings" persist assignments.
-    // DB run status is always "completed" — soft warnings live in the
-    // constraint_violations JSONB for admin review.
+    // "completed" and "completed_with_warnings" save as "completed" (warnings
+    // live in constraint_violations); a hard violation saves as "infeasible".
     const { data: completedRun, error: completeError } = await adminClient
       .from("scheduler_runs")
       .update({
-        status: "completed",
+        status: draftInfeasible ? "infeasible" : "completed",
         completed_at: new Date().toISOString(),
         total_delegates: candidates.delegates.length,
         // The exhibitors that could actually be scheduled — a booth with no

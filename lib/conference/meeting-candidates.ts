@@ -80,10 +80,17 @@ export async function loadMeetingCandidates(
    * is its only writer, so the seat IS the fact. loadSeatHoldings is the one
    * reader (lib/conference/seats.ts).
    */
+  /**
+   * ⛔ EVERY seat, named or not. A delegate is a person: a schedule has to
+   * reach someone, so an unnamed delegate seat is skipped below. An exhibitor
+   * is a COMPANY: its profile is the company's (categories, refusals), and a
+   * company that holds a suite but has not named its staff yet still has a
+   * room to fill (Stephen, 2026-10-26). Requiring a name here left 2027 with
+   * one exhibitor out of sixteen suite-holders.
+   */
   const { seats, entitiesById } = await loadSeatHoldings(db, {
     conferenceId,
     entityKinds: ["registration"],
-    assigned: true,
   });
 
   /**
@@ -266,7 +273,7 @@ export async function loadMeetingCandidates(
 
   const delegates: DelegateProfile[] = [];
   const exhibitors: ExhibitorProfile[] = [];
-  /** Named seats whose type is in no meeting at all — CSC staff, a $4,000 booth. */
+  /** Seats (named or not) whose type is in no meeting at all — CSC staff, a $4,000 booth. */
   const notMatchable: string[] = [];
 
   /**
@@ -388,6 +395,8 @@ export async function loadMeetingCandidates(
         blackoutList,
       });
     } else {
+      // A delegate is a person; nobody named, nobody to meet or to tell.
+      if (!seat.holderPersonId) continue;
       delegates.push({
         registrationId: seat.seatId,
         organizationId: seat.organizationId,

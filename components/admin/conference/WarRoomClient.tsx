@@ -1399,9 +1399,8 @@ function runFindings(diagnostics: unknown): { placed: number | null; findings: R
 }
 
 /**
- * A run's findings as sentences, worst first. ⚠️ A failed (infeasible) run
- * saves none of its meetings, so "placed" is what it reached, not a draft you
- * can open in the grid.
+ * A run's findings as sentences, worst first. A failed (infeasible) draft
+ * keeps its meetings for the grid but can never be published.
  */
 function DraftFindings({ diagnostics, broken }: { diagnostics: unknown; broken: boolean }) {
   const { placed, findings } = runFindings(diagnostics);
@@ -1409,8 +1408,8 @@ function DraftFindings({ diagnostics, broken }: { diagnostics: unknown; broken: 
     <div className="space-y-3 text-sm text-gray-700">
       {placed !== null ? (
         <p>
-          It placed {plural(placed, "meeting")}
-          {broken ? ", then stopped: a failed draft keeps none of them." : "."}
+          It placed {plural(placed, "meeting")}.
+          {broken ? " They are saved, so you can see them in the grid, but this draft can't be published." : ""}
         </p>
       ) : null}
       <ul className="divide-y divide-gray-100">
