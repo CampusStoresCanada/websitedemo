@@ -18,6 +18,7 @@ import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
+import PhaseSection from "@/components/admin/elections/PhaseSection";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
@@ -353,6 +354,13 @@ export default async function ElectionReviewPage({
     ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
     : null;
 
+  // Where the cycle is, so each section below can decide how much of the screen
+  // it deserves. Status-driven: reading it from dates would move the screen on
+  // at midnight on the closing date whether or not anybody had closed anything.
+  const { cyclePhase, sectionState, phaseApplies } = await import("@/lib/elections/phases");
+  const phase = cyclePhase(election, todayHere);
+  const sect = (s: Parameters<typeof sectionState>[0]) => sectionState(s, phase);
+
   const timeline = asOf
     ? disableActions((await getElectionTimeline(slug, asOf)) ?? [])
     : await getElectionTimeline(slug);
@@ -586,9 +594,19 @@ export default async function ElectionReviewPage({
       )}
 
       {noticeState && (
-        <div id="agm-notice" className="scroll-mt-24">
-          <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
-        </div>
+        <PhaseSection
+          state={sect("field_fixed")}
+          title="Notice of the meeting"
+          summary={
+            noticeState.noticeSentAt
+              ? `Given ${formatDate(noticeState.noticeSentAt)}`
+              : `Window ${noticeState.window.opensOn} to ${noticeState.window.closesOn}`
+          }
+        >
+          <div id="agm-notice" className="scroll-mt-24">
+            <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
+          </div>
+        </PhaseSection>
       )}
 
       {/* The election's obligations belong on the board's own list, assigned to
@@ -613,7 +631,15 @@ export default async function ElectionReviewPage({
       {/* Outbound mail. Both are buttons a person presses, not crons: the
           by-law fixes the earliest date, not the latest, and someone should be
           looking at the eligibility numbers when the call goes out. */}
-      <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+      <PhaseSection
+        state={sect("nominating")}
+        title="Email"
+        summary={
+          callSentAt
+            ? `Call sent ${formatDate(callSentAt)} · ${nominations.length} nomination${nominations.length === 1 ? "" : "s"} received`
+            : "the call has not gone out"
+        }
+      >
         <h2 className="text-sm font-semibold text-gray-900">Email</h2>
         <div className="mt-3 flex flex-wrap items-center gap-4">
           {callSentAt ? (
@@ -707,9 +733,14 @@ export default async function ElectionReviewPage({
           anything, so treat &ldquo;sent&rdquo; as &ldquo;attempted&rdquo;; whether a nomination is
           progressing is the reliable signal.
         </p>
-      </section>
+      </PhaseSection>
 
       {agmPackage && (
+        <PhaseSection
+          state={sect("field_fixed")}
+          title="Members' AGM package"
+          summary={agmPackageSentAt ? `Sent ${formatDate(agmPackageSentAt)}` : "not sent"}
+        >
         <div id="agm-package" className="scroll-mt-24">
         <AgmPackagePanel
           items={agmPackage.items}
@@ -733,25 +764,51 @@ export default async function ElectionReviewPage({
           agendaGenerated={Boolean(agendaGenerated)}
         />
         </div>
+        </PhaseSection>
       )}
 
-      <ReminderSchedulePanel
-        plan={nominationReminderPlan}
-        minimumGapDays={election.config.reminders.minimumGapDays}
-        save={saveReminders}
-        error={reminderError}
-        saved={Boolean(remindersSaved)}
-        outstandingCount={null}
-      />
+      <PhaseSection
+        state={sect("nominating")}
+        title="Nomination reminders"
+        summary={
+          nominationReminderPlan.steps.length === 0
+            ? "none scheduled"
+            : `${nominationReminderPlan.steps.length} steps · ${nominationReminderPlan.steps
+                .map((st) => st.sendOn)
+                .join(", ")}`
+        }
+      >
+        <ReminderSchedulePanel
+          plan={nominationReminderPlan}
+          minimumGapDays={election.config.reminders.minimumGapDays}
+          save={saveReminders}
+          error={reminderError}
+          saved={Boolean(remindersSaved)}
+          outstandingCount={null}
+        />
+      </PhaseSection>
 
-      <ReminderSchedulePanel
-        plan={reminderPlan}
-        minimumGapDays={election.config.reminders.minimumGapDays}
-        save={saveReminders}
-        error={reminderError}
-        saved={Boolean(remindersSaved)}
-        outstandingCount={outstandingBallots}
-      />
+      {phaseApplies("balloting", election) ? (
+        <PhaseSection
+          state={sect("balloting")}
+          title="Ballot reminders"
+          summary={`${reminderPlan.steps.length} steps, counted back from ${election.schedule.ballotsCloseAt}`}
+        >
+          <ReminderSchedulePanel
+            plan={reminderPlan}
+            minimumGapDays={election.config.reminders.minimumGapDays}
+            save={saveReminders}
+            error={reminderError}
+            saved={Boolean(remindersSaved)}
+            outstandingCount={outstandingBallots}
+          />
+        </PhaseSection>
+      ) : (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white px-5 py-3 text-sm text-gray-500">
+          <span className="font-medium text-gray-600">Ballot reminders</span> — the slate is
+          acclaimed, so no ballot is circulated and these never run.
+        </div>
+      )}
 
       <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
         <h2 className="text-sm font-semibold text-gray-900">As things stand</h2>
@@ -823,6 +880,18 @@ export default async function ElectionReviewPage({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        {/* The biggest section on the page, and once the field is fixed every
+            control in it is spent — the chases, the term editors, the search.
+            It stays as the record of who stood and what they were missing. */}
+        <PhaseSection
+          state={sect("nominating")}
+          title={`Nominees (${nominations.length})`}
+          summary={
+            validated.length > 0
+              ? `${validated.length} validated · ${projected.outcome}`
+              : `${incomplete.length} still incomplete`
+          }
+        >
         <section className="rounded-lg border border-gray-200 bg-white">
           <div className="border-b border-gray-200 px-5 py-4">
             <h2 className="text-sm font-semibold text-gray-900">
@@ -957,8 +1026,15 @@ export default async function ElectionReviewPage({
             </ul>
           )}
         </section>
+        </PhaseSection>
 
-        <RepresentationPanel snapshot={representation} />
+        <PhaseSection
+          state={sect("nominating")}
+          title="Representation"
+          summary={`${representation.nomineeCount} from ${representation.nomineeOrgCount} of ${representation.eligibleOrgCount} institutions`}
+        >
+          <RepresentationPanel snapshot={representation} />
+        </PhaseSection>
       </div>
     </div>
   );

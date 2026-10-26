@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canPrint, hasDecided, isVisibleTo, resolveWebVisibility,
+  canPrint, countPeopleBehindAddress, hasDecided, isVisibleTo, resolveWebVisibility,
   type VisibilitySource,
 } from "../visibility";
 
@@ -87,5 +87,28 @@ describe("hasDecided", () => {
   it("ignores a value outside the three states", () => {
     expect(hasDecided(c({ directory_visibility: "yes" }))).toBe(false);
     expect(resolveWebVisibility(c({ directory_visibility: "yes" }))).toBe("members");
+  });
+});
+
+describe("countPeopleBehindAddress", () => {
+  it("counts rows that share a Circle ID as one person", () => {
+    // An old prospect row left beside the same person's partner row.
+    expect(countPeopleBehindAddress([{ circle_id: "90083029" }, { circle_id: "90083029" }])).toBe(1);
+  });
+
+  it("keeps a shared inbox ambiguous when the people are different", () => {
+    expect(countPeopleBehindAddress([{ circle_id: "1" }, { circle_id: "2" }])).toBe(2);
+  });
+
+  it("counts every row with no Circle ID as its own person", () => {
+    // No evidence they are the same human, so refuse rather than guess.
+    expect(countPeopleBehindAddress([{ circle_id: null }, { circle_id: null }])).toBe(2);
+    expect(countPeopleBehindAddress([{ circle_id: "1" }, { circle_id: null }])).toBe(2);
+    expect(countPeopleBehindAddress([{ circle_id: "  " }, {}])).toBe(2);
+  });
+
+  it("is one for a single row and zero for none", () => {
+    expect(countPeopleBehindAddress([{ circle_id: null }])).toBe(1);
+    expect(countPeopleBehindAddress([])).toBe(0);
   });
 });

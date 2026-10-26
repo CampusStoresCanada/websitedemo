@@ -123,6 +123,10 @@
     {
       "path": "/api/cron/minutes-draft-collect",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/conference-circle-access",
+      "schedule": "20 * * * *"
     }
   ]
 }

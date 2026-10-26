@@ -1,0 +1,395 @@
+// ---------------------------------------------------------------------------
+// Conference pass holders (and survey answers) → private Circle spaces
+//
+// A conference lists private spaces in `conference_instances.circle_spaces`
+// (e.g. All Conference, Members Only). This keeps each space's members in step
+// with the people holding a matching pass:
+//
+//   - pass holder with a Circle account, not in the space → add_to_space
+//   - someone THIS JOB added who no longer holds a pass    → remove_from_space
+//   - pass holder with no Circle account                   → skipped (never created
+//     here; conference-only contacts deliberately get no Circle account)
+//
+// Removal is limited to people this job added (its completed add_to_space rows
+// in circle_sync_queue). Staff, moderators and anyone added by hand are never
+// removed: the space's roster alone cannot tell them apart from a lapsed holder.
+//
+// It is a reconciler, not a hook on registration, because seats are assigned from
+// many paths (checkout, desk sale, swaps, staff, travel import). Reading the seat
+// table catches all of them, backfills, and heals a failed queue job.
+//
+// API cost per run: one paged roster read per space. Everything else is DB reads
+// and queue rows; the circle-sync cron does the actual Circle calls.
+// ---------------------------------------------------------------------------
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getCircleClient } from "@/lib/circle/client";
+import { isCircleConfigured } from "@/lib/circle/config";
+import { enqueueCircleSync } from "@/lib/circle/sync";
+import { loadSeatHoldings, type SeatHolding } from "@/lib/conference/seats";
+
+export type ConferenceSpaceRule = {
+  spaceId: number;
+  label: string;
+  /** Passes that qualify. Null = every registration-kind pass. */
+  passEntityIds: string[] | null;
+};
+
+export type HolderContact = { contactId: string; email: string; circleId: string };
+
+const IN_CHUNK = 150; // PostgREST .in() fails past ~200 ids
+
+const addKey = (spaceId: number, contactId: string, bucket: string) =>
+  `conf-space-add-${spaceId}-${contactId}-${bucket}`;
+const removeKey = (spaceId: number, contactId: string, bucket: string) =>
+  `conf-space-remove-${spaceId}-${contactId}-${bucket}`;
+
+export function parseSpaceRules(raw: unknown): ConferenceSpaceRule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ConferenceSpaceRule[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const spaceId = Number(row.spaceId);
+    if (!Number.isInteger(spaceId) || spaceId <= 0) continue;
+    const ids = row.passEntityIds;
+    out.push({
+      spaceId,
+      label: typeof row.label === "string" ? row.label : `space ${spaceId}`,
+      passEntityIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : null,
+    });
+  }
+  return out;
+}
+
+/** Contact ids holding a pass that qualifies for this rule. */
+export function qualifyingContactIds(seats: SeatHolding[], rule: ConferenceSpaceRule): Set<string> {
+  const allowed = rule.passEntityIds ? new Set(rule.passEntityIds) : null;
+  const out = new Set<string>();
+  for (const s of seats) {
+    if (s.entityKind !== "registration" || !s.holderContactId) continue;
+    if (allowed && !allowed.has(s.entityId)) continue;
+    out.add(s.holderContactId);
+  }
+  return out;
+}
+
+/**
+ * Contacts this job currently has "in" a space: the last completed act per
+ * contact, read from its own queue rows, was an add. Keys sort by the hour
+ * bucket suffix, so the caller passes rows ordered oldest → newest.
+ */
+export function contactsWeAdded(
+  rows: { idempotency_key: string | null }[],
+  spaceId: number
+): Set<string> {
+  const addPrefix = `conf-space-add-${spaceId}-`;
+  const removePrefix = `conf-space-remove-${spaceId}-`;
+  const state = new Map<string, boolean>();
+  for (const r of rows) {
+    const k = r.idempotency_key ?? "";
+    const isAdd = k.startsWith(addPrefix);
+    if (!isAdd && !k.startsWith(removePrefix)) continue;
+    // contact ids are uuids (36 chars) directly after the prefix
+    const contactId = k.slice((isAdd ? addPrefix : removePrefix).length).slice(0, 36);
+    if (contactId.length === 36) state.set(contactId, isAdd);
+  }
+  return new Set([...state].filter(([, added]) => added).map(([id]) => id));
+}
+
+/**
+ * Who to add and who to remove. Compared on circle_id, never contact id: one
+ * person can have several contacts (one per org) sharing a Circle account.
+ */
+export function diffSpace(
+  wanted: HolderContact[],
+  rosterCircleIds: Set<string>,
+  addedByUs: HolderContact[]
+): { toAdd: HolderContact[]; toRemove: HolderContact[] } {
+  const wantedCircleIds = new Set(wanted.map((w) => w.circleId));
+  const seen = new Set<string>();
+  const toAdd: HolderContact[] = [];
+  for (const w of wanted) {
+    if (rosterCircleIds.has(w.circleId) || seen.has(w.circleId)) continue;
+    seen.add(w.circleId);
+    toAdd.push(w);
+  }
+  const removing = new Set<string>();
+  const toRemove: HolderContact[] = [];
+  for (const a of addedByUs) {
+    if (wantedCircleIds.has(a.circleId) || !rosterCircleIds.has(a.circleId) || removing.has(a.circleId)) continue;
+    removing.add(a.circleId);
+    toRemove.push(a);
+  }
+  return { toAdd, toRemove };
+}
+
+type SpaceResult = {
+  conference: string;
+  label: string;
+  spaceId: number;
+  holders: number;
+  noCircleAccount: number;
+  inSpace: number;
+  queuedAdds: number;
+  queuedRemoves: number;
+};
+
+type Db = ReturnType<typeof createAdminClient>;
+
+async function loadContacts(
+  db: Db,
+  ids: string[]
+): Promise<Map<string, HolderContact> | string> {
+  const out = new Map<string, HolderContact>();
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const { data, error } = await db
+      .from("contacts")
+      .select("id, email, circle_id")
+      .in("id", ids.slice(i, i + IN_CHUNK));
+    if (error) return error.message;
+    for (const c of data ?? []) {
+      if (c.email && c.circle_id) out.set(c.id, { contactId: c.id, email: c.email, circleId: String(c.circle_id) });
+    }
+  }
+  return out;
+}
+
+type Ctx = {
+  db: Db;
+  client: NonNullable<ReturnType<typeof getCircleClient>>;
+  bucket: string;
+  result: { spaces: SpaceResult[]; errors: string[] };
+};
+
+/**
+ * Bring one space in step with the contacts who qualify for it. Shared by every
+ * source of "who belongs here" (conference passes, survey answers): only the
+ * qualifying list differs, the add/remove ledger is the same.
+ */
+async function syncOneSpace(
+  ctx: Ctx,
+  source: string,
+  rule: { spaceId: number; label: string },
+  qualifying: Set<string>,
+  contacts: Map<string, HolderContact>
+): Promise<void> {
+  const { db, client, bucket, result } = ctx;
+  const where = `${source} / ${rule.label}`;
+  const wanted: HolderContact[] = [];
+  let noCircleAccount = 0;
+  for (const id of qualifying) {
+    const c = contacts.get(id);
+    if (c) wanted.push(c);
+    else noCircleAccount++;
+  }
+
+  let roster: Set<string>;
+  try {
+    roster = new Set((await client.listSpaceMemberIds(rule.spaceId)).map(String));
+  } catch (e) {
+    // Never diff against a roster we could not read: it would re-add everyone.
+    result.errors.push(`${where}: roster read failed: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
+
+  const { data: ours, error: oursErr } = await db
+    .from("circle_sync_queue")
+    .select("idempotency_key")
+    .eq("status", "completed")
+    .like("idempotency_key", `conf-space-%-${rule.spaceId}-%`)
+    .order("created_at", { ascending: true });
+  if (oursErr) {
+    result.errors.push(`${where}: could not read past adds: ${oursErr.message}`);
+    return;
+  }
+  const addedIds = [...contactsWeAdded(ours ?? [], rule.spaceId)];
+  const added = await loadContacts(db, addedIds);
+  if (typeof added === "string") {
+    result.errors.push(`${where}: could not load past adds: ${added}`);
+    return;
+  }
+
+  const { toAdd, toRemove } = diffSpace(wanted, roster, [...added.values()]);
+
+  for (const w of toAdd) {
+    await enqueueCircleSync({
+      operation: "add_to_space",
+      entityType: "contact",
+      entityId: w.contactId,
+      payload: { spaceId: rule.spaceId, email: w.email },
+      idempotencyKey: addKey(rule.spaceId, w.contactId, bucket),
+    });
+  }
+  for (const r of toRemove) {
+    await enqueueCircleSync({
+      operation: "remove_from_space",
+      entityType: "contact",
+      entityId: r.contactId,
+      payload: { spaceId: rule.spaceId, email: r.email },
+      idempotencyKey: removeKey(rule.spaceId, r.contactId, bucket),
+    });
+  }
+
+  result.spaces.push({
+    conference: source,
+    label: rule.label,
+    spaceId: rule.spaceId,
+    holders: qualifying.size,
+    noCircleAccount,
+    inSpace: roster.size,
+    queuedAdds: toAdd.length,
+    queuedRemoves: toRemove.length,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Survey-answer spaces: everyone at a school whose latest submitted benchmarking
+// answer includes a value (e.g. Bookware users). Read-only on benchmarking.
+// ---------------------------------------------------------------------------
+
+export type SurveySpaceRule = {
+  spaceId: number;
+  label: string;
+  /** An array column on `benchmarking`. */
+  field: "pos_system";
+  value: string;
+};
+
+/** Current members. Deliberately narrower than ACCESS_ACTIVE_STATUSES: no grace. */
+const CURRENT_MEMBER_STATUSES = ["active", "reactivated"] as const;
+
+export const SURVEY_SPACE_RULES: SurveySpaceRule[] = [
+  { spaceId: 2922289, label: "Bookware Users", field: "pos_system", value: "Carleton Technologies - Bookware" },
+];
+
+/**
+ * Orgs whose most recent submitted (non-draft) survey answer includes the value.
+ * A school that answers something else in a newer survey drops out, so its
+ * people are removed on the next run.
+ */
+export function orgsMatchingLatestAnswer(
+  rows: { organization_id: string | null; fiscal_year: number | null; status: string | null; answer: string[] | null }[],
+  value: string
+): Set<string> {
+  const latest = new Map<string, { year: number; answer: string[] | null }>();
+  for (const r of rows) {
+    if (!r.organization_id || r.fiscal_year == null || r.status === "draft" || r.answer == null) continue;
+    const cur = latest.get(r.organization_id);
+    if (!cur || r.fiscal_year > cur.year) latest.set(r.organization_id, { year: r.fiscal_year, answer: r.answer });
+  }
+  return new Set([...latest].filter(([, l]) => l.answer?.includes(value)).map(([org]) => org));
+}
+
+async function syncSurveySpaces(ctx: Ctx): Promise<void> {
+  const { db, result } = ctx;
+  for (const rule of SURVEY_SPACE_RULES) {
+    const { data: rows, error } = await db
+      .from("benchmarking")
+      .select(`organization_id, fiscal_year, status, answer:${rule.field}`);
+    if (error) {
+      result.errors.push(`Survey / ${rule.label}: could not read answers: ${error.message}`);
+      continue;
+    }
+    const answered = [...orgsMatchingLatestAnswer((rows ?? []) as never, rule.value)];
+
+    // Current members only: a school that cancels or lapses drops out of the
+    // space even if its survey answer still says it uses the system.
+    const orgIds: string[] = [];
+    let orgsFailed = false;
+    for (let i = 0; i < answered.length; i += IN_CHUNK) {
+      const { data, error: oErr } = await db
+        .from("organizations")
+        .select("id")
+        .in("id", answered.slice(i, i + IN_CHUNK))
+        .in("membership_status", CURRENT_MEMBER_STATUSES);
+      if (oErr) {
+        result.errors.push(`Survey / ${rule.label}: could not load schools: ${oErr.message}`);
+        orgsFailed = true;
+        break;
+      }
+      orgIds.push(...(data ?? []).map((o) => o.id));
+    }
+    if (orgsFailed) continue;
+
+    const qualifying = new Set<string>();
+    const contacts = new Map<string, HolderContact>();
+    let failed = false;
+    for (let i = 0; i < orgIds.length; i += IN_CHUNK) {
+      const { data, error: cErr } = await db
+        .from("contacts")
+        .select("id, email, circle_id")
+        .in("organization_id", orgIds.slice(i, i + IN_CHUNK))
+        .is("archived_at", null);
+      if (cErr) {
+        result.errors.push(`Survey / ${rule.label}: could not load contacts: ${cErr.message}`);
+        failed = true;
+        break;
+      }
+      for (const c of data ?? []) {
+        qualifying.add(c.id);
+        if (c.email && c.circle_id) contacts.set(c.id, { contactId: c.id, email: c.email, circleId: String(c.circle_id) });
+      }
+    }
+    // A partial list would read as "these people left" and remove them.
+    if (failed) continue;
+
+    await syncOneSpace(ctx, "Survey", rule, qualifying, contacts);
+  }
+}
+
+export async function runConferenceCircleAccessSync(): Promise<{
+  spaces: SpaceResult[];
+  errors: string[];
+}> {
+  const result = { spaces: [] as SpaceResult[], errors: [] as string[] };
+  if (!isCircleConfigured()) return result;
+  const client = getCircleClient();
+  if (!client) return result;
+
+  const db = createAdminClient();
+  // Hour bucket: a pending job blocks a duplicate within the hour, but a person
+  // removed and later re-added can still be queued again.
+  const ctx: Ctx = { db, client, bucket: new Date().toISOString().slice(0, 13), result };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: confs, error } = await db
+    .from("conference_instances")
+    .select("id, name, end_date, circle_spaces")
+    .or(`end_date.is.null,end_date.gte.${today}`);
+  if (error) {
+    result.errors.push(`Could not load conferences: ${error.message}`);
+  }
+
+  for (const conf of confs ?? []) {
+    const rules = parseSpaceRules(conf.circle_spaces);
+    if (rules.length === 0) continue;
+
+    let seats: SeatHolding[];
+    try {
+      ({ seats } = await loadSeatHoldings(db, {
+        conferenceId: conf.id,
+        assigned: true,
+        entityKinds: ["registration"],
+      }));
+    } catch (e) {
+      result.errors.push(`${conf.name}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+
+    const holderIds = [...new Set(seats.map((s) => s.holderContactId).filter((x): x is string => !!x))];
+    const holders = await loadContacts(db, holderIds);
+    // A partial contact list would read as "these people left" and remove them.
+    if (typeof holders === "string") {
+      result.errors.push(`${conf.name}: could not load holder contacts: ${holders}`);
+      continue;
+    }
+
+    for (const rule of rules) {
+      await syncOneSpace(ctx, conf.name, rule, qualifyingContactIds(seats, rule), holders);
+    }
+  }
+
+  await syncSurveySpaces(ctx);
+  return result;
+}

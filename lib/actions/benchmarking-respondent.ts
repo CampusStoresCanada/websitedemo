@@ -28,6 +28,8 @@ export interface StoreContact {
   hasLogin: boolean;
   /** This is the person currently signed in. */
   isYou: boolean;
+  /** No longer at the store. Only ever true for an admin viewer. */
+  isArchived: boolean;
 }
 
 export async function loadStoreContacts(
@@ -36,12 +38,18 @@ export async function loadStoreContacts(
   const auth = await requireAuthenticated();
   if (!auth.ok) return { contacts: [], youContactId: null };
 
+  // Active contacts only. Hidden people still appear: hidden keeps someone out
+  // of the directory, not off their own store's survey. Archived people have
+  // left the store, so only admins (who may be tidying the roster) see them.
+  const canSeeArchived = isGlobalAdmin(auth.ctx.globalRole);
+
   const db = createAdminClient();
-  const { data } = await db
+  let query = db
     .from("contacts")
-    .select("id, name, first_name, last_name, email, work_email, role_title, phone, work_phone_number, profile_id")
-    .eq("organization_id", organizationId)
-    .order("name");
+    .select("id, name, first_name, last_name, email, work_email, role_title, phone, work_phone_number, profile_id, archived_at")
+    .eq("organization_id", organizationId);
+  if (!canSeeArchived) query = query.is("archived_at", null);
+  const { data } = await query.order("name");
 
   const rows = data ?? [];
   const seen = new Set<string>();
@@ -72,11 +80,17 @@ export async function loadStoreContacts(
       phone: ((r.work_phone_number as string | null) ?? (r.phone as string | null)) || null,
       hasLogin: Boolean(r.profile_id),
       isYou,
+      isArchived: r.archived_at != null,
     });
   }
 
-  // You first — it is your store and usually your survey.
-  contacts.sort((a, b) => Number(b.isYou) - Number(a.isYou) || a.name.localeCompare(b.name));
+  // You first — it is your store and usually your survey. Archived last.
+  contacts.sort(
+    (a, b) =>
+      Number(b.isYou) - Number(a.isYou) ||
+      Number(a.isArchived) - Number(b.isArchived) ||
+      a.name.localeCompare(b.name),
+  );
   return { contacts, youContactId };
 }
 
@@ -179,6 +193,7 @@ export async function addStoreContact(input: {
       roleTitle: input.roleTitle?.trim() || null,
       phone: null,
       isYou: false,
+      isArchived: false,
       // A contact is a record of a person, not an account. Provisioning a login
       // is the respondent flow's job, and only when the store asks for it.
       hasLogin: false,
