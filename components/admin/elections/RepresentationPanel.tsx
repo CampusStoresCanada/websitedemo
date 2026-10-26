@@ -26,6 +26,29 @@ export default function RepresentationPanel({
           {snapshot.eligibleOrgCount} eligible member{snapshot.eligibleOrgCount === 1 ? "" : "s"}.
           For information only — nothing here affects who reaches the ballot.
         </p>
+
+        {/* Two readings, two scales. Saying which is which beats leaving the
+            reader to infer it from two colours. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-gray-600">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-6 rounded bg-[#B92026]" />
+            nominees, of the membership
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-6 rounded bg-[#163D6D]/60" />
+            {snapshot.everyNomineeFits
+              ? `the board that would sit, of ${snapshot.boardSize}`
+              : `the most the board could hold, of ${snapshot.boardSize}`}
+          </span>
+        </div>
+
+        <p className="mt-2 text-[11px] text-gray-500">
+          {snapshot.continuingCount} director
+          {snapshot.continuingCount === 1 ? "" : "s"} continue past this annual general meeting;
+          the second bar adds the nominees to them.
+          {!snapshot.everyNomineeFits &&
+            " More nominees stand than there are seats, so not all of them will join — read that bar as a ceiling, not a forecast."}
+        </p>
       </div>
 
       <div className="divide-y divide-gray-100">
@@ -54,10 +77,20 @@ export default function RepresentationPanel({
                   {buckets.map((bucket) => {
                     const nominees = d.nominees[bucket] ?? 0;
                     const members = d.membership[bucket] ?? 0;
+                    const onBoard = d.board?.[bucket] ?? 0;
+                    // ⚠️ Two denominators on purpose. The nominee bar is a share
+                    // of the MEMBERSHIP — "1 of the 14 colleges has put a name
+                    // forward". The board bar is a share of the BOARD — "3 of
+                    // its 9 seats would be colleges". Same bucket, different
+                    // questions, so they get separate tracks and separate
+                    // numbers rather than one bar nobody could read.
                     const width = members ? Math.round((nominees / members) * 100) : 0;
+                    const boardWidth = snapshot.boardSize
+                      ? Math.round((onBoard / snapshot.boardSize) * 100)
+                      : 0;
                     return (
                       <tr key={bucket}>
-                        <td className="w-36 py-1 pr-3 text-gray-700">
+                        <td className="w-36 py-1 pr-3 align-top text-gray-700">
                           {bucket === "unknown"
                             ? "not recorded"
                             : d.key === "province"
@@ -71,9 +104,20 @@ export default function RepresentationPanel({
                               style={{ width: `${Math.min(100, width)}%` }}
                             />
                           </div>
+                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-gray-100">
+                            <div
+                              className={`h-full rounded ${onBoard ? "bg-[#163D6D]/60" : "bg-transparent"}`}
+                              style={{ width: `${Math.min(100, boardWidth)}%` }}
+                            />
+                          </div>
                         </td>
-                        <td className="w-24 py-1 text-right tabular-nums text-gray-600">
-                          {nominees} / {members}
+                        <td className="w-24 py-1 text-right tabular-nums">
+                          <div className="text-gray-600">
+                            {nominees} / {members}
+                          </div>
+                          <div className="text-[#163D6D]/80">
+                            {onBoard} / {snapshot.boardSize}
+                          </div>
                         </td>
                       </tr>
                     );

@@ -1163,6 +1163,22 @@ export async function getCommitteeReview(slug: string): Promise<CommitteeReview 
     .map((n) => byId.get(n.nomineeOrganizationId))
     .filter((o): o is OrgProfile => o !== undefined);
 
+  // The directors who are NOT up at this AGM — their terms run past it, so they
+  // are the half of the board the nominees would be joining. Read from the
+  // assignments rather than inferred from who did not stand: somebody whose
+  // term ends and who is standing again appears in both lists, and counting
+  // them twice would inflate their institution's share of the board.
+  const { data: continuingRows } = await db
+    .from("governance_role_assignments")
+    .select("organization_id, organizations(name, province, fte, institution_type)")
+    .eq("body_id", election.bodyId)
+    .eq("role_key", "director")
+    .or(`term_end.is.null,term_end.gt.${election.schedule.agmDate}`);
+
+  const continuingOrgs = (continuingRows ?? [])
+    .map((r) => toProfile(r as Parameters<typeof toProfile>[0]))
+    .filter((o): o is OrgProfile => o !== null);
+
   const validated = nominations.filter((n) => n.completeness.complete);
   const incomplete = nominations.filter(
     (n) => !n.completeness.complete && n.candidateAcceptedAt
@@ -1177,7 +1193,12 @@ export async function getCommitteeReview(slug: string): Promise<CommitteeReview 
     nominations,
     validated,
     incomplete,
-    representation: buildRepresentationSnapshot(nomineeOrgs, eligibleOrgs),
+    representation: buildRepresentationSnapshot(
+      nomineeOrgs,
+      eligibleOrgs,
+      continuingOrgs,
+      election.seatsAvailable
+    ),
     // Projected from what would count TODAY, not from raw nomination count — a
     // nominee whose store permission is outstanding is not on the ballot yet.
     projected: resolveOutcome(validated.length, election.seatsAvailable),
