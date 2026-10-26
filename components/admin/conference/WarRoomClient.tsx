@@ -13,6 +13,7 @@ import { resolveFlag, type ConferenceAsk } from "@/lib/actions/flags";
 import { PRINT_SORT_KEYS, type PrintSortKey } from "@/lib/conference/badges/arrangement";
 import { setMyPrintSort } from "@/lib/actions/profile";
 import { sendDocumentToPrinter } from "@/lib/actions/conference-badges";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 type ConferencePerson = {
   id: string;
@@ -31,14 +32,22 @@ type ConferencePerson = {
   admin_notes: string | null;
 };
 
-type OpsTab = "whats_next" | "asks" | "answers" | "people";
+export type OpsTab = "waiting" | "whats_next" | "people" | "answers";
 
-const OPS_TABS: Array<{ id: OpsTab; label: string; adminOnly?: boolean }> = [
-  { id: "whats_next", label: "What's next", adminOnly: true },
-  { id: "asks", label: "Asks" },
+/**
+ * The War Room's tabs (WAR_ROOM_OPERATE_PLAN §5). Print, Meetings and Messages
+ * join as their phases land.
+ */
+const OPS_TABS: Array<{ id: OpsTab; label: string }> = [
+  { id: "waiting", label: "Waiting on us" },
+  { id: "whats_next", label: "What's next" },
+  { id: "people", label: "People" },
   { id: "answers", label: "Answers" },
-  { id: "people", label: "People Lookup" },
 ];
+
+function isOpsTab(value: string | null): value is OpsTab {
+  return OPS_TABS.some((tab) => tab.id === value);
+}
 
 /** A meal's menu, for "what's for dinner?" at the desk. */
 export type WarRoomMenu = { id: string; title: string; dayKey: string; startTime: string | null; menu: string };
@@ -162,25 +171,60 @@ function MyPrintSort({ initial }: { initial: PrintSortKey }) {
   );
 }
 
+/**
+ * Personal settings, out of the way of the work: set once, rarely revisited.
+ * Print sort used to sit above What's next, ahead of everything to do.
+ */
+export function MeMenu({ printSort }: { printSort: PrintSortKey }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+      >
+        Me ▾
+      </button>
+      {open ? (
+        <>
+          {/* Click anywhere else to close. */}
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div className="absolute right-0 z-30 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+            <MyPrintSort initial={printSort} />
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 interface WarRoomClientProps {
   conferenceId: string;
   initialRows: ConferencePerson[];
-  canEditAdminNotes: boolean;
-  whatsNext: WhatsNext | null;
+  whatsNext: WhatsNext;
   answers: ConferenceAnswer[];
   menus: WarRoomMenu[];
   asks: ConferenceAsk[];
+  /** `?tab=` from the address, unchecked (the status line links to tabs). */
+  requestedTab: string | null;
+  /** Rebuilds the people index — the only tab it affects is People. */
+  syncPeopleIndex: () => Promise<void>;
 }
 
 export default function WarRoomClient({
   conferenceId,
   initialRows,
-  canEditAdminNotes,
   whatsNext,
   answers,
   menus,
   asks,
+  requestedTab,
+  syncPeopleIndex,
 }: WarRoomClientProps) {
+  // The War Room is administrators only now (WAR_ROOM_OPERATE_PLAN §2).
+  const canEditAdminNotes = true;
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,8 +236,18 @@ export default function WarRoomClient({
   const [checkIn, setCheckIn] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [lastSuccessAt, setLastSuccessAt] = useState<number>(Date.now());
-  const [activeOpsTab, setActiveOpsTab] = useState<OpsTab>(whatsNext ? "whats_next" : "asks");
-  const tabs = OPS_TABS.filter((tab) => !tab.adminOnly || whatsNext);
+  const openAsks = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
+  // A tab the address names; otherwise whatever has someone waiting, then the
+  // run-sheet.
+  const [activeOpsTab, setActiveOpsTabState] = useState<OpsTab>(
+    isOpsTab(requestedTab) ? requestedTab : openAsks.length > 0 ? "waiting" : "whats_next"
+  );
+  // In the address so the status line can link straight to a tab, and a
+  // refresh lands where you were.
+  const setActiveOpsTab = (tab: OpsTab) => {
+    setActiveOpsTabState(tab);
+    window.history.replaceState(null, "", `?tab=${tab}`);
+  };
 
   const selected = useMemo(
     () => rows.find((row) => row.id === selectedId) ?? null,
@@ -236,11 +290,15 @@ export default function WarRoomClient({
     }
   }, [assignmentStatus, badgeStatus, checkIn, conferenceId, personKind, search]);
 
+  // Only while People is open: polling a roster nobody is looking at is load
+  // for nothing.
+  const peopleOpen = activeOpsTab === "people";
   useEffect(() => {
+    if (!peopleOpen) return;
     void load();
     const id = window.setInterval(() => void load(), POLL_MS);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, peopleOpen]);
 
   const runPersonOp = async (
     personId: string,
@@ -267,34 +325,44 @@ export default function WarRoomClient({
   };
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-gray-900">Operations</h2>
+    <div className="space-y-5">
+      {/* The page's main control, not a card around buttons. */}
+      <nav className="-mx-4 overflow-x-auto border-b border-gray-200 px-4 sm:mx-0 sm:px-0" aria-label="War Room">
+        <div className="flex gap-5">
+          {OPS_TABS.map((tab) => {
+            const active = activeOpsTab === tab.id;
+            const count = tab.id === "waiting" ? openAsks.length : 0;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveOpsTab(tab.id)}
+                aria-current={active ? "page" : undefined}
+                className={`-mb-px whitespace-nowrap border-b-2 py-2.5 text-sm font-medium ${
+                  active ? "border-accent text-accent" : "border-transparent text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                {tab.label}
+                {count > 0 ? (
+                  <span
+                    className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
+                      openAsks.some((a) => a.priority === "high") ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveOpsTab(tab.id)}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                activeOpsTab === tab.id
-                  ? "border-accent bg-[#fff5f5] text-accent"
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </section>
+      </nav>
 
-      {activeOpsTab === "whats_next" && whatsNext ? (
+      {activeOpsTab === "whats_next" ? (
         <WhatsNextView conferenceId={conferenceId} whatsNext={whatsNext} />
       ) : null}
 
-      {activeOpsTab === "asks" ? (
+      {activeOpsTab === "waiting" ? (
         <AsksView conferenceId={conferenceId} asks={asks} canResolve={canEditAdminNotes} />
       ) : null}
 
@@ -305,7 +373,18 @@ export default function WarRoomClient({
       {activeOpsTab === "people" ? (
         <>
           <section className="rounded-xl border border-gray-200 bg-white p-4">
-            <h2 className="text-base font-semibold text-gray-900">Filters</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-900">Filters</h2>
+              {/* Moved from the War Room's header: People is the only thing it touches. */}
+              <ConfirmAction
+                label="Sync People Index"
+                consequence="Rebuilds this conference's people list from registrations and seats. Nobody is emailed."
+                onConfirm={async () => {
+                  await syncPeopleIndex();
+                  await load();
+                }}
+              />
+            </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
               <input
                 value={search}
@@ -444,14 +523,19 @@ export default function WarRoomClient({
                 <div className="rounded-lg border border-gray-100 p-3 text-sm">
                   <p className="font-medium text-gray-900">Quick Actions</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
+                    <ConfirmAction
+                      label="Check in by hand"
+                      consequence={`Records ${selected.display_name ?? "this person"} as checked in now, without a scan.`}
                       disabled={isStale}
-                      onClick={() => void runPersonOp(selected.id, "manual_check_in")}
-                      className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Manual Check-in
-                    </button>
+                      onConfirm={async () => {
+                        try {
+                          await runPersonOp(selected.id, "manual_check_in");
+                          return { success: true };
+                        } catch (err) {
+                          return { success: false, error: err instanceof Error ? err.message : "Couldn't check them in." };
+                        }
+                      }}
+                    />
                     <button
                       type="button"
                       disabled={isStale}
@@ -535,40 +619,13 @@ function AsksView({
   const router = useRouter();
   const [note, setNote] = useState("");
   const [urgent, setUrgent] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const open = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
   const done = asks.filter((a) => !open.includes(a));
-
-  async function add() {
-    if (!note.trim()) return;
-    setBusy(true);
-    setError(null);
-    const result = await submitFlag({
-      pageUrl: `/admin/conference/${conferenceId}/war-room`,
-      priority: urgent ? "high" : "normal",
-      note: note.trim(),
-    });
-    setBusy(false);
-    if (!result.success) {
-      setError(result.error ?? "Couldn't save that.");
-      return;
-    }
-    setNote("");
-    setUrgent(false);
-    router.refresh();
-  }
 
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-gray-200 bg-white px-[18px] py-4">
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void add();
-          }}
-        >
+        <div className="flex flex-wrap items-center gap-2">
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -579,15 +636,25 @@ function AsksView({
             <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
             Urgent
           </label>
-          <button
-            type="submit"
-            disabled={busy || !note.trim()}
-            className="rounded-md bg-[#163D6D] px-3 py-2 text-xs font-semibold text-white hover:bg-[#12325a] disabled:opacity-50"
-          >
-            {busy ? "Adding…" : "Add"}
-          </button>
-        </form>
-        {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+          {/* Adding one messages CSC staff in Circle, so it is asked twice. */}
+          <ConfirmAction
+            label="Add"
+            disabled={!note.trim()}
+            consequence={`Adds this to the list and messages CSC staff in Circle${urgent ? ", marked urgent" : ""}.`}
+            onConfirm={async () => {
+              const result = await submitFlag({
+                pageUrl: `/admin/conference/${conferenceId}/war-room`,
+                priority: urgent ? "high" : "normal",
+                note: note.trim(),
+              });
+              if (!result.success) return { success: false, error: result.error ?? "Couldn't save that." };
+              setNote("");
+              setUrgent(false);
+              router.refresh();
+              return { success: true };
+            }}
+          />
+        </div>
       </section>
 
       <section className="space-y-2">
@@ -616,7 +683,6 @@ function AsksView({
 
 function AskRow({ ask, canResolve }: { ask: ConferenceAsk; canResolve: boolean }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
   // "Ask CSC" from their own page, or raised by staff on one of ours.
   const page = ask.pageUrl.includes("war-room?ask=")
     ? "Ask CSC"
@@ -644,19 +710,17 @@ function AskRow({ ask, canResolve }: { ask: ConferenceAsk; canResolve: boolean }
         </p>
       </div>
       {canResolve ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            const result = await resolveFlag(ask.id);
-            setBusy(false);
-            if (result.success) router.refresh();
-          }}
-          className="shrink-0 rounded-full border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-gray-400 disabled:opacity-50"
-        >
-          {busy ? "…" : "Done"}
-        </button>
+        <span className="shrink-0">
+          <ConfirmAction
+            label="Done"
+            consequence={`Marks ${ask.flaggerName ?? "their"}${ask.flaggerName ? "'s" : ""} ask as handled and moves it to Done.`}
+            onConfirm={async () => {
+              const result = await resolveFlag(ask.id);
+              if (result.success) router.refresh();
+              return result;
+            }}
+          />
+        </span>
       ) : null}
     </div>
   );
@@ -750,7 +814,6 @@ function WhatsNextView({ conferenceId, whatsNext }: { conferenceId: string; what
   if (open + groups.done.length === 0) {
     return (
       <div className="space-y-6">
-      <MyPrintSort initial={whatsNext.printSort} />
       <section className="rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-base font-semibold text-gray-900">Nothing on the run-sheet yet</h2>
         <p className="mt-1 text-sm text-gray-600">
@@ -767,7 +830,6 @@ function WhatsNextView({ conferenceId, whatsNext }: { conferenceId: string; what
 
   return (
     <div className="space-y-6">
-      <MyPrintSort initial={whatsNext.printSort} />
       {groups.now.length > 0 ? (
         <ChecklistGroup title="Now" lists={groups.now} whatsNext={whatsNext} conferenceId={conferenceId} />
       ) : null}

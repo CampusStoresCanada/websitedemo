@@ -284,16 +284,29 @@ export function visibleNavGroups(
 }
 
 /**
- * The conference pages desk staff reach without being global admins: they
- * OPERATE a conference. Badges, catalogue, schedule ops and every other
- * conference page are design work and stay admin-only.
+ * The conference pages desk staff reach without being global admins: the
+ * check-in desk and its printed sheets. Everything else is CSC staff's.
+ *
+ * ⛔ The War Room is NOT here (Stephen, 2026-10-23): it is the administrators'
+ * operations centre, and desk staff — temps, easy to appoint and easy to revoke —
+ * work the desk and nothing else. It used to be listed, which showed temps a
+ * row of buttons to pages they could not open.
  *
  * ⛔ The ONE list. The /admin gate admits on it and the conference sub-nav shows
  * only these tabs to desk staff. Each page still runs
  * requireConferenceDeskAccess itself — this list opens the door, it is not the
  * lock.
  */
-export const CONFERENCE_DESK_SEGMENTS = ["check-in", "war-room"] as const;
+export const CONFERENCE_DESK_SEGMENTS = ["check-in"] as const;
+
+/**
+ * The War Room: CSC's operations centre, with its own slim header. The admin
+ * sidebar, breadcrumbs and the conference's Manage tabs step aside for it, as
+ * they do for the desk (WAR_ROOM_OPERATE_PLAN §4).
+ */
+export function isWarRoomPath(pathname: string): boolean {
+  return /^\/admin\/conference\/[^/]+\/war-room\/?$/.test(pathname);
+}
 
 /**
  * The conference id when the path is one of its desk pages

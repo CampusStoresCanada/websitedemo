@@ -391,6 +391,32 @@ function plural(n: number, one: string, many = `${one}s`): string {
 
 type StaffCheck = (args: { db: AdminClient; conferenceId: string }) => Promise<StaffCheckResult>;
 
+/**
+ * The published schedule's meetings that have started, and how many a booth
+ * card scan confirmed. One count for the "meetings confirmed" task and the War
+ * Room's status line, so the two never disagree.
+ */
+export async function meetingsSoFar(
+  db: AdminClient,
+  conferenceId: string
+): Promise<{ total: number; started: number; confirmed: number; firstStartsLocal: string | null }> {
+  const { getConferenceScheduleTimeline } = await import("./schedule-service");
+  const { loadMeetingConfirmations } = await import("./schedule-ops");
+  const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
+  const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
+  const now = Date.now();
+  const started = meetings.filter((m) => m.startsAt && Date.parse(m.startsAt) <= now);
+  const confirmations = started.length
+    ? await loadMeetingConfirmations(db, started.map((m) => m.meetingAssignment!.scheduleId))
+    : new Map();
+  return {
+    total: meetings.length,
+    started: started.length,
+    confirmed: started.filter((m) => confirmations.has(m.meetingAssignment!.scheduleId)).length,
+    firstStartsLocal: meetings[0]?.startsAtLocal ?? null,
+  };
+}
+
 export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
   /**
    * The pre-printed badge run, against everyone registered since.
@@ -512,7 +538,9 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
         actions,
       };
     } catch (error) {
-      console.error("[war-room] check-in card count failed:", error);
+      // A warning, not an error: on a local server this is the deliberate
+      // refusal to build localhost QR addresses, every load.
+      console.warn("[war-room] check-in card count failed:", error instanceof Error ? error.message : error);
       return { verdict: "tick", detail: "Couldn't count the cards; the sheet will show them.", actions };
     }
   },
@@ -600,30 +628,20 @@ export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
    */
   async meetings_confirmed({ db, conferenceId }) {
     const actions = [{ label: "Open the meeting grid", href: `/admin/conference/${conferenceId}/schedule` }];
-    const { getConferenceScheduleTimeline } = await import("./schedule-service");
-    const { loadMeetingConfirmations } = await import("./schedule-ops");
-    const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
-    const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
-    if (meetings.length === 0) return { verdict: "not_done", detail: "No meetings are scheduled.", actions };
-    const now = Date.now();
-    const started = meetings.filter((m) => m.startsAt && Date.parse(m.startsAt) <= now);
-    if (started.length === 0) {
-      const first = meetings[0];
+    const so = await meetingsSoFar(db, conferenceId);
+    if (so.total === 0) return { verdict: "not_done", detail: "No meetings are scheduled.", actions };
+    if (so.started === 0) {
       return {
         verdict: "not_done",
-        detail: `${plural(meetings.length, "meeting")} scheduled; the first starts ${first.startsAtLocal}.`,
+        detail: `${plural(so.total, "meeting")} scheduled; the first starts ${so.firstStartsLocal}.`,
         actions,
       };
     }
-    const confirmations = await loadMeetingConfirmations(
-      db,
-      started.map((m) => m.meetingAssignment!.scheduleId)
-    );
-    const unconfirmed = started.filter((m) => !confirmations.has(m.meetingAssignment!.scheduleId)).length;
+    const unconfirmed = so.started - so.confirmed;
     return {
       verdict: unconfirmed === 0 ? "done" : "not_done",
       detail:
-        `${started.length - unconfirmed} of ${plural(started.length, "meeting")} so far confirmed` +
+        `${so.confirmed} of ${plural(so.started, "meeting")} so far confirmed` +
         (unconfirmed ? `; ${unconfirmed} not yet. Unconfirmed shows as no ✓ on the grid.` : "."),
       actions,
     };

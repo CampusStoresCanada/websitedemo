@@ -5,8 +5,12 @@ import {
   listConferencePeople,
   syncConferencePeopleIndex,
 } from "@/lib/actions/conference-people";
-import { isGlobalAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
-import WarRoomClient, { SendToPrinterButton, type WhatsNext } from "@/components/admin/conference/WarRoomClient";
+import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import WarRoomClient, {
+  MeMenu,
+  SendToPrinterButton,
+  type WhatsNext,
+} from "@/components/admin/conference/WarRoomClient";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -14,15 +18,18 @@ import {
   loadStaffChecklists,
   type StaffTaskExtra,
 } from "@/lib/conference/checklist-tasks";
-import { arrangeStaffChecklists } from "@/lib/conference/deadline-urgency";
+import { arrangeStaffChecklists, calendarDayIn, describeUrgency } from "@/lib/conference/deadline-urgency";
 import { readPreferences } from "@/lib/profile/preferences";
 import { ENTITY_SELECT, buildEntityGraph } from "@/lib/conference/seats";
 import { deriveAgenda, deriveAnswers } from "@/lib/conference/agenda";
 import { loadConferenceAsks } from "@/lib/actions/flags";
 import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
+import { stationOnline } from "@/lib/conference/badges/print-station";
+import { meetingsSoFar } from "@/lib/conference/checklist-checks";
+import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
 export const metadata = {
-  title: "Conference War Room | Admin",
+  title: "War Room | Admin",
 };
 
 export const dynamic = "force-dynamic";
@@ -69,51 +76,71 @@ function StaffTaskControls({ conferenceId, extra }: { conferenceId: string; extr
   );
 }
 
+/** One piece of the status line: a fact, coloured by how much it matters, linking to where you fix it. */
+function StatusItem({ tone, href, children }: { tone: "alert" | "warn" | "ok" | "quiet"; href: string; children: ReactNode }) {
+  const dot =
+    tone === "alert" ? "bg-red-600" : tone === "warn" ? "bg-amber-500" : tone === "ok" ? "bg-green-600" : "bg-gray-300";
+  return (
+    <a href={href} className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-gray-700 hover:text-gray-950">
+      <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden="true" />
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The War Room: CSC's operations centre (docs/WAR_ROOM_OPERATE_PLAN.md).
+ *
+ * Operate, not Manage: everything here carries out the conference that exists.
+ * Its own slim header — the conference's Manage tabs and the admin sidebar step
+ * aside (lib/admin/nav isWarRoomPath) — then a status line that answers "is
+ * anything on fire?", then the tabs.
+ *
+ * ⛔ Administrators only. Desk staff (temps) work the check-in desk; the War Room
+ * is not theirs (Stephen, 2026-10-23).
+ */
 export default async function ConferenceWarRoomPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
-  const { id: deskConferenceId } = await params;
-  const auth = await requireConferenceDeskAccess(deskConferenceId);
+  const auth = await requireConferenceOpsAccess();
   if (!auth.ok) {
-    return (
-      <main className="p-6 text-sm text-red-700">
-        Conference ops access required.
-      </main>
-    );
+    return <main className="p-6 text-sm text-red-700">The War Room is for CSC staff.</main>;
   }
 
   const { id } = await params;
-  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
-  const canRunSync = isAdmin;
-  const [conferenceResult, peopleResult] = await Promise.all([
-    getConference(id),
-    listConferencePeople(id),
-  ]);
-
+  const [conferenceResult, peopleResult] = await Promise.all([getConference(id), listConferencePeople(id)]);
   if (!conferenceResult.success || !conferenceResult.data) {
     return <main className="p-6 text-sm text-red-700">Conference not found.</main>;
   }
-
+  const conference = conferenceResult.data;
   const rows = peopleResult.success ? peopleResult.data ?? [] : [];
-  const conferenceTimeZone =
-    ((conferenceResult.data as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
+  const timeZone = ((conference as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
+
+  const db = createAdminClient();
+  const [entityRes, refRes, asks, answeringOrgId, preferences, stationsRes, waitingJobs, meetings] = await Promise.all([
+    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
+    db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", id),
+    loadConferenceAsks(id),
+    loadStaffAnsweringOrgId(db),
+    readPreferences(auth.ctx.userId),
+    db.from("print_stations").select("last_seen_at").eq("conference_id", id).is("revoked_at", null),
+    db
+      .from("badge_print_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", id)
+      .in("status", ["sent_to_printer", "rendering"]),
+    meetingsSoFar(db, id).catch(() => null),
+  ]);
 
   // Answers (Wi-Fi, coat check) and meal menus: the same graph and the same
   // readers as each person's own page, so desk and phone say the same thing.
-  const graphDb = createAdminClient();
-  const [entityRes, refRes, asks] = await Promise.all([
-    graphDb.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
-    graphDb
-      .from("conference_entity_refs")
-      .select("from_entity_id, to_entity_id, role, quantity")
-      .eq("conference_id", id),
-    loadConferenceAsks(id),
-  ]);
   const entities = buildEntityGraph(entityRes.data ?? [], refRes.data ?? []);
   const answers = deriveAnswers(entities);
-  const menus = deriveAgenda(entities, conferenceTimeZone)
+  const menus = deriveAgenda(entities, timeZone)
     .filter((item) => item.kind === "meal" && item.description?.startsWith("Menu: "))
     .map((item) => ({
       id: item.id,
@@ -123,102 +150,100 @@ export default async function ConferenceWarRoomPage({
       menu: item.description!.slice("Menu: ".length),
     }));
 
-  // What's next is CSC's own run-sheet: admins only. Desk temps reach this page
-  // for People Lookup and never see it.
-  let whatsNext: WhatsNext | null = null;
-  if (isAdmin) {
-    const db = graphDb;
-    const timeZone = conferenceTimeZone;
-    const [answeringOrgId, preferences] = await Promise.all([
-      loadStaffAnsweringOrgId(db),
-      readPreferences(auth.ctx.userId),
-    ]);
-    const checklists = await loadStaffChecklists(db, id, answeringOrgId);
-    const controlsByTaskId: Record<string, ReactNode> = {};
-    for (const list of checklists) {
-      for (const [taskId, extra] of Object.entries(list.extras)) {
-        controlsByTaskId[taskId] = <StaffTaskControls conferenceId={id} extra={extra} />;
-      }
+  const checklists = await loadStaffChecklists(db, id, answeringOrgId);
+  const controlsByTaskId: Record<string, ReactNode> = {};
+  for (const list of checklists) {
+    for (const [taskId, extra] of Object.entries(list.extras)) {
+      controlsByTaskId[taskId] = <StaffTaskControls conferenceId={id} extra={extra} />;
     }
-    whatsNext = {
-      answeringOrgId,
-      timeZone,
-      groups: arrangeStaffChecklists(checklists, new Date(), timeZone),
-      controlsByTaskId,
-      printSort: parsePrintSort(preferences[PRINT_SORT_PREFERENCE_KEY]),
-    };
   }
+  const groups = arrangeStaffChecklists(checklists, new Date(), timeZone);
+  const printSort = parsePrintSort(preferences[PRINT_SORT_PREFERENCE_KEY]);
+  const whatsNext: WhatsNext = { answeringOrgId, timeZone, groups, controlsByTaskId, printSort };
+
+  // ── The status line: only what is live ──────────────────────────────────
+  const openAsks = asks.filter((a) => a.status === "open" || a.status === "in_progress" || a.status === "acknowledged");
+  const urgentAsks = openAsks.filter((a) => a.priority === "high").length;
+  const stations = stationsRes.data ?? [];
+  const online = stations.some((s) => stationOnline(s.last_seen_at as string | null));
+  const queued = waitingJobs.count ?? 0;
+  const nextList = groups.now[0] ?? groups.next[0] ?? null;
+  const today = calendarDayIn(new Date(), timeZone);
+  const daysAway = nextList
+    ? describeUrgency(calendarDayIn(new Date(nextList.deadline), timeZone), today).daysUntil
+    : null;
+  const meetingsRunning = meetings && meetings.started > 0 && meetings.started < meetings.total;
+
+  // A link from the status line names its tab (?tab=); the client checks it.
+  const tabParam = (await searchParams).tab ?? null;
 
   return (
-    <main className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">War Room</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            {conferenceResult.data.name} ({conferenceResult.data.year}-
-            {conferenceResult.data.edition_code})
-          </p>
+    <main className="mx-auto max-w-5xl space-y-4 px-4 py-5 sm:px-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">War Room</p>
+          <h1 className="truncate text-xl font-bold text-gray-900">{conference.name}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/admin/conference/${id}/badges`}
-            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Badge Ops
-          </Link>
-          <Link
-            href={`/admin/conference/${id}/schedule-ops`}
-            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Schedule Ops
-          </Link>
-          <Link
-            href={`/admin/conference/${id}/travel-import`}
-            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Travel Import
-          </Link>
+        <div className="flex shrink-0 items-center gap-2">
           <Link
             href={`/admin/conference/${id}/check-in`}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md border border-accent bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+            className="rounded-md border border-accent bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
           >
-            Open Check-in Desk
+            Check-in Desk ↗
           </Link>
+          {/* The one way back to Manage: the conference as it is defined. */}
           <Link
-            href={`/admin/conference/${id}`}
-            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            href={`/admin/conference/${id}/overview`}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
           >
-            Back to Conference
+            Manage ▸
           </Link>
-          {canRunSync ? (
-            <form
-              action={async () => {
-                "use server";
-                await syncConferencePeopleIndex(id);
-                revalidatePath(`/admin/conference/${id}/war-room`);
-              }}
-            >
-              <button
-                type="submit"
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Sync People Index
-              </button>
-            </form>
-          ) : null}
+          <MeMenu printSort={printSort} />
         </div>
+      </header>
+
+      <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
+        <StatusItem tone={urgentAsks > 0 ? "alert" : openAsks.length > 0 ? "warn" : "quiet"} href="?tab=waiting">
+          {openAsks.length === 0
+            ? "Nobody waiting on us"
+            : `${openAsks.length} waiting on us${urgentAsks ? `, ${urgentAsks} urgent` : ""}`}
+        </StatusItem>
+        <StatusItem
+          tone={stations.length === 0 ? "quiet" : online ? "ok" : "alert"}
+          href={`/admin/conference/${id}/check-in/print-station`}
+        >
+          {stations.length === 0 ? "No print station" : online ? "Print station online" : "Print station offline"}
+          {queued ? ` · ${queued} waiting` : ""}
+        </StatusItem>
+        {nextList ? (
+          <StatusItem tone={daysAway !== null && daysAway < 0 ? "alert" : daysAway !== null && daysAway <= 7 ? "warn" : "quiet"} href="?tab=whats_next">
+            {daysAway !== null && daysAway < 0 ? "Overdue: " : "Next: "}
+            {nextList.name}, {formatDayMonth(nextList.deadline, timeZone)}
+            {daysAway !== null && daysAway >= 0 ? ` (${daysAway === 0 ? "today" : daysAway === 1 ? "tomorrow" : `${daysAway} days`})` : ""}
+          </StatusItem>
+        ) : null}
+        {meetingsRunning ? (
+          <StatusItem tone={meetings.confirmed < meetings.started ? "warn" : "ok"} href={`/admin/conference/${id}/schedule`}>
+            {meetings.confirmed} of {meetings.started} meetings confirmed
+          </StatusItem>
+        ) : null}
       </div>
 
       <WarRoomClient
         conferenceId={id}
         initialRows={rows}
-        canEditAdminNotes={isAdmin}
         whatsNext={whatsNext}
         answers={answers}
         menus={menus}
         asks={asks}
+        requestedTab={tabParam}
+        syncPeopleIndex={async () => {
+          "use server";
+          await syncConferencePeopleIndex(id);
+          revalidatePath(`/admin/conference/${id}/war-room`);
+        }}
       />
     </main>
   );
