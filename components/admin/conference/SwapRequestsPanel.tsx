@@ -23,10 +23,13 @@ export default function SwapRequestsPanel({
   conferenceId,
   initialSwapRequests,
   initialCapIncreaseRequests,
+  canDecide,
 }: {
   conferenceId: string;
   initialSwapRequests: SwapRequestSummary[];
   initialCapIncreaseRequests: CapIncreaseRow[];
+  /** Decisions are made in the War Room, which is CSC staff's (super admins). */
+  canDecide: boolean;
 }) {
   const [swapRequests, setSwapRequests] = useState(initialSwapRequests);
   const [capRequests, setCapRequests] = useState(initialCapIncreaseRequests);
@@ -219,7 +222,9 @@ export default function SwapRequestsPanel({
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {row.status === "requested" ? (
+                      {row.status === "requested" && !canDecide ? (
+                        <span className="text-xs text-gray-500">With CSC</span>
+                      ) : row.status === "requested" ? (
                         // Decided in one place: the War Room's Waiting on us,
                         // beside everyone else waiting on CSC. This page keeps
                         // the history.

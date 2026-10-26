@@ -1048,8 +1048,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
   }
 
   const base = `/admin/conference/${conferenceId}`;
-  const { live, draft, email, meetings, canPublish } = overview;
-  const superOnly = "Only a super admin can do this.";
+  const { live, draft, email, meetings } = overview;
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const draftReady = draft?.status === "completed";
   const draftBroken = draft?.status === "failed" || draft?.status === "infeasible";
@@ -1102,7 +1101,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                   : "Nothing to publish: generate a draft first."
                 : `${draft.changes.length === 0 ? "No changes" : plural(draft.changes.length, "change")} against ${
                     live ? `the live schedule (${plural(live.meetings, "meeting")})` : "nothing: nothing is live yet"
-                  }.${canPublish ? "" : ` ${superOnly}`}`
+                  }.`
             }
             tone={draftReady && draft.changes.length > 0 ? "attention" : "neutral"}
             preview={
@@ -1140,7 +1139,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 : null
             }
             action={
-              draftReady && canPublish && (draft.changes.length > 0 || !live)
+              draftReady && (draft.changes.length > 0 || !live)
                 ? {
                     label: "Publish",
                     consequence: `Makes this draft the live schedule: ${plural(draft.meetings, "meeting")}.${
@@ -1162,7 +1161,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 ? "Nothing is live to send."
                 : `${email.toSend.length === 0 ? "Everyone has been told" : `${plural(email.toSend.length, "person")} to tell`}${
                     email.alreadyTold ? `, ${email.alreadyTold} already told` : ""
-                  }${email.noEmail ? `, ${email.noEmail} with no email address` : ""}.${canPublish ? "" : ` ${superOnly}`}${
+                  }${email.noEmail ? `, ${email.noEmail} with no email address` : ""}.${
                     sent ? ` ${sent}` : ""
                   }`
             }
@@ -1207,7 +1206,7 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 : null
             }
             action={
-              email && canPublish && email.toSend.length > 0
+              email && email.toSend.length > 0
                 ? {
                     label: "Send",
                     consequence: `Emails ${plural(email.toSend.length, "person")} that their meetings are ready. Anyone already told about this schedule is skipped.`,

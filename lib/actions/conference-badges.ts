@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   stickersFor,
@@ -839,7 +839,7 @@ export type PrintOverview = {
  * tab opens, not with the page: it costs a badge run and a preflight.
  */
 export async function loadPrintOverview(conferenceId: string): Promise<QueueResult<PrintOverview>> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireSuperAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
   const db = createAdminClient();
 

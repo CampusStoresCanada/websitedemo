@@ -1,6 +1,6 @@
 "use server";
 
-import { isSuperAdmin, requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import type { ScheduleMatrixData } from "@/lib/conference/schedule-coverage";
 import type { ScheduleDiffRow, ScheduleOpsRun } from "@/lib/conference/schedule-ops";
 import type { meetingsSoFar } from "@/lib/conference/checklist-checks";
@@ -1176,8 +1176,6 @@ export type MeetingsOverview = {
     templateId: string | null;
   } | null;
   meetings: Awaited<ReturnType<typeof meetingsSoFar>> | null;
-  /** Publishing and emailing are super-admin acts (promoteSchedulerRun, emailActiveSchedule). */
-  canPublish: boolean;
 };
 
 /**
@@ -1188,7 +1186,7 @@ export type MeetingsOverview = {
 export async function loadMeetingsOverview(
   conferenceId: string
 ): Promise<{ success: true; data: MeetingsOverview } | { success: false; error: string }> {
-  const auth = await requireConferenceOpsAccess();
+  const auth = await requireSuperAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
   const db = createAdminClient();
 
@@ -1286,7 +1284,6 @@ export async function loadMeetingsOverview(
         : null,
       email,
       meetings,
-      canPublish: isSuperAdmin(auth.ctx.globalRole),
     },
   };
 }

@@ -436,7 +436,7 @@ export default async function AdminConsolePage() {
           if (key === "bursary") {
             return bursaryQueue && bursaryQueue.rows.length > 0 ? (
               <div key={key} className={cell}>
-                <BursaryQueueWidget data={bursaryQueue} />
+                <BursaryQueueWidget data={bursaryQueue} canDecide={isSA} />
               </div>
             ) : null;
           }
@@ -460,7 +460,8 @@ export default async function AdminConsolePage() {
           <div className="flex flex-wrap gap-2">
             {isOpsActive ? (
               <>
-                <QuickLink href={`/admin/conference/${conf.id}/war-room`}      label="War Room"      primary />
+                {/* CSC staff only (super admins), like the War Room itself. */}
+                {isSA ? <QuickLink href={`/admin/conference/${conf.id}/war-room`} label="War Room" primary /> : null}
                 <QuickLink href={`/admin/conference/${conf.id}/registrations`} label="Registrations" />
                 <QuickLink href={`/admin/conference/${conf.id}/badges`}        label="Badge Ops"     />
                 <QuickLink href={`/admin/conference/${conf.id}/travel-import`} label="Travel Import" />
