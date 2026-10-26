@@ -384,24 +384,31 @@ function ExhibitorLens({
   assignments,
   slotById,
   suiteNumberById,
+  onlyIds,
+  before,
 }: {
   assignments: ScheduleOpsAssignment[];
   slotById: Map<string, ScheduleOpsSlot>;
   suiteNumberById: Map<string, number>;
+  /** Only these exhibitor seats (Publish over a live schedule: those whose day changes). */
+  onlyIds?: Set<string>;
+  /** How many meetings each had in the live schedule, to say what changed. */
+  before?: Map<string, number>;
 }) {
   const groups = useMemo(() => {
-    const m = new Map<string, { name: string; meetings: ScheduleOpsAssignment[] }>();
+    const m = new Map<string, { id: string; name: string; meetings: ScheduleOpsAssignment[] }>();
     for (const a of assignments) {
-      const g = m.get(a.exhibitorSeatId) ?? { name: a.exhibitorOrganizationName, meetings: [] };
+      if (onlyIds && !onlyIds.has(a.exhibitorSeatId)) continue;
+      const g = m.get(a.exhibitorSeatId) ?? { id: a.exhibitorSeatId, name: a.exhibitorOrganizationName, meetings: [] };
       g.meetings.push(a);
       m.set(a.exhibitorSeatId, g);
     }
     return [...m.values()]
       .map((g) => ({ ...g, meetings: [...g.meetings].sort(byDaySlot) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [assignments]);
+  }, [assignments, onlyIds]);
 
-  if (groups.length === 0) return <Empty text="No exhibitor meetings in this run yet." />;
+  if (groups.length === 0) return <Empty text={onlyIds ? "No exhibitor's day changes." : "No exhibitor meetings in this run yet."} />;
 
   return (
     <div className="space-y-3">
@@ -409,9 +416,9 @@ function ExhibitorLens({
         <ItineraryCard
           key={i}
           title={g.name}
-          subtitle={`${g.meetings.length} meeting${g.meetings.length === 1 ? "" : "s"}`}
+          subtitle={meetingCountLine(g.meetings.length, before?.get(g.id))}
           rows={g.meetings.map((m) => ({
-            when: `Day ${m.dayNumber} · Slot ${m.slotNumber}`,
+            when: `Day ${m.dayNumber}`,
             time: slotTime(m, slotById),
             where: `Suite ${suiteNumberById.get(m.suiteId) ?? "?"}`,
             who: m.delegateNames.length > 0 ? m.delegateNames.join(", ") : "No delegates",
@@ -426,16 +433,23 @@ function DelegateLens({
   assignments,
   slotById,
   suiteNumberById,
+  onlyIds,
+  before,
 }: {
   assignments: ScheduleOpsAssignment[];
   slotById: Map<string, ScheduleOpsSlot>;
   suiteNumberById: Map<string, number>;
+  /** Only these people (Publish over a live schedule: those whose day changes). */
+  onlyIds?: Set<string>;
+  /** How many meetings each had in the live schedule, to say what changed. */
+  before?: Map<string, number>;
 }) {
   const groups = useMemo(() => {
-    const m = new Map<string, { name: string; meetings: ScheduleOpsAssignment[] }>();
+    const m = new Map<string, { id: string; name: string; meetings: ScheduleOpsAssignment[] }>();
     for (const a of assignments) {
       a.delegateSeatIds.forEach((id, idx) => {
-        const g = m.get(id) ?? { name: a.delegateNames[idx] ?? id, meetings: [] };
+        if (onlyIds && !onlyIds.has(id)) return;
+        const g = m.get(id) ?? { id, name: a.delegateNames[idx] ?? id, meetings: [] };
         g.meetings.push(a);
         m.set(id, g);
       });
@@ -443,9 +457,9 @@ function DelegateLens({
     return [...m.values()]
       .map((g) => ({ ...g, meetings: [...g.meetings].sort(byDaySlot) }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [assignments]);
+  }, [assignments, onlyIds]);
 
-  if (groups.length === 0) return <Empty text="No delegate meetings in this run yet." />;
+  if (groups.length === 0) return <Empty text={onlyIds ? "No delegate's day changes." : "No delegate meetings in this run yet."} />;
 
   return (
     <div className="space-y-3">
@@ -453,9 +467,9 @@ function DelegateLens({
         <ItineraryCard
           key={i}
           title={g.name}
-          subtitle={`${g.meetings.length} meeting${g.meetings.length === 1 ? "" : "s"}`}
+          subtitle={meetingCountLine(g.meetings.length, before?.get(g.id))}
           rows={g.meetings.map((m) => ({
-            when: `Day ${m.dayNumber} · Slot ${m.slotNumber}`,
+            when: `Day ${m.dayNumber}`,
             time: slotTime(m, slotById),
             where: `Suite ${suiteNumberById.get(m.suiteId) ?? "?"}`,
             who: m.exhibitorOrganizationName,
@@ -532,6 +546,130 @@ function CoverageLens({
 }
 
 // ── shared bits ──────────────────────────────────────────────────
+
+function meetingCountLine(now: number, before: number | undefined): string {
+  const count = `${now} meeting${now === 1 ? "" : "s"}`;
+  return before === undefined ? count : `${count} (was ${before})`;
+}
+
+/** Each person's day as a set, so two runs can be compared person by person. */
+function daysByPerson(assignments: ScheduleOpsAssignment[]) {
+  const delegates = new Map<string, string[]>();
+  const exhibitors = new Map<string, string[]>();
+  for (const a of assignments) {
+    for (const id of a.delegateSeatIds) {
+      delegates.set(id, [...(delegates.get(id) ?? []), `${a.meetingSlotId}:${a.exhibitorSeatId}`]);
+    }
+    exhibitors.set(a.exhibitorSeatId, [
+      ...(exhibitors.get(a.exhibitorSeatId) ?? []),
+      `${a.meetingSlotId}:${[...a.delegateSeatIds].sort().join(",")}`,
+    ]);
+  }
+  return { delegates, exhibitors };
+}
+
+function changedPeople(before: Map<string, string[]>, after: Map<string, string[]>) {
+  const changed = new Set<string>();
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    const a = [...(before.get(id) ?? [])].sort().join("|");
+    const b = [...(after.get(id) ?? [])].sort().join("|");
+    if (a !== b) changed.add(id);
+  }
+  return changed;
+}
+
+/**
+ * Publish's Preview: what each person will see on their own conference page
+ * once this draft is published (Stephen, 2026-10-26) — delegates and
+ * exhibitors, a day each, from the grid's own By delegate / By exhibitor
+ * lists. Over a live schedule it shows only the people whose day changes,
+ * with what they had before.
+ */
+export function PublishPeoplePreview({ data }: { data: ScheduleMatrixData }) {
+  const { summary } = data;
+  const [side, setSide] = useState<"delegates" | "exhibitors">("delegates");
+  const draft = summary.selectedAssignments;
+  const live = summary.activeAssignments;
+  const republish = live.length > 0;
+
+  const suiteNumberById = useMemo(() => new Map(summary.suites.map((s) => [s.id, s.suiteNumber] as const)), [summary.suites]);
+  const slotById = useMemo(() => new Map(summary.slots.map((s) => [s.id, s] as const)), [summary.slots]);
+  const { changed, before, dropped } = useMemo(() => {
+    const was = daysByPerson(live);
+    const now = daysByPerson(draft);
+    const delegates = changedPeople(was.delegates, now.delegates);
+    const exhibitors = changedPeople(was.exhibitors, now.exhibitors);
+    const count = (m: Map<string, string[]>) => new Map([...m].map(([id, list]) => [id, list.length] as const));
+    // Someone with meetings now and none in the draft has no row to show
+    // their day in; they are named on their own instead.
+    const nameOf = new Map<string, string>();
+    for (const a of live) {
+      a.delegateSeatIds.forEach((id, i) => nameOf.set(id, a.delegateNames[i] ?? id));
+      nameOf.set(a.exhibitorSeatId, a.exhibitorOrganizationName);
+    }
+    const lost = [...delegates, ...exhibitors].filter((id) => !now.delegates.has(id) && !now.exhibitors.has(id));
+    return {
+      changed: { delegates, exhibitors },
+      before: { delegates: count(was.delegates), exhibitors: count(was.exhibitors) },
+      dropped: lost.map((id) => nameOf.get(id) ?? id).sort((a, b) => a.localeCompare(b)),
+    };
+  }, [live, draft]);
+
+  const meetingDelegates = useMemo(() => new Set(draft.flatMap((a) => a.delegateSeatIds)), [draft]);
+  const withoutMeetings = data.delegates.filter((d) => !meetingDelegates.has(d.registrationId));
+  const counts = republish
+    ? { delegates: changed.delegates.size, exhibitors: changed.exhibitors.size }
+    : { delegates: meetingDelegates.size, exhibitors: new Set(draft.map((a) => a.exhibitorSeatId)).size };
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-gray-700">
+        {republish
+          ? `Publishing changes the day of ${counts.delegates} delegate${counts.delegates === 1 ? "" : "s"} and ${counts.exhibitors} exhibitor${counts.exhibitors === 1 ? "" : "s"}. Everyone else's day stays as it is.`
+          : `What each person will see on their conference page: ${draft.length} meeting${draft.length === 1 ? "" : "s"} for ${counts.delegates} delegate${counts.delegates === 1 ? "" : "s"} and ${counts.exhibitors} exhibitor${counts.exhibitors === 1 ? "" : "s"}. Nobody is emailed until you send it.`}
+      </p>
+      {withoutMeetings.length > 0 ? (
+        <p className="text-amber-800">
+          {withoutMeetings.length} delegate{withoutMeetings.length === 1 ? " has" : "s have"} no meetings:{" "}
+          {withoutMeetings.map((d) => d.name).join(", ")}.
+        </p>
+      ) : null}
+      {dropped.length > 0 ? <p className="text-amber-800">No longer any meetings: {dropped.join(", ")}.</p> : null}
+      <div className="flex gap-2">
+        {(["delegates", "exhibitors"] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSide(s)}
+            aria-pressed={side === s}
+            className={`rounded-full border px-3 py-1 text-xs ${
+              side === s ? "border-accent bg-blue-50 text-accent" : "border-gray-300 text-gray-600 hover:border-accent"
+            }`}
+          >
+            {s === "delegates" ? "Delegates" : "Exhibitors"} ({counts[s]})
+          </button>
+        ))}
+      </div>
+      {side === "delegates" ? (
+        <DelegateLens
+          assignments={draft}
+          slotById={slotById}
+          suiteNumberById={suiteNumberById}
+          onlyIds={republish ? changed.delegates : undefined}
+          before={republish ? before.delegates : undefined}
+        />
+      ) : (
+        <ExhibitorLens
+          assignments={draft}
+          slotById={slotById}
+          suiteNumberById={suiteNumberById}
+          onlyIds={republish ? changed.exhibitors : undefined}
+          before={republish ? before.exhibitors : undefined}
+        />
+      )}
+    </div>
+  );
+}
 
 function slotTime(a: ScheduleOpsAssignment, slotById: Map<string, ScheduleOpsSlot>): string {
   const slot = slotById.get(a.meetingSlotId);

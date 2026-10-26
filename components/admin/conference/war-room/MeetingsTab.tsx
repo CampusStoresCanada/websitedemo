@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createSchedulerDraftRun, emailActiveSchedule, loadMeetingsOverview, promoteSchedulerRun, type MeetingsOverview } from "@/lib/actions/conference-scheduler";
-import MeetingMatrix from "@/components/admin/conference/MeetingMatrix";
+import MeetingMatrix, { PublishPeoplePreview } from "@/components/admin/conference/MeetingMatrix";
 import Modal from "@/components/ui/Modal";
 import OperateRow from "@/components/ui/OperateRow";
 
@@ -198,41 +198,26 @@ export function MeetingsView({ conferenceId }: { conferenceId: string }) {
                 ? live
                   ? `Live: ${plural(live.meetings, "meeting")} for ${plural(live.people, "person")}. No new draft to publish.`
                   : "Nothing to publish: generate a draft first."
-                : `${draft.changes.length === 0 ? "No changes" : plural(draft.changes.length, "change")} against ${
-                    live ? `the live schedule (${plural(live.meetings, "meeting")})` : "nothing: nothing is live yet"
+                : `${
+                    live
+                      ? draft.changes.length === 0
+                        ? "The draft is the same as the live schedule"
+                        : `${plural(draft.changes.length, "meeting")} ${draft.changes.length === 1 ? "differs" : "differ"} from the live schedule`
+                      : `${plural(draft.meetings, "meeting")} ready to publish; nothing is live yet`
                   }.${canPublish ? "" : ` ${superOnly}`}`
             }
             tone={draftReady && draft.changes.length > 0 ? "attention" : "neutral"}
             preview={
               draftReady
                 ? {
-                    title: "What publishing changes",
+                    // What each person gets, not the slots: Generate's Preview
+                    // is the schedule and its issues (Stephen, 2026-10-26).
+                    title: live ? "Whose day publishing changes" : "What each person will see",
                     content:
-                      draft.changes.length === 0 ? (
+                      live && draft.changes.length === 0 ? (
                         <p className="text-sm text-gray-600">The draft is the same as the live schedule.</p>
                       ) : (
-                        <table className="min-w-full divide-y divide-gray-200 text-xs">
-                          <thead className="text-left text-gray-500">
-                            <tr>
-                              <th className="py-1.5 pr-3 font-medium">When</th>
-                              <th className="py-1.5 pr-3 font-medium">Suite</th>
-                              <th className="py-1.5 pr-3 font-medium">Now</th>
-                              <th className="py-1.5 font-medium">After</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 text-gray-700">
-                            {draft.changes.map((row) => (
-                              <tr key={row.slotId}>
-                                <td className="py-1.5 pr-3 whitespace-nowrap">
-                                  Day {row.dayNumber}, {row.startTime.slice(0, 5)}
-                                </td>
-                                <td className="py-1.5 pr-3">{row.suiteNumber ?? "—"}</td>
-                                <td className="py-1.5 pr-3">{row.live}</td>
-                                <td className="py-1.5">{row.draft}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <PublishPeoplePreview data={overview.matrix} />
                       ),
                   }
                 : null
