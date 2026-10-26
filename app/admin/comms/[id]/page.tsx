@@ -13,6 +13,8 @@ import type {
 import { revalidatePath } from "next/cache";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
 import PendingSubmitButton from "@/components/ui/PendingSubmitButton";
+import ConfirmAction from "@/components/ui/ConfirmAction";
+import { requireAdmin } from "@/lib/auth/guards";
 import CampaignClickMapButton from "@/components/comms/CampaignClickMapButton";
 import RescheduleCampaignForm from "@/components/comms/RescheduleCampaignForm";
 import LocalDateTime from "@/components/comms/LocalDateTime";
@@ -39,20 +41,29 @@ const STATUS_COLORS: Record<DeliveryStatus, string> = {
 // revalidatePath the route is not re-rendered, so the page comes back byte-for-byte
 // identical — same status, same Send Now button — and a real send looks like a
 // no-op. That is how one campaign got sent three times on 2026-08-26.
+//
+// ⛔ Each checks for itself. A server action is its own endpoint: the admin
+// layout's check runs when a page renders, not when an action is called.
 async function sendCampaignAction(campaignId: string) {
   "use server";
+  const auth = await requireAdmin();
+  if (!auth.ok) return;
   await executeCampaignSend(campaignId);
   revalidatePath(`/admin/comms/${campaignId}`);
 }
 
 async function cancelCampaignAction(campaignId: string) {
   "use server";
+  const auth = await requireAdmin();
+  if (!auth.ok) return;
   await cancelScheduledCampaign(campaignId);
   revalidatePath(`/admin/comms/${campaignId}`);
 }
 
 async function scheduleCampaignAction(formData: FormData) {
   "use server";
+  const auth = await requireAdmin();
+  if (!auth.ok) return;
   const campaignId = formData.get("campaign_id") as string;
   const scheduledAtRaw = formData.get("scheduled_at") as string;
   if (!scheduledAtRaw) return;
@@ -200,14 +211,22 @@ export default async function CampaignDetailPage({
             </form>
           )}
           {canSendNow && (
-            <form
-              action={async () => {
+            // Asked twice, with who it reaches: it emails real people at once.
+            <ConfirmAction
+              label="Send Now"
+              size="md"
+              consequence={
+                audiencePreview
+                  ? `Emails ${audiencePreview.count} ${audiencePreview.count === 1 ? "person" : "people"} now${
+                      isScheduled ? ", instead of at the scheduled time" : ""
+                    }.`
+                  : "Emails everyone in the audience now."
+              }
+              onConfirm={async () => {
                 "use server";
                 await sendCampaignAction(id);
               }}
-            >
-              <PendingSubmitButton label="Send Now" pendingLabel="Sending…" />
-            </form>
+            />
           )}
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runChecklistReminders, type ChecklistRunResult } from "@/lib/conference/checklist-engine";
 import {
@@ -233,10 +233,21 @@ export async function deleteChecklistCheckpoint(checkpointId: string): Promise<R
 
 // ── Manual run ──────────────────────────────────────────────────────
 
-export async function runChecklistRemindersNow(): Promise<Result<ChecklistRunResult>> {
-  const auth = await requireAdmin();
+/**
+ * The War Room's "Send reminders now": this conference's checklists only, the
+ * same engine the daily cron runs for every conference. `dryRun` is its
+ * Preview: who would get what, sending and writing nothing.
+ *
+ * ⛔ It used to run every active checklist on the site, from any one
+ * checklist's page (WAR_ROOM_OPERATE_PLAN §8.1).
+ */
+export async function runConferenceRemindersNow(
+  conferenceId: string,
+  options: { dryRun?: boolean } = {}
+): Promise<Result<ChecklistRunResult>> {
+  const auth = await requireSuperAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  const result = await runChecklistReminders();
+  const result = await runChecklistReminders({ conferenceId, dryRun: options.dryRun === true });
   return { success: true, data: result };
 }

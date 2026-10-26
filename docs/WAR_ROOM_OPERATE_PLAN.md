@@ -181,6 +181,18 @@ The War Room shows this conference's messages **in context** and sends through C
 | Conference campaigns (sent, scheduled, drafts) | Comms | The email | Send / schedule ("N people") |
 | Automatic emails (confirmation, schedule ready…) | Comms template | The email | — (they fire on events) |
 
+**Landed 2026-10-26 (phase 5).** `runChecklistReminders` takes a `conferenceId`;
+the War Room's row runs its dry run as the Preview and count, then the same run
+for real. The dry run is now read-only (it used to insert checkpoints) and names
+recipients by org id, not org name. The engine builds digests in parallel:
+164 s → 31 s for the 2027 conference. Checklist detail lost its global "Send
+Reminders Now". Campaigns tagged to the conference show with Comms' own preview
+and a confirmed Send now (count from Comms' audience resolution); automatic
+emails are listed read-only with counts. Comms' Send Now is confirmed with its
+count, and Comms' send / schedule / cancel / create actions check admin
+themselves. **Seen while testing:** the last reminder for 2027 went out
+2026-10-10 and none since, with 16 orgs due; the daily cron is not sending.
+
 ### People
 People Lookup as today, plus the per-person Operate actions: check in by hand, reprint
 this badge, admin notes. The person drawer's broken prompts are replaced by the

@@ -9,8 +9,11 @@ import { requireSuperAdmin } from "@/lib/auth/guards";
 import WarRoomClient, {
   MeMenu,
   SendToPrinterButton,
+  type WarRoomMessages,
   type WhatsNext,
 } from "@/components/admin/conference/WarRoomClient";
+import { executeCampaignSend } from "@/lib/comms/send";
+import type { TemplateCategory } from "@/lib/comms/types";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -76,6 +79,96 @@ function StaffTaskControls({ conferenceId, extra }: { conferenceId: string; extr
   );
 }
 
+/**
+ * This conference's messages, for the Messages tab: the campaigns Comms holds
+ * for it (tagged audience_definition.filters.conference_instance_id, the
+ * conference Comms page's own scope), split into broadcasts people write and
+ * the automatic emails that fire on events. Comms stays where they are sent
+ * and tracked; this only shows them in context.
+ */
+async function loadConferenceMessages(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<WarRoomMessages> {
+  const { data: rows } = await db
+    .from("message_campaigns")
+    .select(
+      `id, name, status, trigger_source, automation_mode, created_at, scheduled_at, sent_at,
+       subject_override, body_override, variable_values, audience_definition, campaign_id,
+       message_templates(id, key, name, subject, body_html, variable_keys, category, is_transactional),
+       message_deliveries(count)`
+    )
+    .eq("audience_definition->filters->>conference_instance_id", conferenceId)
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  type Template = {
+    id: string; key: string; name: string; subject: string; body_html: string;
+    variable_keys: string[] | null; category: TemplateCategory | null; is_transactional: boolean | null;
+  };
+  const templateOf = (row: { message_templates: unknown }) =>
+    (Array.isArray(row.message_templates) ? row.message_templates[0] : row.message_templates) as Template | null;
+  const deliveriesOf = (row: { message_deliveries: unknown }) =>
+    ((row.message_deliveries as Array<{ count: number }> | null)?.[0]?.count ?? 0) as number;
+
+  const broadcasts: WarRoomMessages["broadcasts"] = [];
+  const automatic = new Map<string, WarRoomMessages["automatic"][number]>();
+  // The last reminder from the engine's own log, which is per conference.
+  const { data: lastLogged } = await db
+    .from("conference_checklist_reminder_log")
+    .select("sent_at, conference_checklists!inner(conference_id)")
+    .eq("conference_checklists.conference_id", conferenceId)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastReminder = (lastLogged?.sent_at as string | null) ?? null;
+
+  for (const row of rows ?? []) {
+    const template = templateOf(row);
+    const sentAt = (row.sent_at as string | null) ?? null;
+    if (row.trigger_source === "conference" && row.automation_mode === "auto_send") {
+      // Reminders have their own row in the tab; one run's campaign is tagged
+      // with only one of the conferences it wrote about, so it is not counted here.
+      if (template?.key === "conference_checklist_reminder") continue;
+      const key = template?.key ?? "unknown";
+      const group = automatic.get(key) ?? { key, name: template?.name ?? key, templateId: template?.id ?? null, sent: 0, last: null };
+      group.sent += deliveriesOf(row);
+      group.last ??= sentAt ?? (row.created_at as string);
+      automatic.set(key, group);
+      continue;
+    }
+    const pending = row.status === "draft" || row.status === "scheduled";
+    let recipients: number | null = null;
+    if (pending) {
+      // Who it would reach now, by Comms' own resolution (its detail page's preview).
+      const { previewAudience } = await import("@/lib/comms/audience");
+      const { resolveEffectiveAudience } = await import("@/lib/comms/campaigns");
+      const audience = await resolveEffectiveAudience(
+        row.audience_definition as never,
+        (row.campaign_id as string | null) ?? null
+      );
+      recipients = (await previewAudience(audience, template?.is_transactional ? undefined : template?.category ?? null)).count;
+    }
+    broadcasts.push({
+      id: row.id as string,
+      name: row.name as string,
+      status: row.status as string,
+      when: (row.scheduled_at as string | null) ?? sentAt ?? (row.created_at as string),
+      delivered: deliveriesOf(row),
+      recipients,
+      preview: {
+        subject: template?.subject ?? (row.subject_override as string | null) ?? "",
+        bodyHtml: template?.body_html ?? (row.body_override as string | null) ?? "",
+        variableKeys: template?.variable_keys ?? [],
+        variableValues: (row.variable_values ?? {}) as Record<string, string>,
+        isTransactional: Boolean(template?.is_transactional),
+      },
+    });
+  }
+
+  return { broadcasts, automatic: [...automatic.values()], lastReminder };
+}
+
 /** One piece of the status line: a fact, coloured by how much it matters, linking to where you fix it. */
 function StatusItem({ tone, href, children }: { tone: "alert" | "warn" | "ok" | "quiet"; href: string; children: ReactNode }) {
   const dot =
@@ -122,7 +215,7 @@ export default async function ConferenceWarRoomPage({
   const timeZone = ((conference as { timezone?: string | null }).timezone as string | null) || "America/Toronto";
 
   const db = createAdminClient();
-  const [entityRes, refRes, waiting, answeringOrgId, preferences, stationsRes, waitingJobs, meetings] = await Promise.all([
+  const [entityRes, refRes, waiting, answeringOrgId, preferences, stationsRes, waitingJobs, meetings, messages] = await Promise.all([
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", id),
     db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", id),
     loadWaitingOnUs(id),
@@ -135,6 +228,7 @@ export default async function ConferenceWarRoomPage({
       .eq("conference_id", id)
       .in("status", ["sent_to_printer", "rendering"]),
     meetingsSoFar(db, id).catch(() => null),
+    loadConferenceMessages(db, id),
   ]);
 
   // Answers (Wi-Fi, coat check) and meal menus: the same graph and the same
@@ -241,6 +335,26 @@ export default async function ConferenceWarRoomPage({
         waiting={waiting}
         requestedTab={tabParam}
         printStation={{ stations: stations.length, online, queued }}
+        messages={messages}
+        sendCampaign={async (campaignId: string) => {
+          "use server";
+          // ⛔ Its own checks: CSC staff, and a campaign of THIS conference.
+          const guard = await requireSuperAdmin();
+          if (!guard.ok) return { success: false, error: guard.error };
+          const { data: owned } = await createAdminClient()
+            .from("message_campaigns")
+            .select("id")
+            .eq("id", campaignId)
+            .eq("audience_definition->filters->>conference_instance_id", id)
+            .maybeSingle();
+          if (!owned) return { success: false, error: "That campaign is not one of this conference's." };
+          const sent = await executeCampaignSend(campaignId);
+          revalidatePath(`/admin/conference/${id}/war-room`);
+          if (sent.alreadySent) return { success: false, error: "It had already been sent." };
+          return sent.errors.length > 0 && sent.sentCount === 0
+            ? { success: false, error: sent.errors[0] }
+            : { success: true };
+        }}
         syncPeopleIndex={async () => {
           "use server";
           await syncConferencePeopleIndex(id);

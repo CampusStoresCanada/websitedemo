@@ -8,7 +8,6 @@ import {
   deleteChecklistTask,
   saveChecklistCheckpoint,
   deleteChecklistCheckpoint,
-  runChecklistRemindersNow,
 } from "@/lib/actions/conference-checklists";
 import {
   CHECK_TYPES,
@@ -17,7 +16,6 @@ import {
   type StaffCheckType,
   type TaskAudience,
 } from "@/lib/conference/checklist-check-types";
-import type { ChecklistRunResult } from "@/lib/conference/checklist-engine";
 import type { Tables } from "@/lib/database.types";
 import { parseUTC } from "@/lib/utils";
 import { sendChecklistTestEmail } from "@/lib/actions/checklist-test-send";
@@ -112,8 +110,6 @@ export default function ChecklistDetail({
 }) {
   const router = useRouter();
   const [taskForm, setTaskForm] = useState<TaskFormState>(null);
-  const [runResult, setRunResult] = useState<ChecklistRunResult | null>(null);
-  const [running, setRunning] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
@@ -264,47 +260,13 @@ export default function ChecklistDetail({
         )}
       </section>
 
-      {/* Run now */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-900 mb-2">Send Reminders Now</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Runs the exact same evaluation the daily cron uses — for every active checklist across every conference, not
-          just this one. Anyone already logged for their due checkpoint, or already fully caught up, is skipped.
-        </p>
-        <button
-          type="button"
-          disabled={running}
-          onClick={async () => {
-            setRunning(true);
-            setRunResult(null);
-            const res = await runChecklistRemindersNow();
-            setRunning(false);
-            if (res.success) {
-              setRunResult(res.data);
-              router.refresh();
-            } else {
-              window.alert(res.error);
-            }
-          }}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-        >
-          {running ? "Running…" : "Send Reminders Now"}
-        </button>
-        {runResult && (
-          <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-            <p>
-              Checklists processed: {runResult.checklistsProcessed} · Orgs reminded: {runResult.orgsReminded}
-            </p>
-            {runResult.errors.length > 0 && (
-              <ul className="mt-1 text-red-600 list-disc list-inside">
-                {runResult.errors.map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </section>
+      {/* Sending for real is Operate: the War Room's Messages tab, for this
+          conference only, with who-gets-what first (WAR_ROOM_OPERATE_PLAN §8.1).
+          The daily cron still sends on schedule. */}
+      <p className="text-xs text-gray-500">
+        Reminders go out on schedule every business day. To send this conference&apos;s now, use the War Room&apos;s
+        Messages tab.
+      </p>
 
       {/* Log */}
       {log.length > 0 && (

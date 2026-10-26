@@ -449,8 +449,10 @@ export async function buildChecklistDigest(
  */
 async function ensureDerivedCheckpoints(
   db: AdminClient,
-  checklist: { id: string; deadline_at: string }
-): Promise<void> {
+  checklist: { id: string; deadline_at: string },
+  /** False on a dry run: say which offsets are missing, write nothing. */
+  write = true
+): Promise<number[]> {
   const [{ data: tasks }, { data: existing }] = await Promise.all([
     db
       .from("conference_checklist_tasks")
@@ -470,29 +472,39 @@ async function ensureDerivedCheckpoints(
   const wanted = deriveCheckpointOffsets(new Date(checklist.deadline_at), earliest);
   const have = new Set((existing ?? []).map((c) => c.days_before_deadline as number));
   const missing = wanted.filter((d) => !have.has(d));
-  if (missing.length === 0) return;
+  if (missing.length === 0 || !write) return missing;
 
   await db.from("conference_checklist_checkpoints").insert(
     missing.map((days_before_deadline) => ({ checklist_id: checklist.id, days_before_deadline }))
   );
+  return [];
 }
+
+/** A checkpoint a dry run would have created: never logged, so never sent. */
+const UNSAVED_CHECKPOINT = "unsaved:";
 
 async function findDueOrgs(
   db: AdminClient,
   checklist: {
     id: string; conference_id: string; scope_entity_id: string | null;
     scope_entity_kind?: string | null; deadline_at: string; publication_id?: string | null;
-  }
+  },
+  dryRun = false
 ): Promise<DueOrg[]> {
-  // Derived, not typed in. See lib/conference/checklist-cadence.ts.
-  await ensureDerivedCheckpoints(db, checklist);
+  // Derived, not typed in. See lib/conference/checklist-cadence.ts. A dry run
+  // writes nothing, so the offsets it would add stand in unsaved.
+  const unsaved = await ensureDerivedCheckpoints(db, checklist, !dryRun);
 
-  const { data: checkpoints } = await db
+  const { data: saved } = await db
     .from("conference_checklist_checkpoints")
     .select("id, days_before_deadline")
     .eq("checklist_id", checklist.id)
     .order("days_before_deadline", { ascending: true }); // most-overdue-first
-  if (!checkpoints || checkpoints.length === 0) return [];
+  const checkpoints = [
+    ...(saved ?? []),
+    ...unsaved.map((d) => ({ id: `${UNSAVED_CHECKPOINT}${d}`, days_before_deadline: d })),
+  ].sort((a, b) => a.days_before_deadline - b.days_before_deadline);
+  if (checkpoints.length === 0) return [];
 
   const deadline = new Date(checklist.deadline_at).getTime();
   const now = Date.now();
@@ -509,7 +521,7 @@ async function findDueOrgs(
     .select("checkpoint_id, organization_id")
     .in(
       "checkpoint_id",
-      dueCheckpoints.map((cp) => cp.id)
+      dueCheckpoints.map((cp) => cp.id).filter((id) => !id.startsWith(UNSAVED_CHECKPOINT))
     );
   const loggedSet = new Set((alreadyLogged ?? []).map((r) => `${r.checkpoint_id}:${r.organization_id}`));
 
@@ -534,7 +546,7 @@ export interface ChecklistRunResult {
    * start sending on the next tick. A run that cannot be inspected before it
    * goes is a run nobody can be accountable for.
    */
-  preview?: Array<{ organization: string; recipients: string[]; items: string[] }>;
+  preview?: Array<{ organizationId: string; organization: string; recipients: string[]; items: string[] }>;
 }
 
 /**
@@ -617,17 +629,27 @@ function pickSubjectLine(pending: {
 }
 
 export async function runChecklistReminders(
-  options: { dryRun?: boolean } = {}
+  options: {
+    dryRun?: boolean;
+    /**
+     * One conference's checklists only — the War Room's button (Stephen,
+     * 2026-10-23). The cron omits it and runs them all. An email then carries
+     * only that conference's outstanding lists as context.
+     */
+    conferenceId?: string;
+  } = {}
 ): Promise<ChecklistRunResult> {
   const dryRun = options.dryRun === true;
   const db = createAdminClient();
   const result: ChecklistRunResult = { checklistsProcessed: 0, orgsReminded: 0, errors: [] };
   if (dryRun) result.preview = [];
 
-  const { data: checklists, error: checklistsError } = await db
+  let checklistQuery = db
     .from("conference_checklists")
     .select("id, conference_id, name, deadline_at, scope_entity_id, scope_entity_kind, publication_id, publication:publications(title), conference:conference_instances(year, edition_code)")
     .eq("active", true);
+  if (options.conferenceId) checklistQuery = checklistQuery.eq("conference_id", options.conferenceId);
+  const { data: checklists, error: checklistsError } = await checklistQuery;
   if (checklistsError) {
     result.errors.push(`Failed to load checklists: ${checklistsError.message}`);
     return result;
@@ -667,6 +689,11 @@ export async function runChecklistReminders(
   };
   const pendingByOrg = new Map<string, Pending>();
 
+  // Who is due, for every checklist at once: independent reads. The loop
+  // below still applies them in order.
+  const settled = await Promise.allSettled((checklists ?? []).map((checklist) => findDueOrgs(db, checklist, dryRun)));
+  const dueByChecklist = new Map((checklists ?? []).map((checklist, i) => [checklist.id, settled[i]] as const));
+
   for (const checklist of checklists ?? []) {
     try {
       const conference = Array.isArray(checklist.conference) ? checklist.conference[0] : checklist.conference;
@@ -677,17 +704,20 @@ export async function runChecklistReminders(
         conference.year
       );
 
-      const dueOrgs = await findDueOrgs(db, checklist);
+      const due = dueByChecklist.get(checklist.id)!;
+      if (due.status === "rejected") throw due.reason;
+      const dueOrgs = due.value;
       result.checklistsProcessed++;
       if (dueOrgs.length === 0) continue;
 
-      for (const { organizationId, checkpointId } of dueOrgs) {
-        const digest = await buildChecklistDigest(
-          { ...checklist, publicationTitle: publication?.title ?? null },
-          conference,
-          organizationId,
-          db
-        );
+      // Every due org's digest at once (independent reads), applied in order.
+      const digests = await Promise.all(
+        dueOrgs.map(({ organizationId }) =>
+          buildChecklistDigest({ ...checklist, publicationTitle: publication?.title ?? null }, conference, organizationId, db)
+        )
+      );
+      for (const [index, { organizationId, checkpointId }] of dueOrgs.entries()) {
+        const digest = digests[index];
         /*
           ⛔ A FINISHED TRIGGER STILL OPENS THE DOOR.
 
@@ -757,48 +787,65 @@ export async function runChecklistReminders(
     for context must not consume its own checkpoint, or its real reminder
     never arrives.
   */
+  const scopedByChecklist = new Map<string, Promise<string[]>>();
   for (const [organizationId, pending] of pendingByOrg) {
     const alreadyIn = new Set(pending.sections.map((x) => x.checklistId));
-    for (const checklist of checklists ?? []) {
-      if (alreadyIn.has(checklist.id)) continue;
-      const conference = Array.isArray(checklist.conference) ? checklist.conference[0] : checklist.conference;
-      if (!conference) continue;
-      try {
-        const scoped = await resolveScopedOrgs(db, checklist);
-        if (!scoped.includes(organizationId)) continue;
-        const publication = Array.isArray(checklist.publication) ? checklist.publication[0] : checklist.publication;
-        const digest = await buildChecklistDigest(
-          { ...checklist, publicationTitle: publication?.title ?? null },
-          conference,
-          organizationId,
-          db
-        );
-        if (!digest) continue; // nothing outstanding on that list — stays off
-        // The org's name may still be blank if the checklist that triggered
-        // this send had nothing open — that path never saw a digest.
-        if (!pending.orgName) pending.orgName = digest.orgName;
-        const framing = renderFraming(
-          { ...checklist, publicationTitle: publication?.title ?? null },
-          conference.year
-        );
-        pending.sections.push({
-          triggered: false,
-          checklistId: checklist.id,
-          closesAt: checklist.deadline_at,
-          checklistName: checklist.name,
-          openItemsHtml: digest.variables.open_items_html,
-          introLine: framing.intro_line,
-          itemNames: digest.openItems.map((i) => i.name),
-          subjectLines: digest.openItems.flatMap((i) => i.subjectLines),
-          daysOut: Math.ceil(
-            (new Date(checklist.deadline_at).getTime() - Date.now()) / 86_400_000
-          ),
-        });
-        if (!pending.consentNote && framing.consent_note) pending.consentNote = framing.consent_note;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        result.errors.push(`Context section ${checklist.id} for ${organizationId}: ${msg}`);
+    // Every context digest for this org at once (they are independent reads),
+    // then applied in checklist order so the email is the same as one built
+    // one by one. One by one took two minutes for a single conference.
+    const built = await Promise.all(
+      (checklists ?? []).map(async (checklist) => {
+        if (alreadyIn.has(checklist.id)) return null;
+        const conference = Array.isArray(checklist.conference) ? checklist.conference[0] : checklist.conference;
+        if (!conference) return null;
+        try {
+          // Once per checklist, not once per (org, checklist): who a list
+          // covers does not depend on which org is asking.
+          const scoped = await (scopedByChecklist.get(checklist.id) ??
+            scopedByChecklist.set(checklist.id, resolveScopedOrgs(db, checklist)).get(checklist.id)!);
+          if (!scoped.includes(organizationId)) return null;
+          const publication = Array.isArray(checklist.publication) ? checklist.publication[0] : checklist.publication;
+          const digest = await buildChecklistDigest(
+            { ...checklist, publicationTitle: publication?.title ?? null },
+            conference,
+            organizationId,
+            db
+          );
+          return { checklist, conference, publication, digest, error: null as string | null };
+        } catch (err) {
+          return { checklist, conference, publication: null, digest: null, error: err instanceof Error ? err.message : "Unknown error" };
+        }
+      })
+    );
+    for (const entry of built) {
+      if (!entry) continue;
+      const { checklist, conference, publication, digest } = entry;
+      if (entry.error) {
+        result.errors.push(`Context section ${checklist.id} for ${organizationId}: ${entry.error}`);
+        continue;
       }
+      if (!digest) continue; // nothing outstanding on that list — stays off
+      // The org's name may still be blank if the checklist that triggered
+      // this send had nothing open — that path never saw a digest.
+      if (!pending.orgName) pending.orgName = digest.orgName;
+      const framing = renderFraming(
+        { ...checklist, publicationTitle: publication?.title ?? null },
+        conference.year
+      );
+      pending.sections.push({
+        triggered: false,
+        checklistId: checklist.id,
+        closesAt: checklist.deadline_at,
+        checklistName: checklist.name,
+        openItemsHtml: digest.variables.open_items_html,
+        introLine: framing.intro_line,
+        itemNames: digest.openItems.map((i) => i.name),
+        subjectLines: digest.openItems.flatMap((i) => i.subjectLines),
+        daysOut: Math.ceil(
+          (new Date(checklist.deadline_at).getTime() - Date.now()) / 86_400_000
+        ),
+      });
+      if (!pending.consentNote && framing.consent_note) pending.consentNote = framing.consent_note;
     }
     /*
       What fired TODAY goes to the top, then the rest by nearest cliff.
@@ -820,6 +867,8 @@ export async function runChecklistReminders(
   }
 
   const recipients: { email: string; name: string | null; variableOverrides: Record<string, string> }[] = [];
+  // Who, per organisation: the dry run's "who gets what", by id (two orgs can share a name).
+  const emailsByOrg = new Map<string, string[]>();
   const sentLog: { checklist_id: string; checkpoint_id: string; organization_id: string }[] = [];
   let conferenceIdForAudience: string | null = null;
 
@@ -861,6 +910,7 @@ export async function runChecklistReminders(
       .map((s) => `<p style="margin:18px 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280">${s.checklistName}</p>\n${s.openItemsHtml}`)
       .join("\n");
 
+    emailsByOrg.set(organizationId, admins.map((admin) => admin.email));
     for (const admin of admins) {
       recipients.push({
         email: admin.email,
@@ -911,7 +961,7 @@ export async function runChecklistReminders(
    * does not do is write to anyone, or log a send that would stop the real one
    * later.
    */
-  if (checklistEmailSuppressed()) {
+  if (checklistEmailSuppressed() && !dryRun) {
     result.errors.push(
       "CHECKLIST_SUPPRESS_EMAIL=1 — computed the run and sent nothing."
     );
@@ -923,16 +973,19 @@ export async function runChecklistReminders(
     // Everything above this line is read-only: scope resolution, the checks,
     // the digest. Stopping here reports exactly what the real run would do
     // without a campaign, a send, or a log row that would suppress it later.
-    for (const [, pending] of pendingByOrg) {
+    // ⚠️ Only orgs with someone to write to: an org with no admin is skipped by
+    // the real run too, and counting it would overstate the send.
+    for (const [organizationId, pending] of pendingByOrg) {
+      const emails = emailsByOrg.get(organizationId);
+      if (!emails) continue;
       result.preview!.push({
+        organizationId,
         organization: pending.orgName,
-        recipients: recipients
-          .filter((r) => r.variableOverrides?.org_name === pending.orgName)
-          .map((r) => r.email),
+        recipients: emails,
         items: pending.sections.flatMap((sec) => sec.itemNames),
       });
     }
-    result.orgsReminded = pendingByOrg.size;
+    result.orgsReminded = result.preview!.length;
     return result;
   }
 
