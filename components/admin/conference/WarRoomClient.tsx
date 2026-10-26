@@ -1357,6 +1357,89 @@ function MessagesView({
   );
 }
 
+/** What a scheduler run's diagnostics say, in an operator's words. */
+const FINDING_WORDS: Record<string, string> = {
+  BLACKOUT: "Put someone in a meeting with an organization they refused",
+  DUPLICATE_EXHIBITOR_ORG: "Gave someone two meetings with the same company",
+  GROUP_BOUNDS: "Made a meeting larger or smaller than allowed",
+  EXHIBITOR_TARGET: "Exhibitors below their target number of meetings",
+  DELEGATE_TARGET: "Delegates below their target number of meetings",
+  DELEGATE_SELF_EXCLUDED: "Delegates who refused every exhibitor, so had no one to meet",
+  DELEGATE_DOUBLE_BOOKED: "Put someone in two meetings at the same time",
+  ORG_COVERAGE: "Organizations with no meetings at all",
+  PERSON_COVERAGE: "People with no meetings at all",
+  EXHIBITOR_WITHOUT_SUITE: "Exhibitors with no suite, so no meetings",
+  POLICY_RELAXATION_DISABLED: "Could not loosen the rules to fit more in (turned off)",
+};
+const SEVERITY_WORDS: Record<string, string> = { hard: "Stops the draft", soft: "Warning", info: "Note" };
+
+type RunFinding = { code: string; severity: string; text: string; count: number };
+
+function runFindings(diagnostics: unknown): { placed: number | null; findings: RunFinding[] } {
+  const d = (diagnostics ?? {}) as { totalAssignments?: number; violations?: Array<Record<string, unknown>> };
+  const byCode = new Map<string, RunFinding>();
+  for (const v of d.violations ?? []) {
+    const code = String(v.code ?? "UNKNOWN");
+    const details = (v.details ?? {}) as Record<string, unknown>;
+    const ids = [details.exhibitorSeatIds, details.delegateSeatIds].find(Array.isArray) as unknown[] | undefined;
+    const entry = byCode.get(code) ?? {
+      code,
+      severity: String(v.severity ?? "info"),
+      text: FINDING_WORDS[code] ?? String(v.message ?? code),
+      count: 0,
+    };
+    entry.count += ids ? ids.length : 1;
+    byCode.set(code, entry);
+  }
+  const order = { hard: 0, soft: 1, info: 2 } as Record<string, number>;
+  return {
+    placed: typeof d.totalAssignments === "number" ? d.totalAssignments : null,
+    findings: [...byCode.values()].sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3)),
+  };
+}
+
+/**
+ * A run's findings as sentences, worst first. ⚠️ A failed (infeasible) run
+ * saves none of its meetings, so "placed" is what it reached, not a draft you
+ * can open in the grid.
+ */
+function DraftFindings({ diagnostics, broken }: { diagnostics: unknown; broken: boolean }) {
+  const { placed, findings } = runFindings(diagnostics);
+  return (
+    <div className="space-y-3 text-sm text-gray-700">
+      {placed !== null ? (
+        <p>
+          It placed {plural(placed, "meeting")}
+          {broken ? ", then stopped: a failed draft keeps none of them." : "."}
+        </p>
+      ) : null}
+      <ul className="divide-y divide-gray-100">
+        {findings.map((f) => (
+          <li key={f.code} className="flex items-baseline justify-between gap-3 py-1.5">
+            <span>
+              <span
+                className={`mr-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  f.severity === "hard" ? "bg-red-50 text-red-700" : f.severity === "soft" ? "bg-amber-50 text-amber-800" : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {SEVERITY_WORDS[f.severity] ?? f.severity}
+              </span>
+              {f.text}
+            </span>
+            {f.count > 1 ? <span className="shrink-0 text-xs text-gray-500">{f.count}</span> : null}
+          </li>
+        ))}
+      </ul>
+      <details className="text-xs text-gray-500">
+        <summary className="cursor-pointer">The run&apos;s full report</summary>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-gray-800">
+          {JSON.stringify(diagnostics ?? {}, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 const RUN_STATUS_WORDS: Record<string, string> = {
   running: "still running",
   completed: "ready",
@@ -1426,14 +1509,10 @@ function MeetingsView({ conferenceId }: { conferenceId: string }) {
             tone={draftBroken ? "blocked" : "neutral"}
             edit={{ href: `${base}/schedule`, label: "Days & suites" }}
             preview={
-              draftBroken
+              draft && runFindings(draft.diagnostics).findings.length > 0
                 ? {
-                    title: "Why the draft failed",
-                    content: (
-                      <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-xs text-gray-800">
-                        {JSON.stringify(draft?.diagnostics ?? {}, null, 2)}
-                      </pre>
-                    ),
+                    title: draftBroken ? "Why the draft failed" : "What the draft could not do",
+                    content: <DraftFindings diagnostics={draft.diagnostics} broken={draftBroken} />,
                   }
                 : null
             }
