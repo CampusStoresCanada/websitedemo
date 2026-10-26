@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contactsWeAdded,
+  orgsMatchingLatestAnswer,
   diffSpace,
   parseSpaceRules,
   qualifyingContactIds,
@@ -100,5 +101,20 @@ describe("diffSpace", () => {
     const oldContact = { contactId: "c1", email: "a@x", circleId: "10" };
     const newContact = { contactId: "c1b", email: "a@x", circleId: "10" };
     expect(diffSpace([newContact], new Set(["10"]), [oldContact]).toRemove).toEqual([]);
+  });
+});
+
+describe("orgsMatchingLatestAnswer", () => {
+  const BW = "Carleton Technologies - Bookware";
+  it("uses each school's latest submitted answer and ignores drafts", () => {
+    const rows = [
+      { organization_id: "a", fiscal_year: 2025, status: "verified", answer: [BW] },
+      { organization_id: "b", fiscal_year: 2025, status: "verified", answer: [BW] },
+      { organization_id: "b", fiscal_year: 2026, status: "submitted", answer: ["Prism"] }, // switched
+      { organization_id: "c", fiscal_year: 2025, status: "verified", answer: ["Prism"] },
+      { organization_id: "c", fiscal_year: 2026, status: "draft", answer: [BW] }, // draft doesn't count
+      { organization_id: "d", fiscal_year: 2026, status: "submitted", answer: ["Lightspeed", BW] },
+    ];
+    expect([...orgsMatchingLatestAnswer(rows, BW)].sort()).toEqual(["a", "d"]);
   });
 });
