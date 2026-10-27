@@ -16,6 +16,7 @@ import { redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { getAuditView, getResultsAnnouncement, listScrutineerCandidates } from "@/lib/elections/service";
 import ConfirmSubmitButton from "@/components/admin/elections/ConfirmSubmitButton";
+import BoardTransitionPanel from "@/components/admin/elections/BoardTransitionPanel";
 import {
   sealElectionAction,
   recordTieResolutionAction,
@@ -44,18 +45,29 @@ export default async function ElectionAuditPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ error?: string; announced?: string }>;
+  searchParams: Promise<{ error?: string; announced?: string; moved?: string }>;
 }) {
   const { slug } = await params;
-  const { error, announced } = await searchParams;
+  const { error, announced, moved } = await searchParams;
   const [audit, scrutineers] = await Promise.all([
     getAuditView(slug),
     listScrutineerCandidates(),
   ]);
   if (!audit) notFound();
   const results = await getResultsAnnouncement(slug);
+  const { getBoardTransition } = await import("@/lib/elections/service");
+  const transition = await getBoardTransition(slug);
 
   const { election, roll, sealedCount, reconciled, count, certification } = audit;
+  async function applyTransition(formData: FormData) {
+    "use server";
+    const { applyBoardTransitionAction } = await import("@/lib/actions/elections");
+    const r = await applyBoardTransitionAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}/audit${r.ok ? "?moved=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
   const sealed = election.status === "sealed" || election.status === "certified";
   // An acclaimed slate never passes through balloting, so it is never sealed —
   // and the Certify section below is gated on sealing. Without this the one act
@@ -111,6 +123,13 @@ export default async function ElectionAuditPage({
           {error}
         </div>
       )}
+      {moved && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          Board access moved. Check the names on the panel below — anybody skipped is listed there
+          with the reason, and Circle removals are a separate obligation on the board&apos;s list.
+        </div>
+      )}
+
       {announced && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
           The result has gone to the membership.
@@ -323,6 +342,16 @@ export default async function ElectionAuditPage({
             </p>
           )}
         </section>
+      )}
+
+      {transition && (
+        <BoardTransitionPanel
+          plan={transition.plan}
+          agmDate={transition.agmDate}
+          conferenceEndsOn={transition.conferenceEndsOn}
+          certified={transition.certified}
+          apply={applyTransition}
+        />
       )}
 
       {certification?.certifiedAt && results && (

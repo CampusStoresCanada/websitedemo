@@ -28,9 +28,11 @@ export type SeatHolding = {
   organizationId: string;
   seatIndex: number | null;
   /**
-   * The balance (one purchase line) the seat came from. Widened in for a
-   * registration's included events, which are the seats minted by the SAME
-   * purchase (included-seats.ts).
+   * The balance (one purchase line) the seat came from, which leads to the
+   * purchase and the order that paid for it. Widened in for a registration's
+   * included events, which are the seats minted by the SAME purchase
+   * (included-seats.ts), and to refund the right order when a paid seat is
+   * switched to the CANCOLL-funded registration.
    */
   balanceId: string | null;
   /** The catalogue thing this seat is for. */
