@@ -40,6 +40,7 @@
 
 import { resolveAccess } from "@/lib/conference/entity-commerce";
 import { loadSeatHoldings } from "@/lib/conference/seats";
+import { isFundedOffer } from "@/lib/conference/entity-pricing";
 import {
   badgeNames,
   DEFAULT_PRINT_SORT,
@@ -194,6 +195,12 @@ export type DoorRosterRow = {
   organizationName: string;
   /** Already recorded at this event's door. Always false on the attendee list. */
   inAlready: boolean;
+  /**
+   * Holds a registration someone else pays for (the CANCOLL-funded seat). Read
+   * from the seat itself, never the badge's tier label, which says "Full
+   * Conference" for both.
+   */
+  funded: boolean;
 };
 
 /**
@@ -287,6 +294,7 @@ export async function loadDoorRoster(
       displayName: names.displayName ?? entry.name,
       organizationName: orgName.get(entry.organizationId) ?? "",
       inAlready: inAlready.has(personId),
+      funded: entry.held.some((id) => isFundedOffer(entitiesById.get(id)?.attributes)),
     };
   });
   return sortNames(rows, sort).map((row) => ({
@@ -296,5 +304,6 @@ export async function loadDoorRoster(
     lastName: row.lastName,
     organizationName: row.organizationName,
     inAlready: row.inAlready,
+    funded: row.funded,
   }));
 }

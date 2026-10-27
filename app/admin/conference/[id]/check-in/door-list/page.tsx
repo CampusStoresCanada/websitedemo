@@ -97,7 +97,15 @@ export default async function DoorListPage({
                   </span>
                 </td>
               ) : null}
-              <td className="py-2">{row.name}</td>
+              <td className="py-2">
+                {row.name}
+                {/* So the desk knows who CANCOLL funds (MOU): staff paper only. */}
+                {row.funded ? (
+                  <span className="ml-2 border border-gray-900 px-1 text-[10px] font-semibold uppercase tracking-wide">
+                    CANCOLL
+                  </span>
+                ) : null}
+              </td>
               <td className="py-2">{row.organizationName}</td>
             </tr>
           ))}
