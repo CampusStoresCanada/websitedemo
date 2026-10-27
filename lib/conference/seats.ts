@@ -20,7 +20,7 @@ import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /** The column list every seat read selects — kept beside the row type, as ENTITY_SELECT is. */
 export const SEAT_SELECT =
-  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id, created_at";
+  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id, created_at, balance_id";
 
 export type SeatHolding = {
   seatId: string;
@@ -62,6 +62,12 @@ export type SeatHolding = {
   /** When the seat was allocated — the nearest thing to a registration date,
    *  and a sort key some organisers want their print file stacked by. */
   seatedAt: string | null;
+  /**
+   * The balance this seat was issued from, which leads to the purchase and the
+   * order that paid for it. Needed to refund the right order when a paid seat
+   * is switched to the CANCOLL-funded registration.
+   */
+  balanceId?: string | null;
 };
 
 export type SeatQuery = {
@@ -156,6 +162,7 @@ export async function loadSeatHoldings(
       holderUserId: null,
       holderContactId: null,
       seatedAt: typeof row.created_at === "string" ? row.created_at : null,
+      balanceId: typeof row.balance_id === "string" ? row.balance_id : null,
     });
   }
   if (orphaned.length > 0) {
