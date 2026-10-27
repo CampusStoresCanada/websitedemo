@@ -20,13 +20,19 @@ import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /** The column list every seat read selects — kept beside the row type, as ENTITY_SELECT is. */
 export const SEAT_SELECT =
-  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id, created_at";
+  "id, conference_id, organization_id, entity_id, balance_id, seat_index, holder_person_id, created_at";
 
 export type SeatHolding = {
   seatId: string;
   conferenceId: string;
   organizationId: string;
   seatIndex: number | null;
+  /**
+   * The balance (one purchase line) the seat came from. Widened in for a
+   * registration's included events, which are the seats minted by the SAME
+   * purchase (included-seats.ts).
+   */
+  balanceId: string | null;
   /** The catalogue thing this seat is for. */
   entityId: string;
   entityKind: string;
@@ -74,6 +80,14 @@ export type SeatQuery = {
   entityKinds?: string[];
   /** Only seats nobody is named to, or only seats somebody is. */
   assigned?: boolean;
+  /**
+   * Only seats from these balances — what one order's purchases gave. Widened
+   * in for the check-in desk, which follows a sale it started to the people it
+   * seated.
+   */
+  balanceIds?: string[];
+  /** Only these seats. */
+  seatIds?: string[];
 };
 
 // The shape of the client this needs. Kept structural rather than importing a
@@ -108,6 +122,8 @@ export async function loadSeatHoldings(
   if (query.holderPersonId) seatQuery = seatQuery.eq("holder_person_id", query.holderPersonId);
   if (query.assigned === true) seatQuery = seatQuery.not("holder_person_id", "is", null);
   if (query.assigned === false) seatQuery = seatQuery.is("holder_person_id", null);
+  if (query.balanceIds) seatQuery = seatQuery.in("balance_id", query.balanceIds);
+  if (query.seatIds) seatQuery = seatQuery.in("id", query.seatIds);
 
   const [seatRes, entityRes, refRes] = await Promise.all([
     seatQuery,
@@ -148,6 +164,7 @@ export async function loadSeatHoldings(
       conferenceId: query.conferenceId,
       organizationId: typeof row.organization_id === "string" ? row.organization_id : "",
       seatIndex: typeof row.seat_index === "number" ? row.seat_index : null,
+      balanceId: typeof row.balance_id === "string" ? row.balance_id : null,
       entityId,
       entityKind: entity.kind,
       entityName: entity.name,
@@ -203,6 +220,58 @@ export async function loadSeatHoldings(
   }
 
   return { seats: out, entitiesById: byId };
+}
+
+/**
+ * Name somebody to a seat, or empty it, with the guard that keeps two writers
+ * from bumping each other: `onlyIfEmpty` fills a seat nobody holds,
+ * `onlyIfHeldBy` empties a seat only if that person still holds it. Returns
+ * whether the seat changed.
+ *
+ * Kept beside the reader so a seat is touched in one file. allocateSeat and the
+ * purchase mint predate this and still write their own (grandfathered in the
+ * eslint list); new code comes here.
+ */
+export async function setSeatHolder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin client
+  db: any,
+  seatId: string,
+  personId: string | null,
+  guard: { onlyIfEmpty?: boolean; onlyIfHeldBy?: string } = {}
+): Promise<{ changed: boolean; error: string | null }> {
+  let write = db.from("entity_balance_seats").update({ holder_person_id: personId }).eq("id", seatId);
+  if (guard.onlyIfEmpty) write = write.is("holder_person_id", null);
+  if (guard.onlyIfHeldBy) write = write.eq("holder_person_id", guard.onlyIfHeldBy);
+  const { data, error } = await write.select("id");
+  if (error) return { changed: false, error: error.message };
+  return { changed: Array.isArray(data) && data.length > 0, error: null };
+}
+
+/**
+ * Create one seat on a balance. The SQL mint (mint_v3_for_order) creates paid
+ * seats; this is for the comp paths that have no order (the board's).
+ */
+export async function insertSeat(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin client
+  db: any,
+  seat: {
+    conferenceId: string;
+    organizationId: string | null;
+    balanceId: string;
+    entityId: string;
+    seatIndex: number;
+    holderPersonId: string | null;
+  }
+): Promise<{ error: string | null }> {
+  const { error } = await db.from("entity_balance_seats").insert({
+    conference_id: seat.conferenceId,
+    organization_id: seat.organizationId,
+    balance_id: seat.balanceId,
+    entity_id: seat.entityId,
+    seat_index: seat.seatIndex,
+    holder_person_id: seat.holderPersonId,
+  });
+  return { error: error?.message ?? null };
 }
 
 /** The catalogue graph, for callers that also need to walk it (access, obligations). */

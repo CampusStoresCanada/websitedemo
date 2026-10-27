@@ -186,7 +186,7 @@ export async function loadOrgLegalStatus(
 
   const { data: peopleRows } = await db
     .from("conference_people")
-    .select("id, display_name, contact_email, user_id, assignment_status")
+    .select("id, display_name, contact_email, user_id, assignment_status, canonical_person_id")
     .eq("conference_id", conferenceId)
     .eq("organization_id", organizationId);
 
@@ -201,24 +201,43 @@ export async function loadOrgLegalStatus(
   const userIds = (peopleRows ?? [])
     .map((p) => p.user_id)
     .filter((id): id is string => !!id);
-  const { data: allAcceptances } = userIds.length && assigneeVersionIds.length
+  // Acceptances taken at the check-in desk are recorded for the PERSON (their
+  // contact), who may have no login: count both.
+  const contactIds = (peopleRows ?? [])
+    .map((p) => p.canonical_person_id as string | null)
+    .filter((id): id is string => !!id);
+  const who = [
+    userIds.length ? `user_id.in.(${userIds.join(",")})` : null,
+    contactIds.length ? `contact_id.in.(${contactIds.join(",")})` : null,
+  ].filter(Boolean);
+  const { data: allAcceptances } = who.length && assigneeVersionIds.length
     ? await db
         .from("legal_acceptances")
-        .select("user_id, legal_version_id")
-        .in("user_id", userIds)
+        .select("user_id, contact_id, legal_version_id")
+        .or(who.join(","))
         .in("legal_version_id", assigneeVersionIds)
     : { data: [] };
   const acceptedByUser = new Map<string, Set<string>>();
+  const acceptedByContact = new Map<string, Set<string>>();
   for (const a of allAcceptances ?? []) {
-    const set = acceptedByUser.get(a.user_id) ?? new Set<string>();
-    set.add(a.legal_version_id);
-    acceptedByUser.set(a.user_id, set);
+    for (const [key, map] of [
+      [a.user_id, acceptedByUser],
+      [a.contact_id, acceptedByContact],
+    ] as const) {
+      if (!key) continue;
+      const set = map.get(key) ?? new Set<string>();
+      set.add(a.legal_version_id);
+      map.set(key, set);
+    }
   }
 
   const people: AssigneeLegalStatus[] = (peopleRows ?? [])
     .filter((p) => p.assignment_status !== "canceled")
     .map((p) => {
-      const accepted = p.user_id ? acceptedByUser.get(p.user_id) ?? new Set<string>() : new Set<string>();
+      const accepted = new Set<string>([
+        ...(p.user_id ? acceptedByUser.get(p.user_id) ?? [] : []),
+        ...(p.canonical_person_id ? acceptedByContact.get(p.canonical_person_id as string) ?? [] : []),
+      ]);
       return {
         personId: p.id,
         name: p.display_name ?? p.contact_email ?? "Unnamed",

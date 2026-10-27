@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scanConferenceCheckInToken } from "@/lib/actions/conference-people";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,8 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await context.params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -20,6 +21,8 @@ export async function POST(
     scan_timestamp?: string;
     device_id?: string;
     test_mode?: boolean;
+    as_of?: string | null;
+    entity_id?: string | null;
   };
 
   try {
@@ -28,6 +31,8 @@ export async function POST(
       scan_timestamp?: string;
       device_id?: string;
       test_mode?: boolean;
+      as_of?: string | null;
+      entity_id?: string | null;
     };
   } catch {
     return NextResponse.json(
@@ -52,6 +57,10 @@ export async function POST(
     // per-conference test flag to leave switched on by accident: a rehearsal is
     // something you are doing right now, in this tab.
     testMode: payload.test_mode === true,
+    // Rehearsal only; the action ignores it outside test mode.
+    asOf: payload.as_of ?? null,
+    // The event this device is at (door mode), or none for badge pickup.
+    entityId: typeof payload.entity_id === "string" && payload.entity_id ? payload.entity_id : null,
   });
 
   if (!result.success) {
@@ -70,5 +79,7 @@ export async function POST(
     state: result.data?.state ?? "invalid_token",
     person_id: result.data?.personId ?? null,
     checked_in_at: result.data?.checkedInAt ?? null,
+    // What they must accept at the desk before they are checked in.
+    owed: result.data?.owed ?? [],
   });
 }

@@ -54,8 +54,9 @@ function fakeClientForAcceptanceCheck() {
       }
       if (table === "legal_acceptances") {
         return {
+          // By login OR, for a desk acceptance, by person (computeMissingLegal).
           select: () => ({
-            eq: () => ({
+            or: () => ({
               in: () => ({
                 data: [{ legal_version_id: "v-terms-2" }],
                 error: null,

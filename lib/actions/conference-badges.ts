@@ -1,8 +1,10 @@
 "use server";
 
-import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { ReprintPlan } from "@/lib/conference/badges/reprint-plan";
+import type { Json } from "@/lib/database.types";
+import { stickersFor, type ReprintPlan, type StickerSide } from "@/lib/conference/badges/reprint-plan";
+import { hashPrintStationKey, newPrintStationKey, stationOnline } from "@/lib/conference/badges/print-station";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
@@ -428,7 +430,9 @@ export async function ensureBadgeTokenForPerson(params: {
   conferenceId: string;
   personId: string;
 }): Promise<{ success: boolean; error?: string; data?: { tokenId: string; qrPayload: string } }> {
-  const auth = await requireConferenceOpsAccess();
+  // ⛔ Desk staff, not only admins: a reprint at the desk needs the person's
+  // token, and staff OPERATE the conference (Stephen, 2026-10-19).
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
@@ -864,7 +868,9 @@ export async function requestBadgeReprint(params: {
     warningSample?: string[];
   };
 }> {
-  const auth = await requireConferenceOpsAccess();
+  // ⛔ Reprinting is OPERATING the desk, so desk staff may — it was admin-only,
+  // which refused every temp's Reprint before anything happened.
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
 
   if (!isBadgeReprintReason(params.reason)) {
@@ -1073,4 +1079,244 @@ export async function deleteBadgePrintJob(params: {
   });
 
   return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// The print queue: a laptop beside the QL prints what the desk sends it.
+//
+// ⛔ Not a new system. `transport_method = printer_bridge` and the
+// `sent_to_printer` status have existed since the badge pipeline was built and
+// had no consumer. The print station page (check-in/print-station) is that
+// consumer: any device can scan, and the one beside the printer prints.
+// ─────────────────────────────────────────────────────────────────
+
+type QueueResult<T> = { success: true; data: T } | { success: false; error: string };
+
+/** One of THIS conference's on-site reprints — the only jobs the desk may touch. */
+async function deskReprintJob(conferenceId: string, jobId: string) {
+  const { data: job, error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .select("id, person_id, status, pipeline_type, metadata")
+    .eq("id", jobId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!job || job.pipeline_type !== "onsite_reprint") return { error: "That print job was not found." };
+  return { job };
+}
+
+/**
+ * "Send to print queue": a print station picks it up.
+ *
+ * ⛔ Routed when the desk has picked its printer (`stationId`, chosen once per
+ * device): only that station prints it. Unrouted, the first station to claim
+ * it does, which with one printer is the same thing (Stephen, 2026-10-22: "one
+ * printer is today's reality", but desks must be able to keep their own).
+ * The target travels on the job's metadata, so no column was needed.
+ */
+export async function sendReprintToQueue(params: {
+  conferenceId: string;
+  jobId: string;
+  /** The print station this desk prints to; omit for "any". */
+  stationId?: string | null;
+}): Promise<QueueResult<{ stationOnline: boolean; stationLabel: string | null }>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const found = await deskReprintJob(params.conferenceId, params.jobId);
+  if ("error" in found) return { success: false, error: found.error ?? "That print job was not found." };
+
+  const db = createAdminClient();
+  const { data: stations } = await db
+    .from("print_stations")
+    .select("id, label, last_seen_at")
+    .eq("conference_id", params.conferenceId)
+    .is("revoked_at", null);
+  const target = params.stationId ? (stations ?? []).find((s) => s.id === params.stationId) ?? null : null;
+  if (params.stationId && !target) {
+    return { success: false, error: "That printer was removed. Pick this desk's printer again." };
+  }
+
+  const metadata = { ...((found.job.metadata as Record<string, unknown> | null) ?? {}) };
+  if (target) metadata.print_station_id = target.id;
+  else delete metadata.print_station_id;
+
+  const now = new Date().toISOString();
+  const { error } = await db
+    .from("badge_print_jobs")
+    .update({
+      transport_method: "printer_bridge",
+      status: "sent_to_printer",
+      completed_at: null,
+      updated_at: now,
+      metadata: metadata as Json,
+    })
+    .eq("id", params.jobId);
+  if (error) return { success: false, error: error.message };
+  await insertBadgeEvent({
+    jobId: params.jobId,
+    conferenceId: params.conferenceId,
+    personId: found.job.person_id as string | null,
+    eventType: "sent_to_printer",
+    eventStatus: "success",
+    message: target ? `Sent to the print station "${target.label as string}".` : "Sent to the print station.",
+    actorId: auth.ctx.userId,
+  });
+  // Say so when nothing will pick it up: a queued sticker with no station
+  // online is a sticker nobody is printing.
+  const watching = target ? [target] : stations ?? [];
+  return {
+    success: true,
+    data: {
+      stationOnline: watching.some((row) => stationOnline(row.last_seen_at as string | null)),
+      stationLabel: target ? (target.label as string) : null,
+    },
+  };
+}
+
+export type ReprintPreview = {
+  /** The contact the edit saves to; null = nothing to edit, the roster row prints. */
+  contactId: string | null;
+  firstName: string;
+  lastName: string;
+  roleTitle: string;
+  organizationName: string | null;
+};
+
+/**
+ * What a reprint will print, for the desk to check and correct before it does.
+ * The sticker's own reader (loadBadgeIdentity), so the preview is the print.
+ */
+export async function loadReprintPreview(params: {
+  conferenceId: string;
+  personId: string;
+}): Promise<QueueResult<ReprintPreview>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: person } = await db
+    .from("conference_people")
+    .select("*, organizations(name)")
+    .eq("id", params.personId)
+    .eq("conference_id", params.conferenceId)
+    .maybeSingle();
+  if (!person) return { success: false, error: "That person is not on this conference." };
+  const { loadBadgeIdentity } = await import("@/lib/conference/badges/label-document");
+  const identity = await loadBadgeIdentity(db, person as Record<string, unknown>);
+  const org = (person as { organizations?: { name?: string | null } | null }).organizations;
+  return {
+    success: true,
+    data: {
+      contactId: identity.contactId,
+      firstName: identity.names.firstName ?? "",
+      lastName: identity.names.lastName ?? "",
+      roleTitle: identity.roleTitle ?? "",
+      organizationName: org?.name ?? null,
+    },
+  };
+}
+
+export type QueuedLabel = { jobId: string; personName: string; queuedAt: string; stickers: StickerSide[] };
+
+/** What the print station has to print, oldest first. */
+export async function listQueuedLabels(conferenceId: string): Promise<QueueResult<QueuedLabel[]>> {
+  const auth = await requireConferenceDeskAccess(conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const { data: jobs, error } = await db
+    .from("badge_print_jobs")
+    .select("id, person_id, updated_at, metadata")
+    .eq("conference_id", conferenceId)
+    .eq("pipeline_type", "onsite_reprint")
+    .eq("status", "sent_to_printer")
+    .order("updated_at", { ascending: true })
+    .limit(20);
+  if (error) return { success: false, error: error.message };
+  const personIds = [...new Set((jobs ?? []).map((j) => j.person_id as string).filter(Boolean))];
+  const { data: people, error: peopleError } = personIds.length
+    ? await db.from("conference_people").select("id, display_name").in("id", personIds)
+    : { data: [], error: null };
+  if (peopleError) return { success: false, error: peopleError.message };
+  const nameById = new Map((people ?? []).map((p) => [p.id as string, (p.display_name as string | null) ?? ""]));
+  return {
+    success: true,
+    data: (jobs ?? []).map((j) => ({
+      jobId: j.id as string,
+      personName: nameById.get(j.person_id as string) ?? "",
+      queuedAt: j.updated_at as string,
+      stickers: stickersFor((j.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan),
+    })),
+  };
+}
+
+// ── Print stations: the laptops that print the queue ────────────────────────
+
+export type PrintStationRow = {
+  id: string;
+  label: string;
+  online: boolean;
+  lastSeenAt: string | null;
+  printerStatus: string | null;
+  printerMedia: string | null;
+};
+
+/** This conference's print stations (revoked ones are gone). */
+export async function listPrintStations(conferenceId: string): Promise<QueueResult<PrintStationRow[]>> {
+  const auth = await requireConferenceDeskAccess(conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { data, error } = await createAdminClient()
+    .from("print_stations")
+    .select("id, label, last_seen_at, printer_status, printer_media")
+    .eq("conference_id", conferenceId)
+    .is("revoked_at", null)
+    .order("created_at", { ascending: true });
+  if (error) return { success: false, error: error.message };
+  return {
+    success: true,
+    data: (data ?? []).map((row) => ({
+      id: row.id as string,
+      label: row.label as string,
+      online: stationOnline(row.last_seen_at as string | null),
+      lastSeenAt: (row.last_seen_at as string | null) ?? null,
+      printerStatus: (row.printer_status as string | null) ?? null,
+      printerMedia: (row.printer_media as string | null) ?? null,
+    })),
+  };
+}
+
+/**
+ * A new station key, shown ONCE. ⛔ Only its hash is kept, so a lost key is
+ * revoked and replaced, never recovered. Desk staff may make one: setting up
+ * the laptop beside the printer is operating the desk, and the key reaches
+ * nothing but this conference's queued stickers.
+ */
+export async function createPrintStation(params: {
+  conferenceId: string;
+  label: string;
+}): Promise<QueueResult<{ id: string; key: string }>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const label = params.label.trim() || "Print station";
+  const key = newPrintStationKey();
+  const { data, error } = await createAdminClient()
+    .from("print_stations")
+    .insert({ conference_id: params.conferenceId, label, key_hash: hashPrintStationKey(key), created_by: auth.ctx.userId })
+    .select("id")
+    .single();
+  if (error) return { success: false, error: error.message };
+  return { success: true, data: { id: data.id as string, key } };
+}
+
+export async function revokePrintStation(params: {
+  conferenceId: string;
+  stationId: string;
+}): Promise<QueueResult<null>> {
+  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { error } = await createAdminClient()
+    .from("print_stations")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("id", params.stationId)
+    .eq("conference_id", params.conferenceId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, data: null };
 }

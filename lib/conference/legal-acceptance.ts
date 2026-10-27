@@ -13,6 +13,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import {
   isLegallyExempt,
@@ -90,8 +91,13 @@ export async function computeMissingLegal(
   db: AdminClient,
   conferenceId: string,
   userId: string | null,
-  registrant?: Registrant
-): Promise<{ allAccepted: boolean; missing: string[] }> {
+  registrant?: Registrant,
+  /**
+   * The person's contact. An acceptance taken at the check-in desk is recorded
+   * for the PERSON (they may have no login), so it counts here too.
+   */
+  contactId?: string | null
+): Promise<{ allAccepted: boolean; missing: string[]; missingVersionIds: string[] }> {
   const nowIso = new Date().toISOString();
   const { data: versions } = await db
     .from("conference_legal_versions")
@@ -100,7 +106,7 @@ export async function computeMissingLegal(
     .lte("effective_at", nowIso)
     .order("document_type", { ascending: true })
     .order("version", { ascending: false });
-  if (!versions || versions.length === 0) return { allAccepted: true, missing: [] };
+  if (!versions || versions.length === 0) return { allAccepted: true, missing: [], missingVersionIds: [] };
 
   // Latest version per type, remembering each one's policy entity.
   const latestByType = new Map<string, string>();
@@ -120,7 +126,7 @@ export async function computeMissingLegal(
     // A policy with `applies_to_all` and a legal version with no policy entity
     // ("unmanaged → fail safe") both bypass targeting entirely, so filtering
     // per-policy would still have chased staff for two documents.
-    if (isLegallyExempt(registrant)) return { allAccepted: true, missing: [] };
+    if (isLegallyExempt(registrant)) return { allAccepted: true, missing: [], missingVersionIds: [] };
     const policies = await loadPolicyTargeting(db, conferenceId);
     const requiredPolicies = requiredPolicyEntityIds(policies, registrant);
     requiredTypes = requiredTypes.filter(([, versionId]) => {
@@ -130,18 +136,84 @@ export async function computeMissingLegal(
   }
   const requiredVersionIds = requiredTypes.map(([, versionId]) => versionId);
 
-  let acceptedIds = new Set<string>();
-  if (userId) {
+  const acceptedIds = new Set<string>();
+  const who = [userId ? `user_id.eq.${userId}` : null, contactId ? `contact_id.eq.${contactId}` : null].filter(Boolean);
+  if (who.length > 0 && requiredVersionIds.length > 0) {
     const { data: acceptances } = await db
       .from("legal_acceptances")
       .select("legal_version_id")
-      .eq("user_id", userId)
+      .or(who.join(","))
       .in("legal_version_id", requiredVersionIds);
-    acceptedIds = new Set((acceptances ?? []).map((row) => row.legal_version_id));
+    for (const row of acceptances ?? []) acceptedIds.add(row.legal_version_id);
   }
 
-  const missing = requiredTypes.filter(([, versionId]) => !acceptedIds.has(versionId)).map(([documentType]) => documentType);
-  return { allAccepted: missing.length === 0, missing };
+  const owed = requiredTypes.filter(([, versionId]) => !acceptedIds.has(versionId));
+  return {
+    allAccepted: owed.length === 0,
+    missing: owed.map(([documentType]) => documentType),
+    missingVersionIds: owed.map(([, versionId]) => versionId),
+  };
+}
+
+/**
+ * The audience tier an organisation's people are held to.
+ *
+ * ⛔ Resolved through the configured membership programs, never a string
+ * literal (`organizations.type` is "Vendor Partner", capitalised). Only
+ * `partner` and `staff` diverge from `member`; `staff` must pass through or the
+ * staff exemption can never fire. resolveConferenceTier also feeds pricing, so
+ * the narrowing happens here, not there. One copy, for every caller.
+ */
+export async function audienceForOrg(db: AdminClient, organizationId: string | null): Promise<string[]> {
+  if (!organizationId) return ["member"];
+  const { data: org } = await db.from("organizations").select("type").eq("id", organizationId).maybeSingle();
+  const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
+  return [tier === "partner" || tier === "staff" ? tier : "member"];
+}
+
+export type OwedAgreement = { versionId: string; documentType: string; content: string };
+
+/**
+ * What one person on a conference's roster still has to accept, with the text
+ * to show them. The check-in desk asks this on every badge (Stephen,
+ * 2026-10-23: "if we haven't gotten them to do it by the time they are at the
+ * door, that is our last shot"). Same rule as registration: their audience,
+ * what they hold, the assignee moment; acceptances by their login OR for them.
+ */
+export async function personOwedAgreements(
+  db: AdminClient,
+  conferenceId: string,
+  personId: string
+): Promise<OwedAgreement[]> {
+  const { data: person } = await db
+    .from("conference_people")
+    .select("user_id, organization_id, canonical_person_id")
+    .eq("conference_id", conferenceId)
+    .eq("id", personId)
+    .maybeSingle();
+  if (!person) return [];
+  const [audienceSourceRoles, { seats }] = await Promise.all([
+    audienceForOrg(db, (person.organization_id as string | null) ?? null),
+    loadSeatHoldings(db, { conferenceId, holderPersonId: personId }),
+  ]);
+  const { missingVersionIds } = await computeMissingLegal(
+    db,
+    conferenceId,
+    (person.user_id as string | null) ?? null,
+    { audienceSourceRoles, heldEntityIds: [...new Set(seats.map((seat) => seat.entityId))], role: "assignee" },
+    (person.canonical_person_id as string | null) ?? null
+  );
+  if (missingVersionIds.length === 0) return [];
+  const { data: versions } = await db
+    .from("conference_legal_versions")
+    .select("id, document_type, content")
+    .in("id", missingVersionIds)
+    .order("document_type");
+  return (versions ?? []).map((v) => ({
+    versionId: v.id as string,
+    documentType: v.document_type as string,
+    content: v.content as string,
+  }));
 }
 
 /**
@@ -160,44 +232,15 @@ export async function computeOrgLegalCompleteness(
 ): Promise<boolean> {
   const { data: people } = await db
     .from("conference_people")
-    .select("id, user_id")
+    .select("id")
     .eq("conference_id", conferenceId)
     .eq("organization_id", organizationId);
   if (!people || people.length === 0) return false; // nobody registered yet — not complete
 
-  const { data: org } = await db.from("organizations").select("type").eq("id", organizationId).maybeSingle();
-  // `organizations.type` is capitalised and human-readable — "Vendor Partner",
-  // "Member", "Non-Member". A snake_case literal here silently never matched, so
-  // every vendor partner was evaluated against MEMBER-targeted policies and asked
-  // to accept the wrong documents. Resolve through the configured programs
-  // instead of comparing strings, so the mapping stays correct if the org types
-  // are ever renamed or a third program is added.
-  const programs = await getProgramsConfig();
-  // ⛔ Only `partner` diverges — see conference-legal.ts. resolveConferenceTier
-  // also feeds pricing via loadBuyerTier, so it stays the shared mapping and the
-  // narrowing happens here.
-  // ⚠️ `staff` passes through, same as conference-legal.ts. This file AUTO-MERGED
-  // cleanly into a version that collapsed staff to "member" two lines above the
-  // isLegallyExempt call that looks for "staff" — no conflict marker, type-checked
-  // fine, and the exemption could never have fired.
-  const tier = resolveConferenceTier(org?.type, programs);
-  const audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
-
+  // Per person, by the one rule the check-in desk uses: their login's
+  // acceptances or ones taken for them at the desk (personOwedAgreements).
   for (const person of people) {
-    if (!person.user_id) return false; // no account yet — can't have accepted anything
-
-    const { data: seats } = await db
-      .from("entity_balance_seats")
-      .select("entity_id")
-      .eq("conference_id", conferenceId)
-      .eq("holder_person_id", person.id);
-    const heldEntityIds = [...new Set((seats ?? []).map((s) => s.entity_id))];
-
-    const { allAccepted } = await computeMissingLegal(db, conferenceId, person.user_id, {
-      audienceSourceRoles,
-      heldEntityIds,
-    });
-    if (!allAccepted) return false;
+    if ((await personOwedAgreements(db, conferenceId, person.id as string)).length > 0) return false;
   }
 
   return true;

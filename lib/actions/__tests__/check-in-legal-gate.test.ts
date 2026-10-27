@@ -3,40 +3,34 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 process.env.RESEND_API_KEY = process.env.RESEND_API_KEY ?? "re_test_key";
 
 /**
- * Checking in is NEVER gated on documents.
+ * ⛔ Agreements are collected AT check-in (Stephen, 2026-10-23): "if we haven't
+ * gotten them to do it by the time they are at the door, that is our last
+ * shot." A scan for somebody who still owes agreements does NOT check them in;
+ * it returns `legal_not_accepted` with the agreements, the desk shows them on
+ * its device, records the acceptance, and scans again.
  *
- * ⛔ It is an administrative act — handing somebody the badge that is already
- * theirs — not a grant of access to anything. Gating it turned the busiest
- * queue of the conference into a paperwork desk and punished the attendee for a
- * gap they could not close while standing there.
- *
- * The documents are enforced where they mean something, and already were before
- * this gate existed: registration, buying a day pass, and the welcome
- * acceptance surface. This test exists because "the desk should check that"
- * sounds so reasonable that somebody will add it back.
+ * This replaces the 2026-09-08 rule "check-in is never gated on documents".
+ * That rule was against REFUSING people (a paperwork desk); this collects
+ * consent on the spot instead, so the queue keeps moving.
  */
 
-const gateCalls: string[] = [];
+let owed: Array<{ versionId: string; documentType: string; content: string }> = [];
 let updatedRow: Record<string, unknown> | null = null;
 
 vi.mock("@/lib/auth/guards", () => ({
-  requireConferenceOpsAccess: async () => ({ ok: true, ctx: { userId: "u1" } }),
+  requireConferenceDeskAccess: async () => ({ ok: true, ctx: { userId: "u1" } }),
   requireAuthenticated: async () => ({ ok: true, ctx: { userId: "u1" } }),
   requireAdmin: async () => ({ ok: true, ctx: { userId: "u1" } }),
   isGlobalAdmin: () => true,
 }));
 
-// If anything in the check-in path ever consults these again, gateCalls fills up
-// and the tests below fail.
+vi.mock("@/lib/conference/legal-acceptance", () => ({
+  personOwedAgreements: async () => owed,
+}));
+
 vi.mock("@/lib/actions/conference-legal", () => ({
-  getPersonAssigneeLegalGate: async (_conferenceId: string, personId: string) => {
-    gateCalls.push(personId);
-    return { success: true, data: { allAccepted: false, missing: ["Waiver"] } };
-  },
-  getMyConferenceLegalGate: async () => ({
-    success: true,
-    data: { allAccepted: false, missing: ["Waiver"] },
-  }),
+  getPersonAssigneeLegalGate: async () => ({ success: true, data: { allAccepted: true, missing: [] } }),
+  getMyConferenceLegalGate: async () => ({ success: true, data: { allAccepted: true, missing: [] } }),
 }));
 
 vi.mock("@/lib/audit", () => ({ logAuditEventSafe: async () => undefined }));
@@ -86,7 +80,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 beforeEach(() => {
-  gateCalls.length = 0;
+  owed = [];
   updatedRow = null;
 });
 
@@ -99,34 +93,25 @@ const scan = async (over: Record<string, unknown> = {}) => {
   });
 };
 
-describe("check-in and the document gate", () => {
-  it("checks somebody in even with every document outstanding", async () => {
+describe("check-in collects the agreements", () => {
+  it("checks somebody in who owes nothing", async () => {
     const result = await scan();
     expect(result.data?.state).toBe("valid");
     expect(updatedRow?.checked_in_at).toBeTruthy();
   });
 
-  /**
-   * ⛔ Not merely "does not block" — does not ASK. A gate that is consulted and
-   * then ignored is latency on the hot path of the busiest queue of the
-   * conference, and an invitation for somebody to start honouring it again.
-   */
-  it("never consults the assignee legal gate at all", async () => {
-    await scan();
-    expect(gateCalls).toEqual([]);
+  it("does not check in somebody who owes agreements, and hands back the text", async () => {
+    owed = [{ versionId: "v1", documentType: "member_code_of_conduct", content: "<p>Be kind.</p>" }];
+    const result = await scan();
+    expect(result.data?.state).toBe("legal_not_accepted");
+    expect(result.data?.owed).toEqual(owed);
+    expect(result.data?.checkedInAt).toBeNull();
+    expect(updatedRow).toBeNull();
   });
 
-  it("does not consult it during a rehearsal either", async () => {
+  it("asks during a rehearsal too, so the rehearsal shows the real flow", async () => {
+    owed = [{ versionId: "v1", documentType: "privacy_notice", content: "<p>Photos.</p>" }];
     const result = await scan({ testMode: true });
-    expect(gateCalls).toEqual([]);
-    expect(result.data?.state).toBe("valid");
-    expect(updatedRow?.check_in_is_test).toBe(true);
-  });
-
-  it("never emits legal_not_accepted", async () => {
-    for (const over of [{}, { testMode: true }]) {
-      const result = await scan(over);
-      expect(result.data?.state).not.toBe("legal_not_accepted");
-    }
+    expect(result.data?.state).toBe("legal_not_accepted");
   });
 });

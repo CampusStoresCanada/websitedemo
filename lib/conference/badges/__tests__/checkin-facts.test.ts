@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkInFactsFromRun, todayVerdict } from "../checkin";
+import { checkInFactsFromRun, openSeatsFromRun, todayVerdict, verdictForDay } from "../checkin";
 import type { BadgeRun } from "../run";
 
 /**
@@ -113,6 +113,18 @@ describe("checkInFactsFromRun", () => {
   });
 });
 
+describe("the CANCOLL pin at pickup", () => {
+  it("is for people from a CANCOLL school, and nobody else", () => {
+    const facts = checkInFactsFromRun(run(), new Map(), [], new Set(["org-Northern College"]));
+    expect(facts.p2.cancollPin).toBe(true);
+    expect(facts.p1.cancollPin).toBe(false);
+  });
+
+  it("goes to nobody when the school list is not known", () => {
+    expect(checkInFactsFromRun(run()).p2.cancollPin).toBe(false);
+  });
+});
+
 describe("todayVerdict", () => {
   const CONF_DATES = ["2027-02-02", "2027-02-03", "2027-02-04"];
   const on = (d: string) => new Date(`${d}T09:00:00`);
@@ -182,7 +194,7 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("variable_only");
+    expect(facts.p1.reprintStock).toBe("company_blank");
   });
 
   it("prints the whole card when every seat at that company is named", () => {
@@ -199,7 +211,7 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("full_badge");
+    expect(facts.p1.reprintStock).toBe("none");
   });
 
   it("does not let one company's blank cover another company's person", () => {
@@ -219,6 +231,87 @@ describe("reprint mode on the desk facts", () => {
         ],
       } as never)
     );
-    expect(facts.p1.reprintMode).toBe("full_badge");
+    expect(facts.p1.reprintStock).toBe("none");
+  });
+});
+
+/**
+ * ⛔ What the desk's company search offers a walk-up: seats their company holds
+ * with nobody named. Read from the same run the badges print from, so a seat
+ * the desk offers is a seat a blank was printed for.
+ */
+describe("openSeatsFromRun", () => {
+  it("lists only unnamed seats, with their company and registration type", () => {
+    const open = openSeatsFromRun(
+      run({
+        types: [
+          {
+            entityId: "type-full",
+            name: "Full Conference",
+            accessSummary: access(),
+            agenda: [],
+            seats: [
+              seat("s1", "Sundry Goods", { personId: "p1", firstName: "Ada", lastName: "L" }),
+              seat("s2", "Sundry Goods", null),
+            ],
+          },
+          {
+            entityId: "type-day",
+            name: "Day Pass",
+            accessSummary: access(),
+            agenda: [],
+            seats: [seat("s3", "Other Co", null)],
+          },
+        ],
+      } as never)
+    );
+    expect(open).toEqual([
+      {
+        seatId: "s2",
+        organizationId: "org-Sundry Goods",
+        organizationName: "Sundry Goods",
+        registrationTypeId: "type-full",
+        registrationTypeName: "Full Conference",
+        entityKind: "registration",
+      },
+      {
+        seatId: "s3",
+        organizationId: "org-Other Co",
+        organizationName: "Other Co",
+        registrationTypeId: "type-day",
+        registrationTypeName: "Day Pass",
+        entityKind: "registration",
+      },
+    ]);
+  });
+
+  it("offers nothing when every seat is named", () => {
+    expect(openSeatsFromRun(run())).toEqual([]);
+  });
+});
+
+/**
+ * ⛔ The day rule, which the desk card shows AND the scan enforces: on a
+ * conference day, a badge that does not cover it is refused (Stephen,
+ * 2026-10-19). Off conference days it says nothing.
+ */
+describe("verdictForDay", () => {
+  const conferenceDates = ["2027-02-02", "2027-02-03", "2027-02-04"];
+  const thursdayPass = ["2027-02-04"];
+
+  it("admits on a day the badge covers", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2027-02-04")).toEqual({ admitted: true });
+  });
+
+  it("refuses on a conference day the badge does not cover", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2027-02-02")).toEqual({ admitted: false });
+  });
+
+  it("says nothing on a day that is not a conference day", () => {
+    expect(verdictForDay(thursdayPass, conferenceDates, "2026-10-19")).toBeNull();
+  });
+
+  it("says nothing when it does not know the badge's days", () => {
+    expect(verdictForDay([], conferenceDates, "2027-02-02")).toBeNull();
   });
 });

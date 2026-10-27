@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   applyCanonicalConferencePersonIdentityEdit,
@@ -14,7 +14,8 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string; personId: string }> }
 ) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await context.params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
@@ -43,9 +44,12 @@ export async function PATCH(
   let payload: {
     op?: "update" | "manual_check_in" | "reprint_badge";
     testMode?: boolean;
+    /** The event a door device is checking in to (lib/conference/door.ts). */
+    entityId?: string | null;
     patch?: Record<string, unknown>;
     reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
     reprintNote?: string | null;
+    stockInHand?: string;
     transportMethod?: "pdf" | "printer_bridge";
     canonicalPatch?: {
       displayName?: string | null;
@@ -57,9 +61,11 @@ export async function PATCH(
     payload = (await request.json()) as {
       op?: "update" | "manual_check_in" | "reprint_badge";
       testMode?: boolean;
+      entityId?: string | null;
       patch?: Record<string, unknown>;
       reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
       reprintNote?: string | null;
+      stockInHand?: string;
       transportMethod?: "pdf" | "printer_bridge";
       canonicalPatch?: {
         displayName?: string | null;
@@ -74,6 +80,7 @@ export async function PATCH(
   if (payload.op === "manual_check_in") {
     const result = await markConferencePersonCheckedInManual(personId, {
       testMode: payload.testMode === true,
+      entityId: typeof payload.entityId === "string" ? payload.entityId : null,
     });
     if (!result.success) {
       const lowerError = result.error?.toLowerCase() ?? "";
@@ -113,7 +120,11 @@ export async function PATCH(
     const result = await reprintConferenceBadge(
       personId,
       payload.reprintReason,
-      payload.reprintNote ?? null
+      payload.reprintNote ?? null,
+      // Anything unrecognised is "did not say", which plans a full badge.
+      payload.stockInHand === "company_blank" || payload.stockInHand === "spare"
+        ? payload.stockInHand
+        : undefined
     );
     if (!result.success) {
       const lowerError = result.error?.toLowerCase() ?? "";

@@ -7,6 +7,7 @@ function seat(partial: Partial<SeatHolding> & { seatId: string }): SeatHolding {
     conferenceId: "conf",
     organizationId: "org",
     seatIndex: null,
+    balanceId: null,
     entityId: "type-delegate",
     entityKind: "registration",
     entityName: "Full Conference Registration",

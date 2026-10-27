@@ -75,6 +75,14 @@ export function badgeTokenMatches(token: string, storedHash: string): boolean {
  * and the behaviour is still being designed.
  */
 export function badgeScanUrl(token: string): string {
+  return `${publicScanBase()}${BADGE_SCAN_PATH}/${token}`;
+}
+
+/**
+ * The public site every printed code points at — badges and check-in cards.
+ * Refuses localhost for the same reason: paper outlives a dev server.
+ */
+export function publicScanBase(): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca").replace(/\/+$/, "");
   // A badge is permanent. Generating a print run against a dev environment would
   // put `http://localhost:3000/s/...` on every card, and no one would notice
@@ -87,7 +95,7 @@ export function badgeScanUrl(token: string): string {
       );
     }
   }
-  return `${base}${BADGE_SCAN_PATH}/${token}`;
+  return base;
 }
 
 /**

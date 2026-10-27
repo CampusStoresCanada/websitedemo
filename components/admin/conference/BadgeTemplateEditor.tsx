@@ -5698,8 +5698,11 @@ export default function BadgeTemplateEditor({
                           ? "This code identifies your badge for check-in and scanning on site."
                           : "Nothing extra"
                       }
+                      // ⛔ Not trimmed here: trimming on every keystroke ate each
+                      // space as it was typed, so no two words could be entered.
+                      // The badge trims when it renders (backBlockRows).
                       onChange={(event) =>
-                        updateSelectedBackBlock({ text: event.target.value.trim() || undefined })
+                        updateSelectedBackBlock({ text: event.target.value === "" ? undefined : event.target.value })
                       }
                       rows={2}
                       className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"

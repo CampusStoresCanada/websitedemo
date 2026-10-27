@@ -287,3 +287,36 @@ export function visibleNavGroups(
 
   return groups;
 }
+
+/**
+ * The conference pages desk staff reach without being global admins: they
+ * OPERATE a conference. Badges, catalogue, schedule ops and every other
+ * conference page are design work and stay admin-only.
+ *
+ * ⛔ The ONE list. The /admin gate admits on it and the conference sub-nav shows
+ * only these tabs to desk staff. Each page still runs
+ * requireConferenceDeskAccess itself — this list opens the door, it is not the
+ * lock.
+ */
+export const CONFERENCE_DESK_SEGMENTS = ["check-in", "war-room"] as const;
+
+/**
+ * The conference id when the path is one of its desk pages
+ * (/admin/conference/<id>/<desk page>[/...]), otherwise null.
+ */
+export function conferenceDeskPathId(pathname: string): string | null {
+  const match = /^\/admin\/conference\/([^/]+)\/([^/?#]+)/.exec(pathname);
+  if (!match) return null;
+  return (CONFERENCE_DESK_SEGMENTS as readonly string[]).includes(match[2]) ? match[1] : null;
+}
+
+/**
+ * The check-in desk itself: a full-screen kiosk with no site header, footer,
+ * admin sidebar, conference tabs or toolkit. Everything that frames a page
+ * steps aside for it. Also the door's printed list (`check-in/door-list`) and
+ * the check-in cards (`check-in/cards`): sheets of paper, which the admin frame
+ * would only print over.
+ */
+export function isCheckInDeskPath(pathname: string): boolean {
+  return /^\/admin\/conference\/[^/]+\/check-in(\/door-list|\/cards)?\/?$/.test(pathname);
+}

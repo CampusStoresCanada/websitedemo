@@ -65,6 +65,17 @@ export default async function BadgeScanPage({
 
   // Scanning your own badge records nothing: there is no second party, so no
   // relationship to observe and nothing for scoring to learn.
+  //
+  // ⛔ Both of these are DESTINATIONS a conference chose, not a hardcoded
+  // self-scan rule — any direction can be pointed at either. `me` is the
+  // default for scanning yourself because it is the one that can act: the
+  // account page carries what this person still owes and the extras their
+  // organisation can buy, and it links to the map. The map alone answers
+  // "where do I go" and nothing else.
+  if (outcome === "me") {
+    redirect("/me#conference_checklist");
+  }
+
   if (outcome === "map") {
     redirect(
       badge.conferenceYear && badge.conferenceEdition

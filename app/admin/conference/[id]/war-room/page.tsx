@@ -4,7 +4,7 @@ import {
   listConferencePeople,
   syncConferencePeopleIndex,
 } from "@/lib/actions/conference-people";
-import { isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import { isGlobalAdmin, requireConferenceDeskAccess } from "@/lib/auth/guards";
 import WarRoomClient from "@/components/admin/conference/WarRoomClient";
 import { revalidatePath } from "next/cache";
 
@@ -20,7 +20,8 @@ export default async function ConferenceWarRoomPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const auth = await requireConferenceOpsAccess();
+  const { id: deskConferenceId } = await params;
+  const auth = await requireConferenceDeskAccess(deskConferenceId);
   if (!auth.ok) {
     return (
       <main className="p-6 text-sm text-red-700">

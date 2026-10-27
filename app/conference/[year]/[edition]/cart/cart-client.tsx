@@ -16,7 +16,8 @@ import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
 import PersonPickerModal, { type PickablePerson } from "@/components/people/PersonPickerModal";
 
-type AttendeeRef = { name: string; email: string | null };
+/** contactId: the exact person picked — two people can share one email address. */
+type AttendeeRef = { name: string; email: string | null; contactId?: string | null };
 type OfferItem = {
   cartItemId: string;
   offerEntityId: string;

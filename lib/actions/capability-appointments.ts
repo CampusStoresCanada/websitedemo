@@ -87,6 +87,12 @@ export async function appointToCapability(input: {
   const admin = await requireAdmin();
   if (!admin.ok) return { success: false, error: admin.error };
 
+  // Desk staff are appointed from their conference (Days & Setup → Desk
+  // staff), never here: lib/actions/conference-desk-staff.ts.
+  if (input.capability === "conference.desk_staff") {
+    return { success: false, error: "Add desk staff from the conference's Days & Setup page." };
+  }
+
   if (!input.reason?.trim()) {
     // The reason is the whole audit trail. An appointment nobody can explain
     // later is one nobody can defend later.
@@ -265,7 +271,7 @@ export async function appointableCapabilities(): Promise<
     .eq("appointable", true)
     .order("capability");
 
-  return (data ?? []).map((r) => ({
+  return (data ?? []).filter((r) => r.capability !== "conference.desk_staff").map((r) => ({
     capability: r.capability as string,
     roleKey: r.role_key as string,
   }));

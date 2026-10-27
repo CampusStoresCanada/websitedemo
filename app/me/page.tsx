@@ -16,6 +16,8 @@ import DirectoryVisibilityPanel, { type VisibilityRow } from "@/components/me/Di
 import type { DirectoryVisibility } from "@/lib/contacts/visibility";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 import { loginWithNext } from "@/lib/auth/login-redirect";
+import { inForceOrgLinkFilter } from "@/lib/auth/org-link";
+import { deskConferencesFor } from "@/lib/conference/desk-staff";
 
 /**
  * Never cached. This page shows a person their own conference answers, and a
@@ -42,6 +44,7 @@ export default async function MyAccountPage() {
   const db = createAdminClient();
   const userId = auth.ctx.userId;
   const userEmail = auth.ctx.userEmail;
+  const deskConferences = await deskConferencesFor(userId);
 
   const [profileResult, orgResult, allContactsResult, pendingChangesResult, bookmarksResult] =
     await Promise.all([
@@ -50,7 +53,8 @@ export default async function MyAccountPage() {
         .from("user_organizations")
         .select("id, role, organization:organizations(id, name, slug, type, primary_category)")
         .eq("user_id", userId)
-        .eq("status", "active"),
+        .eq("status", "active")
+        .or(inForceOrgLinkFilter()),
       // Fetch all contact rows for this user across all orgs
       userEmail
         ? (db as any)
@@ -270,6 +274,22 @@ export default async function MyAccountPage() {
           )}
         </div>
       </div>
+
+      {/* Desk staff: the one way in for somebody who is not an admin. Shown only
+          while they hold a desk appointment for a conference today. */}
+      {deskConferences.map((desk) => (
+        <Link
+          key={desk.conferenceId}
+          href={`/admin/conference/${desk.conferenceId}/check-in`}
+          className="flex items-center justify-between gap-3 rounded-2xl border border-[#EE2A2E]/30 bg-[#fff1f1] p-5 hover:border-[#EE2A2E]/60 transition-colors"
+        >
+          <div>
+            <p className="text-sm font-semibold text-[#1A1A1A]">Check-in desk</p>
+            <p className="text-sm text-gray-600">You are on the desk for {desk.name} today.</p>
+          </div>
+          <span className="text-sm font-medium text-[#EE2A2E]">Open the desk →</span>
+        </Link>
+      ))}
 
       {/* Conference to-dos sit above the stat tiles: they are the only thing on
           this page with a deadline attached. */}

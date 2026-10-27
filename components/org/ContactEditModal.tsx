@@ -189,9 +189,12 @@ export default function ContactEditModal({
   // ── Shared state ───────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The email belongs to someone else here already: who is this? (Stephen's
+  // rules, project_shared_email_walkup_rules — a human chooses, never a guess.)
+  const [sharedWith, setSharedWith] = useState<Array<{ contactId: string; name: string }> | null>(null);
 
   // ── Details save ───────────────────────────────────────────────────────────
-  async function handleDetailsSave() {
+  async function handleDetailsSave(sharedAddress?: { contactId: string } | "new") {
     setSaving(true);
     setError(null);
 
@@ -211,8 +214,14 @@ export default function ContactEditModal({
         tags: selectedTags.size > 0 ? [...selectedTags] : undefined,
         invite: sendInvite && canInvite,
         inviteRole,
+        sharedAddress,
       });
       setSaving(false);
+      if (result.code === "SHARED_EMAIL" && result.sharedWith) {
+        setSharedWith(result.sharedWith);
+        return;
+      }
+      setSharedWith(null);
       if (!result.success || !result.contactId) {
         setError(result.error ?? "Failed to add contact.");
         return;
@@ -224,7 +233,11 @@ export default function ContactEditModal({
       // The contact exists either way. If we asked for a login and didn't get
       // one, stay open and say so — silently closing is how this went unnoticed
       // in the first place.
-      if (sendInvite && canInvite && result.invite.status !== "sent") {
+      // On a shared address the login stays with whoever holds it — expected,
+      // not a failure to report.
+      const loginBelongsToSomeoneElse =
+        result.invite.reason === "shared_address" || result.invite.reason === "existing_person";
+      if (sendInvite && canInvite && result.invite.status !== "sent" && !loginBelongsToSomeoneElse) {
         if (result.invite.status === "failed") {
           setError(`Contact added, but the invite failed: ${result.invite.reason}`);
           return;
@@ -239,7 +252,7 @@ export default function ContactEditModal({
         }
       }
 
-      onCreated?.({ id: result.contactId, name, email: fields.work_email.trim() || null });
+      onCreated?.({ id: result.contactId, name: result.name ?? name, email: fields.work_email.trim() || null });
       onClose();
       return;
     }
@@ -285,6 +298,22 @@ export default function ContactEditModal({
       window.dispatchEvent(new CustomEvent("csc:field-updated", {
         detail: { table: "contacts", column: "contact_type", entityId: contact.id },
       }));
+    }
+
+    // An email just added to someone with none (e.g. a walk-up named at the
+    // conference desk without one): stay open, because the login section
+    // below can now offer the invite. Closing here made the admin reopen the
+    // contact to find the button.
+    if (changed.includes("work_email") && !original.work_email.trim() && fields.work_email.trim()) {
+      const refreshed = await getContactLoginStatus(organizationId, contact.id);
+      setLoginStatus(refreshed.status ?? null);
+      setSaving(false);
+      if (refreshed.status && !refreshed.status.hasAccount && !refreshed.status.skipReason && !refreshed.status.loginHeldBy) {
+        setInviteNotice("Saved. Send the invite to give them a login.");
+        return;
+      }
+      onClose();
+      return;
     }
 
     setSaving(false);
@@ -570,6 +599,10 @@ export default function ContactEditModal({
                           ? `Has a login (${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"}).`
                           : `Invited as ${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"} — hasn't signed in yet.`}
                       </p>
+                    ) : loginStatus.loginHeldBy ? (
+                      <p className="text-xs text-gray-500 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
+                        No login of their own. This address&apos;s login belongs to {loginStatus.loginHeldBy}, who shares it.
+                      </p>
                     ) : loginStatus.skipReason ? (
                       <p className="text-xs text-gray-500 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
                         No login — {LOGIN_SKIP_MESSAGES[loginStatus.skipReason]}.
@@ -784,6 +817,37 @@ export default function ContactEditModal({
               </div>
             )}
           </div>
+
+          {sharedWith ? (
+            <div className="shrink-0 border-t border-amber-200 bg-amber-50 px-6 py-4">
+              <p className="text-sm font-medium text-[#1A1A1A]">
+                {fields.work_email.trim()} is already used by {sharedWith.map((m) => m.name).join(", ")}. Is this
+                one of them, or someone else who shares that address?
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {sharedWith.map((m) => (
+                  <button
+                    key={m.contactId}
+                    onClick={() => void handleDetailsSave({ contactId: m.contactId })}
+                    disabled={saving}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:border-gray-400 disabled:opacity-60"
+                  >
+                    It&apos;s {m.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => void handleDetailsSave("new")}
+                  disabled={saving}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:border-gray-400 disabled:opacity-60"
+                >
+                  Someone else, sharing the address
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-gray-600">
+                Someone else gets their own record. The login stays with whoever already has it.
+              </p>
+            </div>
+          ) : null}
 
           {/* Footer */}
           <div className="shrink-0 flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">

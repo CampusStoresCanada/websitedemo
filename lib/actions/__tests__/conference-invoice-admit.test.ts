@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   requireAuthenticatedMock,
-  requireConferenceOpsAccessMock,
+  requireConferenceDeskAccessMock,
   isGlobalAdminMock,
   createAdminClientMock,
   stripeInvoiceCreateMock,
@@ -40,7 +40,7 @@ const {
   resolveConferenceOrderTaxRatesMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
-  requireConferenceOpsAccessMock: vi.fn(),
+  requireConferenceDeskAccessMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
   createAdminClientMock: vi.fn(),
   stripeInvoiceCreateMock: vi.fn(),
@@ -63,8 +63,17 @@ const {
 
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
-  requireConferenceOpsAccess: requireConferenceOpsAccessMock,
+  requireConferenceDeskAccess: requireConferenceDeskAccessMock,
   isGlobalAdmin: isGlobalAdminMock,
+  // Mirrors the real rule over this file's mocks: global admin, member of the
+  // org, or conference ops.
+  requireOrgCommerceAccess: async (organizationId: string) => {
+    const auth = await requireAuthenticatedMock();
+    if (!auth.ok) return auth;
+    if (isGlobalAdminMock(auth.ctx.globalRole) || auth.ctx.activeOrgIds?.includes(organizationId)) return auth;
+    const ops = await requireConferenceDeskAccessMock();
+    return ops?.ok ? ops : { ok: false, status: 403, error: "You are not authorized to manage commerce for this organization." };
+  },
 }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMock }));
 vi.mock("@/lib/stripe/client", () => ({
@@ -101,6 +110,8 @@ vi.mock("@/lib/actions/conference-people", () => ({
 vi.mock("@/lib/actions/conference-entity-commerce", () => ({
   findExistingUserByEmail: findExistingUserByEmailMock,
 }));
+const { mintAttendeesMock } = vi.hoisted(() => ({ mintAttendeesMock: vi.fn(async () => undefined) }));
+vi.mock("../../conference/registration-mint", () => ({ mintRegistrationAttendeesFromOrder: mintAttendeesMock }));
 vi.mock("../../comms/conference-triggers", () => ({
   triggerConferenceRegistrationConfirmation: vi.fn(),
   triggerConferencePaymentConfirmation: vi.fn(),
@@ -162,7 +173,7 @@ beforeEach(() => {
     ok: true,
     ctx: { userId: "staff-1", userEmail: "desk@campusstores.ca", globalRole: "member", activeOrgIds: ["org-1"] },
   });
-  requireConferenceOpsAccessMock.mockResolvedValue({ ok: true });
+  requireConferenceDeskAccessMock.mockResolvedValue({ ok: true });
   isGlobalAdminMock.mockReturnValue(false);
   canBuyMock.mockReturnValue({ ok: true });
   priceForTierMock.mockReturnValue(29_900);
@@ -186,7 +197,7 @@ describe("invoicing at the desk — who may, and what it grants", () => {
     // An org admin buying for their OWN org passes assertUserCanManageOrg. The
     // deferral decision is a separate right, and this is a server action whose
     // arguments are attacker-controlled from the public cart page.
-    requireConferenceOpsAccessMock.mockResolvedValue({ ok: false, error: "nope" });
+    requireConferenceDeskAccessMock.mockResolvedValue({ ok: false, error: "nope" });
     const { db, rpc } = makeFakeDb(invoiceQueues(), ORDER_RPC);
     createAdminClientMock.mockReturnValue(db);
 
@@ -215,6 +226,17 @@ describe("invoicing at the desk — who may, and what it grants", () => {
     // ⚠️ And ONLY the v3 mint — the order stays honestly unpaid. Flipping it to
     // paid here would book money nobody has received.
     expect(rpc).not.toHaveBeenCalledWith("process_conference_order_paid", expect.anything());
+  });
+
+  // ⛔ An unnamed seat has no badge. The walk-up the desk just invoiced is named
+  // now, while they are standing there — not when their company pays.
+  it("names the attendees when the invoice is sent", async () => {
+    const { db } = makeFakeDb(invoiceQueues(), ORDER_RPC);
+    createAdminClientMock.mockReturnValue(db);
+
+    await createConferenceCheckout(INVOICE_INPUT);
+
+    expect(mintAttendeesMock).toHaveBeenCalledWith(db, "order-1", INVOICE_INPUT.conferenceId, INVOICE_INPUT.organizationId);
   });
 
   it("⛔ releases the reservation hold, so the expiry cron cannot cancel it", async () => {

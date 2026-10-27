@@ -89,6 +89,8 @@ export type TemplateKey =
   | "conference_reminder"
   | "conference_waitlist_approved"
   | "conference_checklist_reminder"
+  /** A walk-up named at the check-in desk without an email: no login. Tells their org admins. */
+  | "conference_walkup_without_email"
   // Sent to ONE person about their own listing — never to their org admin.
   | "directory_visibility_ask"
   // Benchmarking. Transactional: the survey is a membership obligation and a
