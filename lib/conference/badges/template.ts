@@ -1012,6 +1012,33 @@ export function resolveBadgeVariant(
 }
 
 /**
+ * A layout for every variant the template has, seeded from the base where one
+ * is missing. Four separate places used to hand-build `{delegate, exhibitor}`
+ * here; each of them silently dropped every registration-type layout.
+ *
+ * ⛔ Every STORED layout is kept, not only the variants with a colour theme.
+ * Keying this on `variants` alone dropped every type designed without its own
+ * colours the moment the editor opened, and the next save wrote Default over
+ * them. CANCOLL's corner text vanished that way (2026-10-27).
+ */
+export function seedLayoutsFor(
+  config: BadgeTemplateConfigV1,
+  extraKeys: string[] = []
+): NonNullable<BadgeTemplateConfigV1["variantLayouts"]> {
+  const out: NonNullable<BadgeTemplateConfigV1["variantLayouts"]> = {};
+  const keys = [DEFAULT_VARIANT, ...Object.keys(config.variants), ...Object.keys(config.variantLayouts ?? {}), ...extraKeys];
+  for (const key of new Set(keys)) {
+    out[key] = structuredClone(
+      config.variantLayouts?.[key] ?? {
+        front: config.front,
+        back: config.back,
+      }
+    );
+  }
+  return out;
+}
+
+/**
  * What a registration type's badge LOOKS like — front design and colour theme —
  * as a comparable key. Two types with the same key print identical cards, so
  * one spare stack fits both (print-stock.ts spareStacks).

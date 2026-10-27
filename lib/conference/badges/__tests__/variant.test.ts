@@ -3,6 +3,7 @@ import {
   DEFAULT_VARIANT,
   normalizeBadgeTemplateConfig,
   resolveBadgeVariant,
+  seedLayoutsFor,
 } from "../template";
 
 /**
@@ -104,5 +105,22 @@ describe("normalizeBadgeTemplateConfig", () => {
     expect(t.variantLayouts?.exhibitor?.front.offsetX).toBe(9);
     // `delegate` is not carried forward under its old name — it IS the default.
     expect(t.variantLayouts?.delegate).toBeUndefined();
+  });
+});
+
+// ⛔ What the editor opens with. Keying it on colour themes alone dropped every
+// type designed without its own colours, and the next save wrote Default over
+// them (CANCOLL's corner text, 2026-10-27).
+describe("seedLayoutsFor", () => {
+  it("keeps a type's layout that has no colour theme of its own", () => {
+    const text = { id: "t1", text: "CANCOLL", x: 113, y: 1455, width: 270, sizePt: 10, family: "primary", weight: 700, opacity: 1 };
+    const t = cfg({ variantLayouts: { [ONE_DAY]: { front: { textLayers: [text] } } } });
+    expect(Object.keys(t.variants)).not.toContain(ONE_DAY);
+    expect(seedLayoutsFor(t)[ONE_DAY]?.front.textLayers).toEqual([text]);
+  });
+
+  it("seeds a type nobody designed from the base", () => {
+    const t = cfg({});
+    expect(seedLayoutsFor(t, [FOUR_DAY])[FOUR_DAY]?.front).toEqual(t.front);
   });
 });

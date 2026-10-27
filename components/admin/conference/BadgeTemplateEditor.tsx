@@ -18,7 +18,7 @@ import type {
   BadgeTextBindingKey,
   BadgeTemplateConfigV1,
 } from "@/lib/conference/badges/template";
-import { DEFAULT_VARIANT, normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
+import { DEFAULT_VARIANT, normalizeBadgeTemplateConfig, seedLayoutsFor } from "@/lib/conference/badges/template";
 import { designPxFromPt, fitTextLayout, slotHeightDesignPx } from "@/lib/conference/badges/text-fit";
 
 type Props = {
@@ -232,26 +232,6 @@ function cloneDeep<T>(value: T): T {
     return globalThis.structuredClone(value);
   }
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-/**
- * A layout for every variant the template has, seeded from the base where one
- * is missing. Four separate places used to hand-build `{delegate, exhibitor}`
- * here; each of them silently dropped every registration-type layout.
- */
-function seedLayoutsFor(
-  config: BadgeTemplateConfigV1,
-  extraKeys: string[] = []
-): NonNullable<BadgeTemplateConfigV1["variantLayouts"]> {
-  const out: NonNullable<BadgeTemplateConfigV1["variantLayouts"]> = {};
-  for (const key of new Set([DEFAULT_VARIANT, ...Object.keys(config.variants), ...extraKeys])) {
-    out[key] =
-      config.variantLayouts?.[key] ?? {
-        front: cloneDeep(config.front),
-        back: cloneDeep(config.back),
-      };
-  }
-  return out;
 }
 
 export default function BadgeTemplateEditor({
