@@ -294,7 +294,15 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
  * against it — they cannot disagree.
  */
 export const PERSON_CHECKS_BULK: Partial<
-  Record<CheckType, (args: { db: AdminClient; conferenceId: string }) => Promise<Set<string>>>
+  Record<
+    CheckType,
+    (args: {
+      db: AdminClient;
+      conferenceId: string;
+      /** The task's `check_entity_id`, for a check about one particular thing. */
+      entityId?: string | null;
+    }) => Promise<Set<string>>
+  >
 > = {
   /**
    * Which contacts have told us who they want to meet.
@@ -326,6 +334,55 @@ export const PERSON_CHECKS_BULK: Partial<
         .filter((id): id is string => Boolean(id))
     );
   },
+
+  /**
+   * Which contacts have accepted ONE document: the task's `check_entity_id`
+   * names its policy entity, and only that document's newest version counts.
+   *
+   * The org-grain version asks "has everyone at this company accepted
+   * everything", which is a company question. This one exists for a document
+   * a single person must agree to themselves, today the CANCOLL information
+   * sharing consent, which is asked only on that delegate's own checklist and
+   * is deliberately not linked to their registration (so it is not raised at
+   * seat claim, on the welcome page or at the check-in desk).
+   *
+   * Keyed on acceptance by the person's own login, mapped to their contact
+   * through conference_people, the same row their checklist is loaded from.
+   * A task with no document named can be seen by nobody, so nobody passes it.
+   */
+  async legal_document_accepted({ db, conferenceId, entityId }) {
+    if (!entityId) return new Set();
+    const { data: version } = await db
+      .from("conference_legal_versions")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("policy_entity_id", entityId)
+      .lte("effective_at", new Date().toISOString())
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!version) return new Set();
+
+    const { data: accepted } = await db
+      .from("legal_acceptances")
+      .select("user_id")
+      .eq("legal_version_id", version.id);
+    const userIds = [...new Set((accepted ?? []).map((a) => a.user_id))];
+    if (userIds.length === 0) return new Set();
+
+    const { data: people } = await db
+      .from("conference_people")
+      .select("contact_id, canonical_person_id")
+      .eq("conference_id", conferenceId)
+      .in("user_id", userIds);
+    // contact_id first, canonical_person_id has no FK. Same precedence as
+    // loadPersonalTasks, which is what the result is matched against.
+    return new Set(
+      (people ?? [])
+        .map((p) => (p.contact_id as string | null) || (p.canonical_person_id as string | null))
+        .filter((id): id is string => Boolean(id))
+    );
+  },
 };
 
 /**
@@ -339,11 +396,12 @@ export async function evaluatePersonChecklistTaskCheck(
   db: AdminClient,
   checkType: CheckType,
   conferenceId: string,
-  contactId: string
+  contactId: string,
+  entityId: string | null = null
 ): Promise<boolean | null> {
   const check = PERSON_CHECKS_BULK[checkType];
   if (!check) return null;
-  return (await check({ db, conferenceId })).has(contactId);
+  return (await check({ db, conferenceId, entityId })).has(contactId);
 }
 
 export async function evaluateChecklistTaskCheck(

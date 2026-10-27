@@ -3244,6 +3244,62 @@ export type Database = {
           },
         ]
       }
+      circle_space_rules: {
+        Row: {
+          conference_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          label: string
+          last_run: Json | null
+          last_run_at: string | null
+          pass_entity_ids: string[] | null
+          space_id: number
+          survey_field: string | null
+          survey_value: string | null
+          updated_at: string
+        }
+        Insert: {
+          conference_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          label: string
+          last_run?: Json | null
+          last_run_at?: string | null
+          pass_entity_ids?: string[] | null
+          space_id: number
+          survey_field?: string | null
+          survey_value?: string | null
+          updated_at?: string
+        }
+        Update: {
+          conference_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          label?: string
+          last_run?: Json | null
+          last_run_at?: string | null
+          pass_entity_ids?: string[] | null
+          space_id?: number
+          survey_field?: string | null
+          survey_value?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "circle_space_rules_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       circle_sync_queue: {
         Row: {
           attempts: number

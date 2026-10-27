@@ -282,11 +282,20 @@ export class CircleAdminClient {
   // ---- Spaces -------------------------------------------------------------
 
   async listSpaces(): Promise<CircleSpace[]> {
-    const result = await this.request<{ records: CircleSpace[] }>(
-      "GET",
-      "/spaces"
-    );
-    return result.records ?? (Array.isArray(result) ? result : []);
+    const spaces: CircleSpace[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.request<{ records: CircleSpace[]; has_next_page?: boolean }>(
+        "GET",
+        "/spaces",
+        { params: { per_page: 100, page } }
+      );
+      const records = result.records ?? [];
+      spaces.push(...records);
+      if (!result.has_next_page || records.length === 0) break;
+      page++;
+    }
+    return spaces;
   }
 
   /**

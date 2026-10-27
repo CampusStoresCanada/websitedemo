@@ -223,6 +223,11 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "SSO cutover controls, member mapping, and sync status.",
       },
       {
+        href: "/admin/circle/spaces",
+        label: "Circle Spaces",
+        description: "Choose which private Circle spaces stay in step with conference passes or survey answers.",
+      },
+      {
         href: "/admin/content",
         label: "Site Content",
         description: "Manage board/staff listings and public website content.",
