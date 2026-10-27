@@ -157,7 +157,9 @@ export async function resolveBoothScan(suiteId: string, userId: string, now: Dat
       .from("conference_check_in_events")
       .select("person_id, confirmed_by")
       .eq("schedule_id", assignment.scheduleId)
-      .eq("is_test", false);
+      .eq("is_test", false)
+      // Scans only: a staff ruling belongs to staff views (schedule-ops).
+      .in("confirmed_by", ["attendee", "exhibitor"]);
     const confirmations = rows ?? [];
 
     if (agenda.data.meetingSeatId && agenda.data.meetingSeatId === assignment.exhibitorSeatId) {

@@ -11,7 +11,9 @@ import { computeCoverage, type MatrixParticipant, type ScheduleMatrixData } from
 import {
   clearMeetingAssignment,
   setMeetingAssignment,
+  setMeetingRuling,
 } from "@/lib/actions/conference-schedule-assign";
+import type { MeetingRuling } from "@/lib/conference/schedule-ops";
 import Modal from "@/components/ui/Modal";
 import ConfirmAction, { type ConfirmActionResult } from "@/components/ui/ConfirmAction";
 
@@ -309,7 +311,7 @@ function GridLens({
                         {/* Did it happen? From the booth's check-in card. A
                             meeting with no scan is unconfirmed — Stephen's
                             no-show, without a separate state. */}
-                        {assignment.confirmation ? (
+                        {assignment.confirmation && assignment.confirmation.confirmedPersonIds.length > 0 ? (
                           <span
                             className="rounded bg-emerald-600 px-1 text-[9px] font-semibold uppercase text-white"
                             title={`Confirmed by ${[
@@ -821,11 +823,14 @@ function CellEditor({
   // ⛔ In the live schedule an edit is a change to somebody's day: asked twice,
   // and it says nobody is told (no email goes out after a hand edit).
   const liveNote = live ? " This is the live schedule; nobody is emailed about the change." : "";
+  // A ruling keeps the editor open (a meeting can have several delegates); the
+  // grid reloads when it closes.
+  const [ruled, setRuled] = useState(false);
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={() => (ruled ? onSaved() : onClose())}
       title={`Suite ${cell.suiteNumber} · Day ${cell.dayNumber} · Slot ${cell.slotNumber}`}
       footer={
         <div className="flex w-full items-start justify-between gap-2">
@@ -933,7 +938,112 @@ function CellEditor({
             {error && <p className="text-xs text-red-600">{error}</p>}
           </div>
         )}
+        {live && cell.assignment && cell.assignment.delegateSeatIds.length > 0 ? (
+          <MeetingAttendance
+            conferenceId={conferenceId}
+            assignment={cell.assignment}
+            onRuled={() => setRuled(true)}
+          />
+        ) : null}
     </Modal>
+  );
+}
+
+const RULING_WORDS: Record<MeetingRuling, string> = {
+  attended: "Attended",
+  absent: "Absent",
+  excused: "Excused",
+};
+
+/**
+ * Did each delegate attend? The booth card's scans say so first; staff rule
+ * where they cannot: absent, or excused when the partner or CSC did not show
+ * (CANCOLL MOU 8.6). Staff only: never shown to other members (MOU 12.6).
+ */
+function MeetingAttendance({
+  conferenceId,
+  assignment,
+  onRuled,
+}: {
+  conferenceId: string;
+  assignment: ScheduleOpsAssignment;
+  onRuled: () => void;
+}) {
+  const [rulings, setRulings] = useState(assignment.confirmation?.rulings ?? {});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busySeat, setBusySeat] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const scanned = new Set(
+    (assignment.confirmation?.confirmedPersonIds ?? []).filter((id) => !assignment.confirmation?.rulings[id])
+  );
+
+  async function rule(seatId: string, personId: string, ruling: MeetingRuling) {
+    setBusySeat(seatId);
+    setError(null);
+    const note = notes[seatId]?.trim() || null;
+    const res = await setMeetingRuling(conferenceId, {
+      scheduleId: assignment.id,
+      delegateSeatId: seatId,
+      ruling,
+      note,
+    });
+    setBusySeat(null);
+    if (!res.success) return setError(res.error);
+    setRulings((prev) => ({ ...prev, [personId]: { ruling, note } }));
+    onRuled();
+  }
+
+  return (
+    <div className="border-t border-gray-100 px-4 py-3">
+      <p className="text-xs font-medium text-gray-700">Attendance</p>
+      <ul className="mt-2 space-y-2">
+        {assignment.delegateSeatIds.map((seatId, i) => {
+          const personId = assignment.delegatePersonIds[i];
+          const ruling = personId ? rulings[personId] : undefined;
+          const state = ruling
+            ? `${RULING_WORDS[ruling.ruling]}, ruled by staff${ruling.note ? `: ${ruling.note}` : ""}`
+            : personId && scanned.has(personId)
+              ? "Attended: scanned the booth card"
+              : "Not confirmed yet";
+          return (
+            <li key={seatId} className="text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="font-medium text-gray-900">{assignment.delegateNames[i]}</span>
+                  <span className="ml-2 text-gray-500">{state}</span>
+                </div>
+                {personId ? (
+                  <div className="flex gap-1">
+                    {(Object.keys(RULING_WORDS) as MeetingRuling[]).map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        disabled={busySeat === seatId || ruling?.ruling === key}
+                        onClick={() => void rule(seatId, personId, key)}
+                        className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                      >
+                        {RULING_WORDS[key]}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-gray-400">Nobody named on this seat</span>
+                )}
+              </div>
+              {personId ? (
+                <input
+                  value={notes[seatId] ?? ""}
+                  onChange={(e) => setNotes((prev) => ({ ...prev, [seatId]: e.target.value }))}
+                  placeholder="Note (optional): e.g. the partner did not show"
+                  className="mt-1 w-full rounded border border-gray-200 px-2 py-1 text-[11px]"
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+    </div>
   );
 }
 

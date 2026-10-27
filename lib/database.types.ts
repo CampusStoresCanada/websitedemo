@@ -3992,6 +3992,8 @@ export type Database = {
           is_test: boolean
           person_id: string | null
           result_state: string
+          ruling: string | null
+          ruling_note: string | null
           scan_token_id: string | null
           schedule_id: string | null
         }
@@ -4008,6 +4010,8 @@ export type Database = {
           is_test?: boolean
           person_id?: string | null
           result_state: string
+          ruling?: string | null
+          ruling_note?: string | null
           scan_token_id?: string | null
           schedule_id?: string | null
         }
@@ -4024,6 +4028,8 @@ export type Database = {
           is_test?: boolean
           person_id?: string | null
           result_state?: string
+          ruling?: string | null
+          ruling_note?: string | null
           scan_token_id?: string | null
           schedule_id?: string | null
         }

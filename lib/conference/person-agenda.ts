@@ -387,6 +387,8 @@ export async function loadPersonAgenda(
             .from("conference_check_in_events")
             .select("schedule_id, confirmed_by, person_id")
             .eq("is_test", false)
+            // Scans only: a staff ruling is never shown to the person (CANCOLL MOU 12.6).
+            .in("confirmed_by", ["attendee", "exhibitor"])
             .in("schedule_id", scheduleIds);
           return isExhibitor ? q : q.eq("person_id", personId);
         })()

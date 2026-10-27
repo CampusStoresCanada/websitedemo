@@ -3,6 +3,8 @@
 import { requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { loadSeatHoldings } from "@/lib/conference/seats";
+import type { MeetingRuling } from "@/lib/conference/schedule-ops";
 
 /**
  * Manual per-cell overrides on the meeting grid (War Room, Meetings). Writes directly to the
@@ -189,6 +191,67 @@ export async function clearMeetingAssignment(
     actorId: auth.ctx.userId,
     actorType: "user",
     details: { conferenceId, runId: input.runId, meetingSlotId: input.meetingSlotId },
+  });
+  return { success: true, data: null };
+}
+
+const MEETING_RULINGS: readonly MeetingRuling[] = ["attended", "absent", "excused"];
+
+/**
+ * Staff's word on whether one delegate attended one meeting: attended, absent,
+ * or excused when the partner or CSC did not show (CANCOLL MOU 8.6). One more
+ * row in the record the check-in cards write; the newest ruling wins over the
+ * scans (loadMeetingConfirmations). A correction is another ruling, so the
+ * history stays.
+ */
+export async function setMeetingRuling(
+  conferenceId: string,
+  input: { scheduleId: string; delegateSeatId: string; ruling: MeetingRuling; note?: string | null }
+): Promise<Result<null>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!MEETING_RULINGS.includes(input.ruling)) return { success: false, error: "Unknown outcome." };
+
+  const db = createAdminClient();
+  const { data: schedule, error: scheduleError } = await db
+    .from("schedules")
+    .select("id, delegate_seat_ids, status")
+    .eq("id", input.scheduleId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  if (scheduleError || !schedule) return { success: false, error: "Meeting not found." };
+  if (schedule.status === "canceled") {
+    return { success: false, error: "This meeting was cancelled, so nobody missed it." };
+  }
+  if (!(schedule.delegate_seat_ids ?? []).includes(input.delegateSeatId)) {
+    return { success: false, error: "That delegate is not in this meeting." };
+  }
+
+  const { seats } = await loadSeatHoldings(db, { conferenceId, seatIds: [input.delegateSeatId] });
+  const personId = seats[0]?.holderPersonId;
+  if (!personId) return { success: false, error: "Nobody is named on that seat." };
+
+  const note = input.note?.trim() || null;
+  const { error } = await db.from("conference_check_in_events").insert({
+    conference_id: conferenceId,
+    person_id: personId,
+    schedule_id: input.scheduleId,
+    confirmed_by: "staff",
+    ruling: input.ruling,
+    ruling_note: note,
+    checked_in_by: auth.ctx.userId,
+    check_in_source: "manual",
+    result_state: "valid",
+  });
+  if (error) return { success: false, error: error.message };
+
+  await logAuditEventSafe({
+    action: "schedule_meeting_ruling",
+    entityType: "schedule",
+    entityId: input.scheduleId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId, personId, ruling: input.ruling, note },
   });
   return { success: true, data: null };
 }
