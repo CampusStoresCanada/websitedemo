@@ -114,8 +114,18 @@ export async function loadMeetingCandidates(
 
   const { data: orgRows } = await db
     .from("organizations")
-    .select("id, primary_category, procurement_info")
+    .select("id, primary_category, procurement_info, is_test")
     .in("id", orgIds.length > 0 ? orgIds : ["00000000-0000-0000-0000-000000000000"]);
+
+  /**
+   * A test organization is in no meeting. Its seats are real rows (test buyers
+   * exercise checkout), but a schedule reaches real suites and real inboxes, so
+   * they never enter the list the scheduler, the grid and Publish all read.
+   */
+  const testOrgIds = new Set<string>();
+  for (const row of orgRows ?? []) {
+    if (row.is_test === true) testOrgIds.add(row.id as string);
+  }
 
   /**
    * Match signal comes from the ORG's standing procurement profile, not from a
@@ -361,7 +371,7 @@ export async function loadMeetingCandidates(
      * WHICH SIDE they sit on is the separate, already-solved question:
      * ownership-gate's "does this type require owning a booth".
      */
-    if (!participatesInMeetings(seat.entityId)) {
+    if (testOrgIds.has(seat.organizationId) || !participatesInMeetings(seat.entityId)) {
       notMatchable.push(seat.seatId);
       continue;
     }
