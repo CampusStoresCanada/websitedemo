@@ -3246,6 +3246,7 @@ export type Database = {
       }
       circle_space_rules: {
         Row: {
+          body_key: string | null
           conference_id: string | null
           created_at: string
           created_by: string | null
@@ -3253,14 +3254,18 @@ export type Database = {
           kind: string
           label: string
           last_run: Json | null
+          destination: string
+          google_group_email: string | null
           last_run_at: string | null
           pass_entity_ids: string[] | null
-          space_id: number
+          role_key: string | null
+          space_id: number | null
           survey_field: string | null
           survey_value: string | null
           updated_at: string
         }
         Insert: {
+          body_key?: string | null
           conference_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -3268,14 +3273,18 @@ export type Database = {
           kind: string
           label: string
           last_run?: Json | null
+          destination?: string
+          google_group_email?: string | null
           last_run_at?: string | null
           pass_entity_ids?: string[] | null
-          space_id: number
+          role_key?: string | null
+          space_id?: number | null
           survey_field?: string | null
           survey_value?: string | null
           updated_at?: string
         }
         Update: {
+          body_key?: string | null
           conference_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -3283,9 +3292,12 @@ export type Database = {
           kind?: string
           label?: string
           last_run?: Json | null
+          destination?: string
+          google_group_email?: string | null
           last_run_at?: string | null
           pass_entity_ids?: string[] | null
-          space_id?: number
+          role_key?: string | null
+          space_id?: number | null
           survey_field?: string | null
           survey_value?: string | null
           updated_at?: string

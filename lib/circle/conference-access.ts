@@ -30,13 +30,20 @@ import { enqueueCircleSync } from "@/lib/circle/sync";
 import { loadSeatHoldings, type SeatHolding } from "@/lib/conference/seats";
 import {
   parseRuleRow,
+  ruleDestination,
   SPACE_RULE_COLUMNS,
   type ConferencePassRule,
+  type GovernanceRoleRule,
   type RuleLastRun,
   type SpaceRule,
   type SpaceRuleRow,
   type SurveyAnswerRule,
 } from "@/lib/circle/space-rules";
+import {
+  addGroupMember,
+  listGroupMembers,
+  workspaceConfigured,
+} from "@/lib/google/directory";
 
 export type HolderContact = { contactId: string; email: string; circleId: string };
 
@@ -183,6 +190,15 @@ async function syncOneSpace(
 ): Promise<void> {
   const { db, client, bucket, result } = ctx;
   const where = `${source} / ${rule.label}`;
+
+  // ⚠️ spaceId became nullable when rules gained a destination — a Google
+  // group rule has no space. This function is Circle-only, so it narrows once
+  // here rather than asserting at each of the nine uses below.
+  const spaceId = rule.spaceId;
+  if (spaceId === null) {
+    await failRule(ctx, rule, `${where}: no Circle space on a rule the Circle job was given`);
+    return;
+  }
   const wanted: HolderContact[] = [];
   let noCircleAccount = 0;
   for (const id of qualifying) {
@@ -193,7 +209,7 @@ async function syncOneSpace(
 
   let roster: Set<string>;
   try {
-    roster = new Set((await client.listSpaceMemberIds(rule.spaceId)).map(String));
+    roster = new Set((await client.listSpaceMemberIds(spaceId)).map(String));
   } catch (e) {
     // Never diff against a roster we could not read: it would re-add everyone.
     await failRule(ctx, rule, `${where}: roster read failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -204,13 +220,13 @@ async function syncOneSpace(
     .from("circle_sync_queue")
     .select("idempotency_key")
     .eq("status", "completed")
-    .like("idempotency_key", `conf-space-%-${rule.spaceId}-%`)
+    .like("idempotency_key", `conf-space-%-${spaceId}-%`)
     .order("created_at", { ascending: true });
   if (oursErr) {
     await failRule(ctx, rule, `${where}: could not read past adds: ${oursErr.message}`);
     return;
   }
-  const addedIds = [...contactsWeAdded(ours ?? [], rule.spaceId)];
+  const addedIds = [...contactsWeAdded(ours ?? [], spaceId)];
   const added = await loadContacts(db, addedIds);
   if (typeof added === "string") {
     await failRule(ctx, rule, `${where}: could not load past adds: ${added}`);
@@ -228,7 +244,7 @@ async function syncOneSpace(
     .select("entity_id")
     .eq("status", "failed")
     .eq("operation", "add_to_space")
-    .like("idempotency_key", `conf-space-add-${rule.spaceId}-%`)
+    .like("idempotency_key", `conf-space-add-${spaceId}-%`)
     .gte("created_at", since);
   if (refusedErr) {
     await failRule(ctx, rule, `${where}: could not read recent refusals: ${refusedErr.message}`);
@@ -242,8 +258,8 @@ async function syncOneSpace(
       operation: "add_to_space",
       entityType: "contact",
       entityId: w.contactId,
-      payload: { spaceId: rule.spaceId, email: w.email },
-      idempotencyKey: addKey(rule.spaceId, w.contactId, bucket),
+      payload: { spaceId: spaceId, email: w.email },
+      idempotencyKey: addKey(spaceId, w.contactId, bucket),
     });
   }
   for (const r of toRemove) {
@@ -251,8 +267,8 @@ async function syncOneSpace(
       operation: "remove_from_space",
       entityType: "contact",
       entityId: r.contactId,
-      payload: { spaceId: rule.spaceId, email: r.email },
-      idempotencyKey: removeKey(rule.spaceId, r.contactId, bucket),
+      payload: { spaceId: spaceId, email: r.email },
+      idempotencyKey: removeKey(spaceId, r.contactId, bucket),
     });
   }
 
@@ -264,7 +280,7 @@ async function syncOneSpace(
     waitingOnInvite: diffAdds.length - toAdd.length,
     queuedRemoves: toRemove.length,
   };
-  result.spaces.push({ conference: source, label: rule.label, spaceId: rule.spaceId, ...counts });
+  result.spaces.push({ conference: source, label: rule.label, spaceId: spaceId, ...counts });
   await recordRun(ctx, rule, counts);
 }
 
@@ -394,19 +410,121 @@ async function syncConferenceSpaces(ctx: Ctx, rules: ConferencePassRule[]): Prom
   }
 }
 
+/**
+ * A governance_role rule pointed at a Google group.
+ *
+ * ⛔ ADD-ONLY, and the institutional address only. Two deliberate limits:
+ *
+ *  - Circle knows what it added from its own queue's idempotency keys. There
+ *    is no such ledger for Google, and inventing a second provenance
+ *    mechanism to justify automatic removals is not worth it for a board
+ *    mailing list. Anybody who should no longer be there is COUNTED and
+ *    reported; taking them out stays a person's act, same as Circle.
+ *  - board@campusstores.ca currently holds most directors twice, once on
+ *    their institutional address and once on an @campusstores.ca alias. The
+ *    alias half is being retired, nothing in contacts records the mapping,
+ *    and the two do not derive from each other (tlinden@stfx.ca is
+ *    patricia.linden-teasdale@). So an alias is never added and never
+ *    counted as missing.
+ */
+async function syncGovernanceGroup(
+  db: Db,
+  rule: GovernanceRoleRule,
+  groupEmail: string,
+  result: { errors: string[] }
+): Promise<void> {
+  const { data: body } = await db
+    .from("governance_bodies")
+    .select("id")
+    .eq("key", rule.bodyKey)
+    .maybeSingle();
+  if (!body) {
+    await db
+      .from("circle_space_rules")
+      .update({ last_run: { error: `no governance body "${rule.bodyKey}"` }, last_run_at: new Date().toISOString() })
+      .eq("id", rule.id);
+    result.errors.push(`${rule.label}: no governance body "${rule.bodyKey}"`);
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: holders } = await db
+    .from("governance_role_assignments")
+    .select("person_contact_id, contacts(email)")
+    .eq("body_id", body.id)
+    .eq("role_key", rule.roleKey)
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  const wanted = new Set(
+    (holders ?? [])
+      .map((h) => (h.contacts as { email?: string } | null)?.email?.toLowerCase())
+      .filter((e): e is string => Boolean(e))
+  );
+
+  let current: { email: string; role: string }[];
+  try {
+    current = await listGroupMembers(groupEmail);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await db
+      .from("circle_space_rules")
+      .update({ last_run: { error: `member list failed: ${message}` }, last_run_at: new Date().toISOString() })
+      .eq("id", rule.id);
+    result.errors.push(`${rule.label}: ${message}`);
+    return;
+  }
+
+  const present = new Set(current.map((m) => m.email));
+  const toAdd = [...wanted].filter((e) => !present.has(e));
+
+  // Counted, never acted on: an alias is out of scope, and anybody else in
+  // the group was put there by a person.
+  const aliasDomain = "@campusstores.ca";
+  const shouldNotBeThere = current.filter(
+    (m) => !wanted.has(m.email) && !m.email.endsWith(aliasDomain) && m.role === "MEMBER"
+  ).length;
+
+  let added = 0;
+  const failures: string[] = [];
+  for (const email of toAdd) {
+    try {
+      await addGroupMember(groupEmail, email);
+      added++;
+    } catch (e) {
+      failures.push(`${email}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  await db
+    .from("circle_space_rules")
+    .update({
+      last_run: {
+        holders: wanted.size,
+        inSpace: present.size,
+        queuedAdds: added,
+        queuedRemoves: shouldNotBeThere,
+        ...(failures.length ? { error: failures.join("; ") } : {}),
+      },
+      last_run_at: new Date().toISOString(),
+    })
+    .eq("id", rule.id);
+
+  if (failures.length) result.errors.push(`${rule.label}: ${failures.join("; ")}`);
+}
+
 export async function runConferenceCircleAccessSync(): Promise<{
   spaces: SpaceResult[];
   errors: string[];
 }> {
   const result = { spaces: [] as SpaceResult[], errors: [] as string[] };
-  if (!isCircleConfigured()) return result;
-  const client = getCircleClient();
-  if (!client) return result;
-
   const db = createAdminClient();
-  // Hour bucket: a pending job blocks a duplicate within the hour, but a person
-  // removed and later re-added can still be queued again.
-  const ctx: Ctx = { db, client, bucket: new Date().toISOString().slice(0, 13), result };
+
+  // ⚠️ The Circle guard used to sit at the top and return. It now wraps only
+  // the Circle work: a Google group rule has nothing to do with Circle being
+  // configured, and bailing here would have left board membership silently
+  // unsynced whenever a Circle key was missing.
+  const client = isCircleConfigured() ? getCircleClient() : null;
 
   const { data: rows, error } = await db.from("circle_space_rules").select(SPACE_RULE_COLUMNS);
   if (error) {
@@ -416,16 +534,49 @@ export async function runConferenceCircleAccessSync(): Promise<{
 
   const conferenceRules: ConferencePassRule[] = [];
   const surveyRules: SurveyAnswerRule[] = [];
+  const googleRules: { rule: GovernanceRoleRule; groupEmail: string }[] = [];
+
   for (const row of (rows ?? []) as SpaceRuleRow[]) {
     const rule = parseRuleRow(row);
     if (typeof rule === "string") {
       result.errors.push(`${row.label}: ${rule}`);
       continue;
     }
+    const destination = ruleDestination(row);
+    if (typeof destination === "string") {
+      result.errors.push(`${row.label}: ${destination}`);
+      continue;
+    }
+    if (destination.kind === "google_group") {
+      if (rule.kind !== "governance_role") {
+        result.errors.push(`${row.label}: only a governance_role rule can point at a Google group`);
+        continue;
+      }
+      googleRules.push({ rule, groupEmail: destination.groupEmail });
+      continue;
+    }
     if (rule.kind === "conference_passes") conferenceRules.push(rule);
-    else surveyRules.push(rule);
+    else if (rule.kind === "survey_answer") surveyRules.push(rule);
+    else result.errors.push(`${row.label}: a governance_role rule needs a Google group destination`);
   }
 
+  if (googleRules.length > 0) {
+    if (!workspaceConfigured()) {
+      result.errors.push("Google Workspace is not configured, so group rules were skipped.");
+    } else {
+      for (const g of googleRules) await syncGovernanceGroup(db, g.rule, g.groupEmail, result);
+    }
+  }
+
+  if (!client) {
+    if (conferenceRules.length > 0 || surveyRules.length > 0)
+      result.errors.push("Circle is not configured, so space rules were skipped.");
+    return result;
+  }
+
+  // Hour bucket: a pending job blocks a duplicate within the hour, but a person
+  // removed and later re-added can still be queued again.
+  const ctx: Ctx = { db, client, bucket: new Date().toISOString().slice(0, 13), result };
   await syncConferenceSpaces(ctx, conferenceRules);
   for (const rule of surveyRules) await syncSurveySpace(ctx, rule);
   return result;

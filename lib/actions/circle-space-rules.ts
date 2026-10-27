@@ -25,8 +25,10 @@ export async function saveCircleSpaceRule(id: string | null, input: SpaceRuleInp
   const fields = { ...checked.row, last_run: null, last_run_at: null, updated_at: new Date().toISOString() };
 
   if (id) {
-    const update: Partial<typeof fields> = { ...fields };
-    delete update.space_id;
+    // Destructured rather than deleted from a Partial: `fields` is a union of
+    // the per-kind row shapes, and Partial-of-a-union stopped being assignable
+    // once space_id became nullable. Same effect, and it keeps the type.
+    const { space_id: _fixedSpace, ...update } = fields;
     const { error } = await db.from("circle_space_rules").update(update).eq("id", id);
     if (error) return { success: false, error: error.message };
   } else {
