@@ -113,6 +113,18 @@ describe("checkInFactsFromRun", () => {
   });
 });
 
+describe("the CANCOLL pin at pickup", () => {
+  it("is for people from a CANCOLL school, and nobody else", () => {
+    const facts = checkInFactsFromRun(run(), new Map(), [], new Set(["org-Northern College"]));
+    expect(facts.p2.cancollPin).toBe(true);
+    expect(facts.p1.cancollPin).toBe(false);
+  });
+
+  it("goes to nobody when the school list is not known", () => {
+    expect(checkInFactsFromRun(run()).p2.cancollPin).toBe(false);
+  });
+});
+
 describe("todayVerdict", () => {
   const CONF_DATES = ["2027-02-02", "2027-02-03", "2027-02-04"];
   const on = (d: string) => new Date(`${d}T09:00:00`);

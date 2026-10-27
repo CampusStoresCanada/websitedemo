@@ -64,6 +64,8 @@ type CheckInFacts = {
   reprintReason?: string;
   /** The cards that exist for them (reprint-plan cardsOnHand). */
   reprintCards?: { companyBlank: boolean; spareCount: number; spareLabel: string | null; typeName: string | null };
+  /** Their school is in CANCOLL: hand them a pin at pickup. */
+  cancollPin?: boolean;
 };
 
 type PendingScan = {
@@ -1900,6 +1902,12 @@ export default function CheckInDeskClient({
               {card.facts?.admittedTo.length ? (
                 <p className="text-sm text-gray-300">
                   {card.facts.admittedTo.join(" · ")}
+                </p>
+              ) : null}
+              {/* At badge pickup only, not at every event door. */}
+              {card.facts?.cancollPin && toneOf(card.state) === "go" && !activeDoorEvent ? (
+                <p className="mt-2 rounded-lg bg-amber-400/20 px-3 py-2 text-base font-bold text-amber-200">
+                  Give a CANCOLL pin
                 </p>
               ) : null}
               {card.hotelName ? <p className="mt-1 text-xs text-gray-200">Room: {card.hotelName}</p> : null}
