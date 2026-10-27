@@ -3,7 +3,6 @@ import {
   contactsWeAdded,
   orgsMatchingLatestAnswer,
   diffSpace,
-  parseSpaceRules,
   qualifyingContactIds,
 } from "@/lib/circle/conference-access";
 import type { SeatHolding } from "@/lib/conference/seats";
@@ -25,23 +24,6 @@ function seat(entityId: string, contactId: string | null, kind = "registration")
   };
 }
 
-describe("parseSpaceRules", () => {
-  it("keeps valid rules and treats a missing pass list as all passes", () => {
-    expect(
-      parseSpaceRules([
-        { spaceId: 5, label: "All" },
-        { spaceId: 6, label: "Members", passEntityIds: ["full"] },
-        { spaceId: "nope" },
-        null,
-      ])
-    ).toEqual([
-      { spaceId: 5, label: "All", passEntityIds: null },
-      { spaceId: 6, label: "Members", passEntityIds: ["full"] },
-    ]);
-    expect(parseSpaceRules(null)).toEqual([]);
-  });
-});
-
 describe("qualifyingContactIds", () => {
   const seats = [
     seat("full", "c1"),
@@ -51,14 +33,14 @@ describe("qualifyingContactIds", () => {
   ];
 
   it("all-conference takes every assigned registration pass", () => {
-    expect([...qualifyingContactIds(seats, { spaceId: 1, label: "All", passEntityIds: null })].sort()).toEqual([
+    expect([...qualifyingContactIds(seats, { passEntityIds: null })].sort()).toEqual([
       "c1",
       "c2",
     ]);
   });
 
   it("members-only takes only the listed passes", () => {
-    expect([...qualifyingContactIds(seats, { spaceId: 2, label: "Members", passEntityIds: ["full"] })]).toEqual([
+    expect([...qualifyingContactIds(seats, { passEntityIds: ["full"] })]).toEqual([
       "c1",
     ]);
   });
