@@ -4,6 +4,7 @@ import { loadDoorRoster } from "@/lib/conference/attendance";
 import { readPreferences } from "@/lib/profile/preferences";
 import { parsePrintSort, PRINT_SORT_PREFERENCE_KEY } from "@/lib/conference/badges/arrangement";
 import PrintButton from "@/components/benchmarking/PrintButton";
+import { CertificationBadges } from "@/components/ui/CertificationBadges";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Name list | Check-in" };
@@ -98,13 +99,11 @@ export default async function DoorListPage({
                 </td>
               ) : null}
               <td className="py-2">
-                {row.name}
-                {/* So the desk knows who CANCOLL funds (MOU): staff paper only. */}
-                {row.funded ? (
-                  <span className="ml-2 border border-gray-900 px-1 text-[10px] font-semibold uppercase tracking-wide">
-                    CANCOLL
-                  </span>
-                ) : null}
+                <span className="inline-flex items-center gap-2">
+                  {row.name}
+                  {/* So the desk knows who CANCOLL funds (MOU): staff paper only. */}
+                  {row.funded ? <CertificationBadges certifications={["CANCOLL"]} showCancoll size="sm" /> : null}
+                </span>
               </td>
               <td className="py-2">{row.organizationName}</td>
             </tr>
