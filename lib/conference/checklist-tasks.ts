@@ -22,6 +22,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluateChecklistTaskCheck, evaluatePersonChecklistTaskCheck } from "./checklist-checks";
 import type { CheckType } from "./checklist-check-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
+import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "../constants/conference";
+import { loadSeatHoldings, type SeatHolding } from "./seats";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -68,7 +70,65 @@ export type PersonalTask = {
    * else" — deadlines, show code, the link. Null for every other task.
    */
   service: ServiceDetails | null;
+  /**
+   * The document a person agrees to in this task's own row, for a
+   * `legal_document_accepted` task that names one. Absent everywhere else.
+   */
+  document?: { versionId: string; title: string; content: string } | null;
 };
+
+/**
+ * Which conference_people a scoped person task is asked of, or null when the
+ * task names no scope (it is asked of everyone, as person tasks always were).
+ *
+ * The person-grain twin of filterTasksToOrgScope: same two columns, same AND,
+ * but read from the SEATS a person holds rather than the balances a company
+ * holds. The CANCOLL consent is the reason: one school buys several Full
+ * Conference Registrations, and only the delegate holding the funded one may be
+ * asked. Reassigning that seat moves the task with it, because the answer is
+ * read from the seat every time rather than stored.
+ *
+ * Pure, over seats the caller loaded once through loadSeatHoldings, so a list of
+ * tasks costs one seat read rather than one per task.
+ */
+export function personIdsInTaskScope(
+  seats: ReadonlyArray<Pick<SeatHolding, "entityId" | "holderPersonId">>,
+  entitiesById: ReadonlyMap<string, { kind: string }>,
+  scope: { scope_entity_id?: string | null; scope_entity_kind?: string | null }
+): Set<string> | null {
+  if (!scope.scope_entity_id && !scope.scope_entity_kind) return null;
+  const inScope = new Set<string>();
+  for (const seat of seats) {
+    if (!seat.holderPersonId) continue;
+    if (scope.scope_entity_id && seat.entityId !== scope.scope_entity_id) continue;
+    if (scope.scope_entity_kind && entitiesById.get(seat.entityId)?.kind !== scope.scope_entity_kind) continue;
+    inScope.add(seat.holderPersonId);
+  }
+  return inScope;
+}
+
+/** The newest effective version of the document a policy entity stands for. */
+async function loadTaskDocument(
+  db: AdminClient,
+  conferenceId: string,
+  policyEntityId: string
+): Promise<PersonalTask["document"]> {
+  const { data } = await db
+    .from("conference_legal_versions")
+    .select("id, document_type, content")
+    .eq("conference_id", conferenceId)
+    .eq("policy_entity_id", policyEntityId)
+    .lte("effective_at", new Date().toISOString())
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    versionId: data.id,
+    title: LEGAL_DOCUMENT_LABELS[data.document_type as LegalDocumentType] ?? data.document_type,
+    content: data.content,
+  };
+}
 
 /**
  * Fields on `conference_people` that already answer a task without anyone
@@ -169,7 +229,7 @@ export async function loadPersonalTasks(
   const [{ data: checklists }, { data: person }] = await Promise.all([
     db
       .from("conference_checklists")
-      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, ask_from, hardens_because)")
+      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind, deadline_at, ask_from, hardens_because)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
     db
@@ -185,12 +245,21 @@ export async function loadPersonalTasks(
     ((person?.contact_id as string | null) || (person?.canonical_person_id as string | null)) ??
     null;
 
-  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
+  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; check_entity_id: string | null; scope_entity_id: string | null; scope_entity_kind: string | null; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
+  const allTasks = (checklists ?? []).flatMap(
+    (cl) => (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? []
+  );
+  // This person's own seats, read once, and only when some task is scoped.
+  const mySeats = allTasks.some((t) => t.audience === "person" && (t.scope_entity_id || t.scope_entity_kind))
+    ? await loadSeatHoldings(db, { conferenceId, holderPersonId: personId })
+    : null;
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
     for (const task of tasks) {
       if (!task.active || task.audience !== "person") continue;
+      const inScope = mySeats ? personIdsInTaskScope(mySeats.seats, mySeats.entitiesById, task) : null;
+      if (inScope && !inScope.has(personId)) continue;
       // A task's own date beats the list's. Stronco's pre-show pricing ends 10
       // January and Encore's advance rate 18 January, on one list that said 11
       // January for both — the row header contradicted the supplier facts
@@ -242,16 +311,23 @@ export async function loadPersonalTasks(
             db,
             task.check_type as CheckType,
             conferenceId,
-            contactId
+            contactId,
+            task.check_entity_id
           )
         : null;
       if (detected !== null) {
+        // A document they agree to here, in the row, rather than somewhere else.
+        const document =
+          task.check_type === "legal_document_accepted" && task.check_entity_id && !detected
+            ? await loadTaskDocument(db, conferenceId, task.check_entity_id)
+            : null;
         return {
           taskId: task.id, name: task.name, description: task.description,
           state: detected ? "done" : "pending",
           evidence: null, derived: true, deadline,
           source: "monitored", checkType: task.check_type, service: null,
           hardensBecause: task.hardens_because, askingNow: isAsking(task),
+          document,
         };
       }
 

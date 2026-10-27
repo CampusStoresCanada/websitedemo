@@ -91,6 +91,9 @@ vi.mock("../../conference/entity-pricing", () => ({
   canBuy: canBuyMock,
   priceForTier: priceForTierMock,
   availability: availabilityMock,
+  // No funded (CANCOLL) offer in these carts.
+  isFundedOffer: () => false,
+  fundedRegistrationAllowed: () => false,
 }));
 vi.mock("@/lib/actions/conference-people", () => ({
   resolveAssigneeForEmail: resolveAssigneeForEmailMock,

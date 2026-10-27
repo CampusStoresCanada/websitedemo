@@ -118,6 +118,14 @@ export type ChecklistTaskInput = {
 };
 
 const ENTITY_SCOPED_CHECKS = new Set<CheckType>(["seat_assigned", "entity_purchased"]);
+/**
+ * Checks that MAY name one thing without having to. A `legal_document_accepted`
+ * task with a document named (the CANCOLL consent, by its policy entity) asks
+ * about that document alone; without one it is the company-wide "everything
+ * accepted" check. Nulling it on save would quietly turn the first into the
+ * second the next time anyone edited the task's wording.
+ */
+const OPTIONAL_ENTITY_CHECKS = new Set<CheckType>(["legal_document_accepted"]);
 
 export async function saveChecklistTask(
   checklistId: string,
@@ -138,7 +146,10 @@ export async function saveChecklistTask(
     name: input.name.trim(),
     description: input.description.trim(),
     check_type: input.checkType,
-    check_entity_id: ENTITY_SCOPED_CHECKS.has(input.checkType) ? input.checkEntityId : null,
+    check_entity_id:
+      ENTITY_SCOPED_CHECKS.has(input.checkType) || OPTIONAL_ENTITY_CHECKS.has(input.checkType)
+        ? input.checkEntityId
+        : null,
     ...(input.scopeEntityKind !== undefined ? { scope_entity_kind: input.scopeEntityKind } : {}),
     ...(input.scopeEntityId !== undefined ? { scope_entity_id: input.scopeEntityId } : {}),
     sort_order: input.sortOrder,

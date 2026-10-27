@@ -14,7 +14,16 @@ import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 // Relative imports: these pure modules are pulled in unmocked by vitest, where
 // the "@/" alias isn't resolved (see project notes on the test setup).
-import { availability, canBuy, directPurchaseAllowed, isDirectPurchaseOnly, priceForTier } from "../conference/entity-pricing";
+import {
+  availability,
+  canBuy,
+  directPurchaseAllowed,
+  fundedRegistrationAllowed,
+  isDirectPurchaseOnly,
+  isFundedOffer,
+  priceForTier,
+  type FundedRegistrationBuyer,
+} from "../conference/entity-pricing";
 import {
   MEMBERSHIP_RENEWAL_KIND,
   membershipCoversConference,
@@ -49,6 +58,7 @@ import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
+import { fulfilConferenceOrder } from "../stripe/webhook-processing";
 import { enqueueQBConferenceRefund } from "../quickbooks/conference-export";
 import type { BuildEntity, EntityRefView } from "./conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
@@ -392,6 +402,118 @@ function parseAttendees(metadata: unknown, quantity: number): (AttendeeRef | nul
   return slots;
 }
 
+/** The buyer facts fundedRegistrationAllowed reads, loaded once from the org row. */
+async function loadFundedRegistrationBuyer(
+  db: ReturnType<typeof createAdminClient>,
+  organizationId: string
+): Promise<FundedRegistrationBuyer | null> {
+  const { data } = await db
+    .from("organizations")
+    .select("id, type, membership_status, is_cancoll_member, is_test")
+    .eq("id", organizationId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id,
+    type: data.type,
+    membershipStatus: data.membership_status,
+    isCancollMember: data.is_cancoll_member,
+    isTest: data.is_test,
+  };
+}
+
+/** Units of an offer this org already holds or carries in a live cart, across every user at the org. */
+async function heldOrCartedUnits(
+  db: ReturnType<typeof createAdminClient>,
+  params: { conferenceId: string; organizationId: string; offerEntityId: string; excludeCartItemId?: string }
+): Promise<number> {
+  let cartQuery = db
+    .from("cart_items")
+    .select("quantity")
+    .eq("conference_id", params.conferenceId)
+    .eq("organization_id", params.organizationId)
+    .eq("offer_entity_id", params.offerEntityId)
+    .gt("expires_at", new Date().toISOString());
+  if (params.excludeCartItemId) cartQuery = cartQuery.neq("id", params.excludeCartItemId);
+  const [{ data: heldUnits }, { data: cartUnits }] = await Promise.all([
+    db
+      .from("entity_balances")
+      .select("quantity")
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .eq("entity_id", params.offerEntityId),
+    cartQuery,
+  ]);
+  return (
+    (heldUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0) +
+    (cartUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0)
+  );
+}
+
+/**
+ * The funded stand-in this school should get instead of one unit of a
+ * registration, or null.
+ *
+ * Null when no funded copy of this registration exists, when the school does
+ * not qualify, or when it already holds or carries its one funded registration
+ * (the MOU funds one per school, issued to the first delegate who registers).
+ */
+async function fundedSwapFor(
+  db: ReturnType<typeof createAdminClient>,
+  params: { conferenceId: string; organizationId: string; offerEntityId: string }
+): Promise<string | null> {
+  const { data: candidates } = await db
+    .from("conference_entities")
+    .select("id, attributes")
+    .eq("conference_id", params.conferenceId)
+    .eq("kind", "registration")
+    .eq("attributes->>funds_offer_id", params.offerEntityId);
+  const funded = (candidates ?? []).find((c) => isFundedOffer(c.attributes as Record<string, unknown> | null));
+  if (!funded) return null;
+
+  const buyer = await loadFundedRegistrationBuyer(db, params.organizationId);
+  if (!fundedRegistrationAllowed(funded.attributes as Record<string, unknown> | null, buyer)) return null;
+
+  const already = await heldOrCartedUnits(db, {
+    conferenceId: params.conferenceId,
+    organizationId: params.organizationId,
+    offerEntityId: funded.id,
+  });
+  return already > 0 ? null : funded.id;
+}
+
+/**
+ * The till's recheck of every funded line in a cart.
+ *
+ * The cart swap decided eligibility minutes ago; the flag, the membership or
+ * the switch may have moved since, and a cart line is not a purchase. Same rule,
+ * asked again at the moment money would have changed hands.
+ */
+async function fundedLinesRefusal(
+  db: ReturnType<typeof createAdminClient>,
+  params: {
+    conferenceId: string;
+    organizationId: string;
+    rows: Array<{ offer: BuildEntity; offerAttributes: Record<string, unknown> }>;
+  }
+): Promise<string | null> {
+  const fundedRows = params.rows.filter((r) => isFundedOffer(r.offerAttributes));
+  if (fundedRows.length === 0) return null;
+  const buyer = await loadFundedRegistrationBuyer(db, params.organizationId);
+  for (const { offer, offerAttributes } of fundedRows) {
+    if (!fundedRegistrationAllowed(offerAttributes, buyer)) {
+      return `${offer.name}: your organization is not eligible for this registration. Remove it and add the regular registration instead.`;
+    }
+    const units = await heldOrCartedUnits(db, {
+      conferenceId: params.conferenceId,
+      organizationId: params.organizationId,
+      offerEntityId: offer.id,
+    });
+    if (units > 1) return `${offer.name} is one per organisation.`;
+  }
+  return null;
+}
+
 /** Load the v3 Offer cart lines (as BuildEntities) so eligibility + tier pricing can run. */
 async function getOfferCartRows(params: {
   conferenceId: string;
@@ -402,6 +524,8 @@ async function getOfferCartRows(params: {
     cartItemId: string;
     cartQuantity: number;
     offer: BuildEntity;
+    /** The offer row's own attributes. `offer.attributes` is left empty by minimalOfferEntity. */
+    offerAttributes: Record<string, unknown>;
     linkedToCartItemIds: string[];
     attendees: (AttendeeRef | null)[];
   }>;
@@ -425,7 +549,7 @@ async function getOfferCartRows(params: {
   const [{ data: offers }, { data: whoRefs }] = await Promise.all([
     adminClient
       .from("conference_entities")
-      .select("id, kind, name, price_cents, currency, inventory, tier_prices")
+      .select("id, kind, name, price_cents, currency, inventory, tier_prices, attributes")
       .in("id", offerIds),
     adminClient
       .from("conference_entity_refs")
@@ -459,7 +583,8 @@ async function getOfferCartRows(params: {
       byId.set(o.id, offer);
       const linkedToCartItemIds = linkedToIds(cr.metadata);
       const attendees = o.kind === "registration" ? parseAttendees(cr.metadata, cr.quantity) : [];
-      return { cartItemId: cr.id, cartQuantity: cr.quantity, offer, linkedToCartItemIds, attendees };
+      const offerAttributes = (o.attributes as Record<string, unknown> | null) ?? {};
+      return { cartItemId: cr.id, cartQuantity: cr.quantity, offer, offerAttributes, linkedToCartItemIds, attendees };
     })
     .filter(
       (
@@ -468,6 +593,7 @@ async function getOfferCartRows(params: {
         cartItemId: string;
         cartQuantity: number;
         offer: BuildEntity;
+        offerAttributes: Record<string, unknown>;
         linkedToCartItemIds: string[];
         attendees: (AttendeeRef | null)[];
       } => x !== null
@@ -706,9 +832,47 @@ export async function addOfferToCart(params: {
     // never via listConferenceOffers(). Gated on category here since the
     // generic who-audience/tier system has no concept of primary_category.
     const offerAttrs = (offerRow.attributes as Record<string, unknown> | null) ?? {};
+
+    /*
+      CANCOLL-funded registration: the first unit becomes the funded copy.
+
+      The school adds the ordinary registration and never sees a second
+      product. If it qualifies and has not had its one funded registration
+      yet, the first unit (and the first attendee, if named) goes onto the
+      funded line at $0 and the rest stay on the line it asked for. The MOU
+      issues the funded registration to the first delegate who registers, so
+      this is the only place it needs to happen.
+    */
+    const fundedOffer = isFundedOffer(offerAttrs);
+    if (offerRow.kind === "registration" && !fundedOffer) {
+      const fundedId = await fundedSwapFor(adminClient, {
+        conferenceId: params.conferenceId,
+        organizationId: params.organizationId,
+        offerEntityId: offerRow.id,
+      });
+      if (fundedId) {
+        const funded = await addOfferToCart({
+          ...params,
+          offerEntityId: fundedId,
+          quantity: 1,
+          attendees: params.attendees?.slice(0, 1),
+        });
+        if (!funded.success || quantity === 1) return funded;
+        return addOfferToCart({ ...params, quantity: quantity - 1, attendees: params.attendees?.slice(1) });
+      }
+    }
+
     const directPurchaseOnly = isDirectPurchaseOnly(offerAttrs);
-    if (!offerRow.is_for_sale && !directPurchaseOnly) {
+    if (!offerRow.is_for_sale && !directPurchaseOnly && !fundedOffer) {
       return { success: false, error: "This thing isn't for sale." };
+    }
+    // Reachable directly by id like any hidden offer, so the gate is the rule
+    // itself, never the route the caller took to get here.
+    if (fundedOffer) {
+      const buyer = await loadFundedRegistrationBuyer(adminClient, params.organizationId);
+      if (!fundedRegistrationAllowed(offerAttrs, buyer)) {
+        return { success: false, code: "INELIGIBLE", error: "Not eligible for this registration." };
+      }
     }
     if (directPurchaseOnly) {
       const { data: buyerOrg } = await adminClient
@@ -851,24 +1015,11 @@ export async function addOfferToCart(params: {
     */
     const maxPerOrg = Number((offerAttrs as Record<string, unknown>).max_per_org);
     if (Number.isFinite(maxPerOrg) && maxPerOrg > 0) {
-      const [{ data: heldUnits }, { data: cartUnits }] = await Promise.all([
-        adminClient
-          .from("entity_balances")
-          .select("quantity")
-          .eq("conference_id", params.conferenceId)
-          .eq("organization_id", params.organizationId)
-          .eq("entity_id", params.offerEntityId),
-        adminClient
-          .from("cart_items")
-          .select("quantity")
-          .eq("conference_id", params.conferenceId)
-          .eq("organization_id", params.organizationId)
-          .eq("offer_entity_id", params.offerEntityId)
-          .gt("expires_at", new Date().toISOString()),
-      ]);
-      const already =
-        (heldUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0) +
-        (cartUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0);
+      const already = await heldOrCartedUnits(adminClient, {
+        conferenceId: params.conferenceId,
+        organizationId: params.organizationId,
+        offerEntityId: params.offerEntityId,
+      });
       if (already >= maxPerOrg) {
         return {
           success: false,
@@ -1126,11 +1277,57 @@ export async function updateCartItemQuantity(params: {
     if (item.offer_entity_id) {
       const { data: offerRow } = await adminClient
         .from("conference_entities")
-        .select("kind")
+        .select("kind, name, attributes")
         .eq("id", item.offer_entity_id)
         .maybeSingle();
       if (offerRow?.kind === "booth") nextQuantity = 1;
       isRegistration = offerRow?.kind === "registration";
+
+      /*
+        Stepping the CANCOLL-funded line past 1 means "I'm registering more
+        people", not "give me more free ones". The funded line stays at 1 and
+        the extra units go onto the ordinary registration it stands in for, at
+        full price — the same split addOfferToCart makes when they're added.
+        Only for the buyer's own cart: addOfferToCart adds to the CALLER's
+        cart, so overflowing from someone else's line would land the units in
+        the wrong one.
+      */
+      const offerAttrs = (offerRow?.attributes as Record<string, unknown> | null) ?? {};
+      if (isFundedOffer(offerAttrs) && nextQuantity > 1 && item.user_id === auth.ctx.userId) {
+        const added = await addOfferToCart({
+          conferenceId: item.conference_id,
+          organizationId: item.organization_id,
+          offerEntityId: offerAttrs.funds_offer_id as string,
+          quantity: nextQuantity - 1,
+        });
+        if (!added.success) return added;
+        return { success: true, data: item };
+      }
+
+      // The same per-organisation cap addOfferToCart enforces. Without it a
+      // one-per-school line (Conference in a Box, the CANCOLL-funded
+      // registration) could simply be stepped up to two in the cart.
+      const maxPerOrg = Number(offerAttrs.max_per_org);
+      if (Number.isFinite(maxPerOrg) && maxPerOrg > 0 && nextQuantity > item.quantity) {
+        const elsewhere = await heldOrCartedUnits(adminClient, {
+          conferenceId: item.conference_id,
+          organizationId: item.organization_id,
+          offerEntityId: item.offer_entity_id,
+          excludeCartItemId: item.id,
+        });
+        if (elsewhere + nextQuantity > maxPerOrg) {
+          return {
+            success: false,
+            code: "INELIGIBLE",
+            error:
+              maxPerOrg === 1
+                ? isFundedOffer(offerAttrs)
+                  ? "CANCOLL covers one registration per school. Add another Full Conference Registration for anyone else attending."
+                  : `${offerRow?.name ?? "This"} is one per organisation.`
+                : `${offerRow?.name ?? "This"} is limited to ${maxPerOrg} per organisation.`,
+          };
+        }
+      }
     }
 
     // Resize the attendee-slot array to match — growing pads with open
@@ -1464,6 +1661,13 @@ export async function createConferenceCheckout(
     // cart item actually is.
     const cartItemKindById = new Map(offerCart.rows.map((r) => [r.cartItemId, r.offer.kind]));
 
+    const fundedRefusal = await fundedLinesRefusal(adminClient, {
+      conferenceId: input.conferenceId,
+      organizationId: input.organizationId,
+      rows: offerCart.rows,
+    });
+    if (fundedRefusal) return { success: false, code: "INELIGIBLE", error: fundedRefusal };
+
     const offerPrices: Record<string, number> = {};
     for (const { offer, linkedToCartItemIds } of offerCart.rows) {
       const eligible = canBuy(offer, buyerTier, offerCart.byId);
@@ -1566,6 +1770,39 @@ export async function createConferenceCheckout(
       };
     });
 
+    /*
+      ⛔ $0 lines stay on the order and off the Stripe object. The order is the
+      record and mints them either way; Stripe only needs what is being paid.
+
+      A cart holding nothing but the CANCOLL-funded registration has nothing to
+      pay at all, and Stripe refuses a $0 Checkout Session. That order is
+      fulfilled here, through the same fulfilConferenceOrder a paid one uses,
+      so it seats the attendee and sends the confirmation exactly as a card
+      payment would.
+    */
+    const chargeableLineItems = lineItems.filter((li) => li.price_data.unit_amount > 0);
+    if (chargeableLineItems.length === 0) {
+      await fulfilConferenceOrder(adminClient, {
+        orderId: order.id,
+        conferenceId: input.conferenceId,
+        orgId: input.organizationId,
+        userId: authz.userId,
+        source: "no_charge",
+      });
+      await logAuditEventSafe({
+        action: "conference_checkout_no_charge",
+        entityType: "conference_order",
+        entityId: order.id,
+        actorId: authz.userId,
+        actorType: "user",
+        details: { conferenceId: input.conferenceId, organizationId: input.organizationId },
+      });
+      return {
+        success: true,
+        data: { checkoutUrl: input.successUrl, orderId: order.id, checkoutSessionId: "" },
+      };
+    }
+
     // ── INVOICE INSTEAD OF A CARD ──────────────────────────────────────────
     // ⛔ The ORDER above is identical either way — same RPC, same per-line tax.
     // Only the Stripe object differs, and fulfilment is shared, so an invoiced
@@ -1595,7 +1832,7 @@ export async function createConferenceCheckout(
         return { success: false, error: "Stripe did not return an invoice id." };
       }
 
-      for (const li of lineItems) {
+      for (const li of chargeableLineItems) {
         const pd = li.price_data as {
           currency: string;
           unit_amount: number;
@@ -1761,7 +1998,7 @@ export async function createConferenceCheckout(
       mode: "payment",
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
-      line_items: lineItems,
+      line_items: chargeableLineItems,
       client_reference_id: order.id,
       payment_intent_data: {
         metadata: {
@@ -2232,6 +2469,13 @@ export async function devCompleteConferenceCheckout(params: {
     if (conferenceError || !conference) {
       return { success: false, error: conferenceError?.message ?? "Conference not found" };
     }
+
+    const fundedRefusal = await fundedLinesRefusal(adminClient, {
+      conferenceId: params.conferenceId,
+      organizationId: params.organizationId,
+      rows: offerCart.rows,
+    });
+    if (fundedRefusal) return { success: false, code: "INELIGIBLE", error: fundedRefusal };
 
     const buyerTier = await loadBuyerTier(params.organizationId);
     const cartItemKindById = new Map(offerCart.rows.map((r) => [r.cartItemId, r.offer.kind]));

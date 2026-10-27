@@ -26,6 +26,7 @@ const {
   resolveAssigneeForEmailMock,
   findExistingUserByEmailMock,
   resolveConferenceOrderTaxRatesMock,
+  fulfilConferenceOrderMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
@@ -40,6 +41,7 @@ const {
   applyProrationMock: vi.fn((baseAmountCents: number) => ({ amountCents: baseAmountCents, discountPct: 0 })),
   resolveAssigneeForEmailMock: vi.fn(),
   findExistingUserByEmailMock: vi.fn(),
+  fulfilConferenceOrderMock: vi.fn(),
   resolveConferenceOrderTaxRatesMock: vi.fn(async (): Promise<{
     conferenceRatePct: number;
     membershipRatePct: number;
@@ -91,6 +93,9 @@ vi.mock("../../conference/entity-pricing", () => ({
   canBuy: canBuyMock,
   priceForTier: priceForTierMock,
   availability: availabilityMock,
+  // No funded (CANCOLL) offer in these carts.
+  isFundedOffer: () => false,
+  fundedRegistrationAllowed: () => false,
 }));
 // lib/actions/conference-people.ts / conference-entity-commerce.ts (pulled in
 // unmocked via devCompleteConferenceCheckout's mintRegistrationAttendeesFromOrder
@@ -107,6 +112,12 @@ vi.mock("@/lib/actions/conference-entity-commerce", () => ({
 vi.mock("../../comms/conference-triggers", () => ({
   triggerConferenceRegistrationConfirmation: vi.fn(),
   triggerConferencePaymentConfirmation: vi.fn(),
+}));
+
+// The one fulfilment every paid order goes through. A $0 order calls it
+// directly instead of waiting for a Stripe webhook that will never come.
+vi.mock("../../stripe/webhook-processing", () => ({
+  fulfilConferenceOrder: fulfilConferenceOrderMock,
 }));
 
 import { createConferenceCheckout } from "../conference-commerce";
@@ -311,6 +322,58 @@ describe("createConferenceCheckout — contract with the Stripe webhook", () => 
 // ---------------------------------------------------------------------------
 // Guard rails
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// $0 lines (the CANCOLL-funded registration)
+// ---------------------------------------------------------------------------
+
+describe("createConferenceCheckout — $0 lines", () => {
+  const FUNDED_LINE = {
+    quantity: 1,
+    unit_price_cents: 0,
+    offer: { name: "Full Conference Registration (covered by CANCOLL)", kind: "registration" },
+  };
+
+  it("keeps a $0 line on the order but off the Stripe session", async () => {
+    const queues = happyPathQueues();
+    queues.conference_order_items = [
+      { data: [{ quantity: 1, unit_price_cents: 50_000, offer: { name: "Delegate Pass" } }, FUNDED_LINE] },
+    ];
+    const { db } = makeFakeDb(queues, ORDER_RPC_RESULT);
+    createAdminClientMock.mockReturnValue(db);
+
+    await createConferenceCheckout(INPUT);
+
+    const sessionArgs = stripeSessionCreateMock.mock.calls[0][0];
+    expect(sessionArgs.line_items.map((li: { price_data: { product_data: { name: string } } }) => li.price_data.product_data.name)).toEqual([
+      "Delegate Pass",
+    ]);
+    expect(fulfilConferenceOrderMock).not.toHaveBeenCalled();
+  });
+
+  /** Stripe refuses a $0 Checkout Session, so a school registering only its funded delegate would be stuck. */
+  it("fulfils an order with nothing to pay without going to Stripe", async () => {
+    const queues = happyPathQueues();
+    queues.conference_order_items = [{ data: [FUNDED_LINE] }];
+    const { db } = makeFakeDb(queues, ORDER_RPC_RESULT);
+    createAdminClientMock.mockReturnValue(db);
+
+    const result = await createConferenceCheckout(INPUT);
+
+    expect(stripeSessionCreateMock).not.toHaveBeenCalled();
+    expect(fulfilConferenceOrderMock).toHaveBeenCalledExactlyOnceWith(db, {
+      orderId: "order-1",
+      conferenceId: "conf-1",
+      orgId: "org-1",
+      userId: "user-1",
+      source: "no_charge",
+    });
+    expect(result).toEqual({
+      success: true,
+      data: { checkoutUrl: INPUT.successUrl, orderId: "order-1", checkoutSessionId: "" },
+    });
+  });
+});
 
 describe("createConferenceCheckout — guard rails", () => {
   it("rejects an empty cart before creating anything", async () => {
