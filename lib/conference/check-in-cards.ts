@@ -8,6 +8,7 @@ import { personReachesEntity } from "@/lib/conference/badges/checkin";
 import { doorWindow, type DoorEvent } from "@/lib/conference/door";
 import { publicScanBase } from "@/lib/conference/badges/tokens";
 import { loadMemberMap } from "@/lib/conference/member-map";
+import { fieldSaysYes } from "@/lib/conference/entity-kinds";
 
 /**
  * Check-in cards (Stephen, 2026-10-21): a printed QR at a place. Scan it while
@@ -36,9 +37,7 @@ const MEETING_MARGIN_MS = 15 * 60 * 1000;
 
 /** An organiser turns an event's card on in the Build tab: Check-in card = yes. */
 export function takesCheckInCards(attributes: Record<string, unknown> | null | undefined): boolean {
-  const raw = attributes?.check_in_card;
-  if (raw === true) return true;
-  return typeof raw === "string" && ["yes", "y", "true", "on", "1"].includes(raw.trim().toLowerCase());
+  return fieldSaysYes(attributes?.check_in_card);
 }
 
 /** What a card's QR opens. Signed-in only, like a badge's. */
