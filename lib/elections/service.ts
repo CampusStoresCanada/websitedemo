@@ -43,6 +43,11 @@ import {
   type ElectionSchedule,
 } from "./schedule";
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
+import {
+  buildTransitionPlan,
+  type BoardTransitionPlan,
+  type TransitionPerson,
+} from "./transition";
 import type { ReminderPhase } from "./config";
 import { buildAgmScript } from "./documents/agm-script";
 import { buildAgmPackage, type AgmPackage } from "./documents/agm-package";
@@ -4166,6 +4171,219 @@ export async function getResultsAnnouncement(slug: string): Promise<
  * not proof, and a postponed meeting would otherwise announce an election that
  * has not happened.
  */
+/**
+ * The board changeover: who gains access, who loses it, and when.
+ *
+ * ⛔ Reads only. Nothing moves until applyBoardTransition is pressed, and the
+ * list of names is shown first — these are live administrator accounts, and
+ * the failure mode is somebody losing a login they still need.
+ */
+export async function getBoardTransition(slug: string): Promise<{
+  plan: BoardTransitionPlan;
+  agmDate: string;
+  conferenceEndsOn: string | null;
+  certified: boolean;
+} | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const describe = async (
+    contactId: string,
+    name: string,
+    organizationName: string
+  ): Promise<TransitionPerson> => {
+    const { data: c } = await db
+      .from("contacts")
+      .select("id, email, profile_id")
+      .eq("id", contactId)
+      .maybeSingle();
+    const profileId = (c?.profile_id as string) ?? null;
+
+    const { data: prof } = profileId
+      ? await db.from("profiles").select("global_role").eq("id", profileId).maybeSingle()
+      : { data: null };
+    const role = (prof?.global_role as string) ?? "user";
+
+    // ⛔ An office is not a seat. Somebody who is an administrator because they
+    // are the Executive Director, the President, or CSC staff keeps that when
+    // their directorship ends.
+    const { count: offices } = await db
+      .from("governance_role_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("person_contact_id", contactId)
+      .neq("role_key", "director")
+      .or(`term_end.is.null,term_end.gt.${election.schedule.agmDate}`);
+
+    return {
+      contactId,
+      profileId,
+      name,
+      email: (c?.email as string) ?? null,
+      organizationName,
+      alreadyHasAccess: role === "admin" || role === "super_admin",
+      protectedRole: role === "super_admin" || (offices ?? 0) > 0,
+    };
+  };
+
+  const outcomes = election.status === "certified" ? await getCandidateOutcomes(slug) : null;
+  const elected = await Promise.all(
+    (outcomes?.elected ?? []).map((c) => describe(c.contactId, c.name, c.organizationName))
+  );
+
+  const { data: endingRows } = await db
+    .from("governance_role_assignments")
+    .select("person_contact_id, contacts(name), organizations(name)")
+    .eq("body_id", election.bodyId)
+    .eq("role_key", "director")
+    .eq("counts_toward_cap", true)
+    .lte("term_end", election.schedule.agmDate);
+
+  const termEndingAtThisAgm = await Promise.all(
+    (endingRows ?? [])
+      .filter((r) => r.person_contact_id)
+      .map((r) =>
+        describe(
+          r.person_contact_id as string,
+          (r.contacts as { name?: string } | null)?.name ?? "Unknown",
+          (r.organizations as { name?: string } | null)?.name ?? "their institution"
+        )
+      )
+  );
+
+  // The conference the outgoing directors stay through. Its END, because that
+  // is the thing people mean by "after the conference".
+  const { data: conf } = await db
+    .from("events")
+    .select("ends_at")
+    .gt("starts_at", election.schedule.agmDate)
+    .ilike("title", "%conference%")
+    .order("starts_at")
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    plan: buildTransitionPlan({ elected, termEndingAtThisAgm }),
+    agmDate: election.schedule.agmDate,
+    conferenceEndsOn: conf?.ends_at ? String(conf.ends_at).slice(0, 10) : null,
+    certified: election.status === "certified",
+  };
+}
+
+/**
+ * Move the access, one side at a time.
+ *
+ * Separate sides because they happen on different dates — the incoming join at
+ * the meeting, the outgoing keep theirs through the conference after it. One
+ * button doing both would be wrong on one of them.
+ *
+ * ⛔ Refuses before the effective date, like every other dated act in this
+ * module. Granting early hands somebody the console before the members have
+ * elected them; revoking early takes it off a sitting director.
+ */
+export async function applyBoardTransition(
+  slug: string,
+  input: {
+    side: "incoming" | "outgoing";
+    effectiveOn: string;
+    actorProfileId: string;
+  }
+): Promise<Result<{ changed: string[]; skipped: string[]; taskRaised: boolean }>> {
+  const db = createAdminClient();
+  const state = await getBoardTransition(slug);
+  if (!state) return fail("That election does not exist.");
+  if (!state.certified)
+    return fail("The result is not certified, so nobody has been elected yet.");
+  if (today() < input.effectiveOn)
+    return fail(
+      `That takes effect on ${input.effectiveOn}. Moving access before then grants the console to somebody the members have not seated yet, or takes it off a director who is still serving.`
+    );
+
+  const election = (await getElection(slug))!;
+  const changed: string[] = [];
+  const skipped: string[] = [];
+
+  if (input.side === "incoming") {
+    for (const p of state.plan.incoming) {
+      // The register entry, which is what the term-limit check and the roster
+      // read. Two years from the meeting, end-exclusive like every other row.
+      const termEnd = `${Number(input.effectiveOn.slice(0, 4)) + 2}${input.effectiveOn.slice(4)}`;
+      await db.from("governance_role_assignments").insert({
+        body_id: election.bodyId,
+        person_contact_id: p.contactId,
+        person_profile_id: p.profileId,
+        role_key: "director",
+        term_start: input.effectiveOn,
+        term_end: termEnd,
+        counts_toward_cap: true,
+        elected_at_election_id: election.id,
+        notes: `Elected ${election.cycleYear}`,
+      });
+
+      if (p.profileId && !p.alreadyHasAccess) {
+        await db.from("profiles").update({ global_role: "admin" }).eq("id", p.profileId);
+        changed.push(p.name);
+      } else if (!p.profileId) {
+        skipped.push(`${p.name} (no account yet — they must sign in once first)`);
+      } else {
+        skipped.push(`${p.name} (already an administrator)`);
+      }
+    }
+  } else {
+    for (const p of state.plan.outgoing) {
+      if (p.protectedRole) {
+        skipped.push(`${p.name} (administrator for another reason — left alone)`);
+        continue;
+      }
+      if (!p.profileId || !p.alreadyHasAccess) {
+        skipped.push(`${p.name} (no administrator access to remove)`);
+        continue;
+      }
+      await db.from("profiles").update({ global_role: "user" }).eq("id", p.profileId);
+      changed.push(p.name);
+    }
+  }
+
+  // ⚠️ Circle is NOT touched here. Adds reconcile from circle_space_rules on
+  // their own; removals are the side that drifts, and a board space is the
+  // wrong place to discover that. Raised as an obligation on a person instead
+  // of pretended at in software.
+  let taskRaised = false;
+  if (input.side === "outgoing" && state.plan.outgoing.length > 0) {
+    // Hangs off a board meeting like every other obligation — that is what
+    // puts it in front of the officer who holds it rather than in a list
+    // nobody opens.
+    const { data: meetingRow } = await db
+      .from("board_meetings")
+      .select("id")
+      .lte("meeting_date", input.effectiveOn)
+      .order("meeting_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (meetingRow) {
+      const names = state.plan.outgoing.map((p) => p.name).join(", ");
+      const { error } = await db.from("board_action_items").insert({
+        meeting_id: meetingRow.id as string,
+        title: `Remove the outgoing ${election.cycleYear} directors from the board Circle spaces`,
+        description:
+          `${names} left the board on ${input.effectiveOn}. Their website access has been removed.\n\n` +
+          `HOW: in Circle, remove them from the board spaces and revoke moderator status.\n\n` +
+          `By hand on purpose. Circle removals queue but do not reliably drain, and the only ` +
+          `reconciler is add-only — so a revoke that silently fails never self-heals, and a ` +
+          `board space is the wrong place to discover that. Check the member list afterwards ` +
+          `rather than trusting the queue.`,
+        assignees: [],
+        due_date: input.effectiveOn,
+        source: "manual",
+      });
+      taskRaised = !error;
+    }
+  }
+
+  return ok({ changed, skipped, taskRaised });
+}
+
 /**
  * Tell the candidates, before the membership hears it.
  *
