@@ -75,9 +75,30 @@ export const RELATIONSHIP_BY_ROLE: Record<string, Relationship> = Object.fromEnt
   RELATIONSHIPS.map((r) => [r.role, r])
 );
 
+/** A yes/no field typed as text ("yes", "y", "true", "on", "1"), as Check-in card is. */
+export function fieldSaysYes(raw: unknown): boolean {
+  if (raw === true) return true;
+  return typeof raw === "string" && ["yes", "y", "true", "on", "1"].includes(raw.trim().toLowerCase());
+}
+
+/**
+ * Kept off the public schedule (the conference page's "at a glance"). It still
+ * shows on the own page of each person it is for, and to staff (Stephen,
+ * 2026-10-27: the CANCOLL AGM, before CANCOLL announces it).
+ */
+export function isNotPublic(attributes: Record<string, unknown> | null | undefined): boolean {
+  return fieldSaysYes(attributes?.not_public);
+}
+
+// Everything with a time is on the schedule, so each can be kept off the public one.
 const TIME_FIELDS: SuggestedField[] = [
   { key: "start_time", label: "Starts", type: "time" },
   { key: "end_time", label: "Ends", type: "time" },
+  {
+    key: "not_public", label: "Not public", type: "text",
+    placeholder: "yes",
+    hint: "Type yes to keep this off the public schedule. The people it is for still see it on their own page.",
+  },
 ];
 
 const SUMMARY_FIELD: SuggestedField = {
