@@ -7,7 +7,13 @@
  * administrator accounts for no reason, and leave an audit trail saying so.
  */
 import { describe, it, expect } from "vitest";
-import { buildTransitionPlan, resolveEffectiveDate, type TransitionPerson } from "../transition";
+import {
+  buildTransitionPlan,
+  resolveEffectiveDate,
+  termsEndingBy,
+  latestTermPerPerson,
+  type TransitionPerson,
+} from "../transition";
 
 const person = (name: string, over: Partial<TransitionPerson> = {}): TransitionPerson => ({
   contactId: name,
@@ -82,5 +88,55 @@ describe("when it takes effect", () => {
       "2027-03-01"
     );
     expect(resolveEffectiveDate("custom", { ...dates, custom: "March" }).date).toBeNull();
+  });
+});
+
+describe("one row per person, the term they hold now", () => {
+  // ⚠️ Every case here is a real row shape from the live register. Filtering
+  // term_end directly produced fourteen "outgoing" directors out of ten
+  // people, five of whom were continuing — caught by running it against real
+  // data, not by a fixture.
+  const row = (contactId: string, termEnd: string | null) => ({
+    contactId,
+    termEnd,
+    name: contactId,
+    organizationName: "Somewhere",
+  });
+
+  it("collapses a director's several past terms into one", () => {
+    const rows = [
+      row("Kack", "2023-01-01"),
+      row("Kack", "2025-01-01"),
+      row("Kack", "2027-01-01"),
+    ];
+    expect(latestTermPerPerson(rows)).toHaveLength(1);
+    expect(latestTermPerPerson(rows)[0].termEnd).toBe("2027-01-01");
+  });
+
+  it("does not call a continuing director outgoing because of an older term", () => {
+    // Sean Bell: served 2024-2026, re-elected through 2028. The old term ended
+    // before this AGM; he is not going anywhere.
+    const rows = [row("Bell", "2026-01-01"), row("Bell", "2028-01-01")];
+    expect(termsEndingBy(rows, "2027-01-21")).toEqual([]);
+  });
+
+  it("finds the ones whose current term really does end", () => {
+    const rows = [
+      row("Davies", "2027-01-01"),
+      row("Bell", "2026-01-01"),
+      row("Bell", "2028-01-01"),
+    ];
+    expect(termsEndingBy(rows, "2027-01-21").map((r) => r.contactId)).toEqual(["Davies"]);
+  });
+
+  it("treats an open-ended term as outranking any date", () => {
+    const rows = [row("Officer", "2026-01-01"), row("Officer", null)];
+    expect(latestTermPerPerson(rows)[0].termEnd).toBeNull();
+    expect(termsEndingBy(rows, "2027-01-21")).toEqual([]);
+  });
+
+  it("keeps an open-ended term whichever order the rows arrive in", () => {
+    expect(latestTermPerPerson([row("X", null), row("X", "2026-01-01")])[0].termEnd).toBeNull();
+    expect(latestTermPerPerson([row("X", "2026-01-01"), row("X", null)])[0].termEnd).toBeNull();
   });
 });

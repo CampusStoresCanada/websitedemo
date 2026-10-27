@@ -94,3 +94,42 @@ export function buildTransitionPlan(input: {
 
   return { incoming, outgoing, continuing, noop: grants === 0 && revokes === 0 };
 }
+
+export interface DirectorTermRow {
+  contactId: string;
+  termEnd: string | null;
+  name: string;
+  organizationName: string;
+}
+
+/**
+ * One row per person: the term they hold NOW.
+ *
+ * ⚠️ Written because filtering the rows directly is wrong twice, and both
+ * showed up the first time this ran against real data rather than fixtures.
+ * `term_end <= agmDate` returns a row per HISTORICAL term, so a director with
+ * three past terms appeared three times — and five CONTINUING directors
+ * appeared as outgoing, because each of them also holds an older term that did
+ * end before this meeting. The question is whether the term somebody holds now
+ * ends here, not whether they have ever finished one.
+ *
+ * A null end is open-ended and outranks any date.
+ */
+export function latestTermPerPerson(rows: DirectorTermRow[]): DirectorTermRow[] {
+  const latest = new Map<string, DirectorTermRow>();
+  for (const row of rows) {
+    const seen = latest.get(row.contactId);
+    if (!seen) {
+      latest.set(row.contactId, row);
+      continue;
+    }
+    if (seen.termEnd === null) continue;
+    if (row.termEnd === null || row.termEnd > seen.termEnd) latest.set(row.contactId, row);
+  }
+  return [...latest.values()];
+}
+
+/** Those whose current term ends at or before the meeting. */
+export function termsEndingBy(rows: DirectorTermRow[], agmDate: string): DirectorTermRow[] {
+  return latestTermPerPerson(rows).filter((r) => r.termEnd !== null && r.termEnd <= agmDate);
+}

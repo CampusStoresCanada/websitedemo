@@ -45,6 +45,7 @@ import {
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import {
   buildTransitionPlan,
+  termsEndingBy,
   type BoardTransitionPlan,
   type TransitionPerson,
 } from "./transition";
@@ -4231,24 +4232,33 @@ export async function getBoardTransition(slug: string): Promise<{
     (outcomes?.elected ?? []).map((c) => describe(c.contactId, c.name, c.organizationName))
   );
 
-  const { data: endingRows } = await db
+  // ⚠️ Every director row, then reduced to ONE per person by their LATEST
+  // term. Filtering rows on `term_end <= agmDate` directly is wrong twice
+  // over, and both showed up the first time this ran against real data: a
+  // director with three past terms appeared three times, and five CONTINUING
+  // directors appeared as outgoing because they each also hold an older term
+  // that did end before this meeting. What matters is whether the term a
+  // person holds NOW ends here, not whether they have ever finished one.
+  const { data: directorRows } = await db
     .from("governance_role_assignments")
-    .select("person_contact_id, contacts(name), organizations(name)")
+    .select("person_contact_id, term_end, contacts(name), organizations(name)")
     .eq("body_id", election.bodyId)
     .eq("role_key", "director")
-    .eq("counts_toward_cap", true)
-    .lte("term_end", election.schedule.agmDate);
+    .eq("counts_toward_cap", true);
 
   const termEndingAtThisAgm = await Promise.all(
-    (endingRows ?? [])
-      .filter((r) => r.person_contact_id)
-      .map((r) =>
-        describe(
-          r.person_contact_id as string,
-          (r.contacts as { name?: string } | null)?.name ?? "Unknown",
-          (r.organizations as { name?: string } | null)?.name ?? "their institution"
-        )
-      )
+    termsEndingBy(
+      (directorRows ?? [])
+        .filter((r) => r.person_contact_id)
+        .map((r) => ({
+          contactId: r.person_contact_id as string,
+          termEnd: (r.term_end as string) ?? null,
+          name: (r.contacts as { name?: string } | null)?.name ?? "Unknown",
+          organizationName:
+            (r.organizations as { name?: string } | null)?.name ?? "their institution",
+        })),
+      election.schedule.agmDate
+    ).map((r) => describe(r.contactId, r.name, r.organizationName))
   );
 
   // The conference the outgoing directors stay through. Its END, because that
