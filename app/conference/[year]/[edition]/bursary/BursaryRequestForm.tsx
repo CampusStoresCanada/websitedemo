@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveBursaryAnswer, submitBursaryRequest, type BursaryRequestView } from "@/lib/actions/conference-bursary";
 import {
@@ -11,7 +11,6 @@ import {
   type BursaryRequestAnswers,
   type BursaryRequestField,
 } from "@/lib/conference/bursary-request";
-import { formatDeadline } from "@/lib/benchmarking/deadline";
 import AgreeToDocument from "@/components/me/AgreeToDocument";
 
 /**
@@ -33,19 +32,26 @@ export default function BursaryRequestForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const deadline = formatDeadline(view.closesAt);
+  const deadline = view.closesOnLabel;
   const locked = !view.canEdit;
   const gaps = bursaryRequestGaps(answers, view.termsAccepted);
 
+  /*
+    Saves go one after another, never in parallel, and the questions stay
+    usable while they do. Disabling the form during each save swallowed a
+    second click made before the first save returned; running saves in
+    parallel let the first two both try to create the school's row.
+  */
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const save = (field: BursaryRequestField, value: string | boolean | null) => {
-    const previous = answers;
-    setAnswers({ ...answers, [field]: value } as BursaryRequestAnswers);
+    const before = answers[field];
+    setAnswers((current) => ({ ...current, [field]: value }) as BursaryRequestAnswers);
     setError(null);
     setSaved(false);
-    startTransition(async () => {
+    saveQueue.current = saveQueue.current.then(async () => {
       const result = await saveBursaryAnswer({ conferenceId, organizationId, field, value });
       if (!result.success) {
-        setAnswers(previous);
+        setAnswers((current) => ({ ...current, [field]: before }) as BursaryRequestAnswers);
         setError(result.error);
       } else {
         setSaved(true);
@@ -56,6 +62,7 @@ export default function BursaryRequestForm({
   const submit = () => {
     setError(null);
     startTransition(async () => {
+      await saveQueue.current;
       const result = await submitBursaryRequest({ conferenceId, organizationId });
       if (!result.success) setError(result.error);
       else router.refresh();
@@ -85,7 +92,7 @@ export default function BursaryRequestForm({
       </p>
       {!view.open && <p className="font-medium text-red-700">Requests have closed.</p>}
 
-      <fieldset disabled={locked || isPending} className="space-y-6">
+      <fieldset disabled={locked} className="space-y-6">
         <section>
           <label className="block font-medium text-gray-900" htmlFor="bursary-delegate">
             Who is the support for?

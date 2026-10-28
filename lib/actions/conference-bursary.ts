@@ -15,6 +15,7 @@ import {
   type BursaryRequestAnswers,
 } from "@/lib/conference/bursary-request";
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -192,6 +193,12 @@ export type BursaryRequestView = {
   termsAccepted: boolean;
   open: boolean;
   closesAt: string | null;
+  /**
+   * "November 20, 2026": the last day, formatted on the server. Not in the
+   * browser: a browser with stale time-zone data rendered this deadline as the
+   * 21st, which is the boundary, not the last day.
+   */
+  closesOnLabel: string | null;
   /** This person may change it: entitled at the school, open, not yet submitted. */
   canEdit: boolean;
   gaps: string[];
@@ -315,6 +322,7 @@ export async function getBursaryRequest(params: {
       termsAccepted,
       open,
       closesAt,
+      closesOnLabel: formatDeadline(closesAt),
       canEdit: open && !row?.requested_at,
       gaps: bursaryRequestGaps(answers, termsAccepted),
     },
