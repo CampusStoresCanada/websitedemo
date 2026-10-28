@@ -212,39 +212,39 @@ function resolveLogoUrl(
 }
 
 /**
- * Size and place the image so its CONTENT is the largest rectangle of its own
- * shape that fits the frame, centred. Pixel values are relative to the frame.
+ * Size and place a measured logo in its frame, centred on its content.
  *
- * For a circle of diameter d the largest a:1 rectangle has its diagonal on the
- * circle: width d·a/√(1+a²), height d/√(1+a²).
+ * In a circle the logo is scaled until its farthest real pixel sits just
+ * inside the edge, so a round crest fills the circle and only a logo with
+ * something in its corners is pulled in, and only as far as those corners
+ * need. In a square frame its content box is contained. Pixel values are
+ * relative to the frame.
  */
 function placeLogo(params: {
   box: LogoContentBox;
   frameSize: number;
   circle: boolean;
-  /** Share of the frame the content may use, so it never touches the edge. */
+  /** Share of the frame the content may reach, so it never touches the edge. */
   fill?: number;
 }): { left: number; top: number; width: number; height: number } {
   const { box, frameSize, circle } = params;
-  const d = frameSize * (params.fill ?? 0.9);
-  const a = box.aspect > 0 ? box.aspect : 1;
-  let w: number;
-  let h: number;
-  if (circle) {
-    const k = Math.sqrt(1 + a * a);
-    w = (d * a) / k;
-    h = d / k;
+  const fill = params.fill ?? 0.96;
+  let imgW: number;
+  if (circle && box.reach > 0) {
+    imgW = (fill * frameSize) / (2 * box.reach);
   } else {
-    w = Math.min(d, d * a);
-    h = w / a;
+    const d = frameSize * fill;
+    const contentW = Math.min(d, d * box.aspect);
+    imgW = contentW / box.width;
   }
-  const imgW = w / box.width;
-  const imgH = h / box.height;
+  const imgH = imgW / box.imageAspect;
+  const centreX = box.left + box.width / 2;
+  const centreY = box.top + box.height / 2;
   return {
     width: imgW,
     height: imgH,
-    left: (frameSize - w) / 2 - box.left * imgW,
-    top: (frameSize - h) / 2 - box.top * imgH,
+    left: frameSize / 2 - centreX * imgW,
+    top: frameSize / 2 - centreY * imgH,
   };
 }
 
@@ -951,6 +951,9 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     if (!fit) {
       return `<img class="org-logo ${circle ? "circle safe" : ""}" src="${escapeHtml(url)}" alt="" />`;
     }
+    if (fit.photo) {
+      return `<img class="org-logo photo ${circle ? "circle" : ""}" src="${escapeHtml(url)}" alt="" />`;
+    }
     const frame = front.logo.diameter * scaleX;
     const at = placeLogo({ box: fit, frameSize: frame, circle });
     return `<img class="org-logo fitted" src="${escapeHtml(url)}" alt="" style="left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px;" />`;
@@ -1233,6 +1236,7 @@ export function renderJobDocumentHtml(params: {
       /* Unmeasured: the square inside the circle, which nothing can poke out of. */
       .org-logo.safe { inset: 14.6%; width: auto; height: auto; border-radius: 0; }
       .org-logo.fitted { inset: auto; object-fit: fill; }
+      .org-logo.photo { object-fit: cover; }
       .shape-layer { position: absolute; box-sizing: border-box; }
       .image-layer { position: absolute; }
       .slot-text {

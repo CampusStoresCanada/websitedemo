@@ -338,6 +338,13 @@ export type LogoContentBox = {
   height: number;
   /** Width over height of the content, in pixels. */
   aspect: number;
+  /** Width over height of the whole file. */
+  imageAspect: number;
+  /** Farthest content pixel from the content's centre, as a share of the
+   *  file's width. What decides how large the logo can be in a circle. */
+  reach: number;
+  /** A full-bleed, roughly square picture: fills the circle like a photo. */
+  photo: boolean;
 };
 
 export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {
