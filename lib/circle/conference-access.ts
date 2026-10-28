@@ -33,17 +33,11 @@ import {
   ruleDestination,
   SPACE_RULE_COLUMNS,
   type ConferencePassRule,
-  type GovernanceRoleRule,
   type RuleLastRun,
   type SpaceRule,
   type SpaceRuleRow,
   type SurveyAnswerRule,
 } from "@/lib/circle/space-rules";
-import {
-  addGroupMember,
-  listGroupMembers,
-  workspaceConfigured,
-} from "@/lib/google/directory";
 
 export type HolderContact = { contactId: string; email: string; circleId: string };
 
@@ -410,109 +404,6 @@ async function syncConferenceSpaces(ctx: Ctx, rules: ConferencePassRule[]): Prom
   }
 }
 
-/**
- * A governance_role rule pointed at a Google group.
- *
- * ⛔ ADD-ONLY, and the institutional address only. Two deliberate limits:
- *
- *  - Circle knows what it added from its own queue's idempotency keys. There
- *    is no such ledger for Google, and inventing a second provenance
- *    mechanism to justify automatic removals is not worth it for a board
- *    mailing list. Anybody who should no longer be there is COUNTED and
- *    reported; taking them out stays a person's act, same as Circle.
- *  - board@campusstores.ca currently holds most directors twice, once on
- *    their institutional address and once on an @campusstores.ca alias. The
- *    alias half is being retired, nothing in contacts records the mapping,
- *    and the two do not derive from each other (tlinden@stfx.ca is
- *    patricia.linden-teasdale@). So an alias is never added and never
- *    counted as missing.
- */
-async function syncGovernanceGroup(
-  db: Db,
-  rule: GovernanceRoleRule,
-  groupEmail: string,
-  result: { errors: string[] }
-): Promise<void> {
-  const { data: body } = await db
-    .from("governance_bodies")
-    .select("id")
-    .eq("key", rule.bodyKey)
-    .maybeSingle();
-  if (!body) {
-    await db
-      .from("circle_space_rules")
-      .update({ last_run: { error: `no governance body "${rule.bodyKey}"` }, last_run_at: new Date().toISOString() })
-      .eq("id", rule.id);
-    result.errors.push(`${rule.label}: no governance body "${rule.bodyKey}"`);
-    return;
-  }
-
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: holders } = await db
-    .from("governance_role_assignments")
-    .select("person_contact_id, contacts(email)")
-    .eq("body_id", body.id)
-    .eq("role_key", rule.roleKey)
-    .lte("term_start", today)
-    .or(`term_end.is.null,term_end.gt.${today}`);
-
-  const wanted = new Set(
-    (holders ?? [])
-      .map((h) => (h.contacts as { email?: string } | null)?.email?.toLowerCase())
-      .filter((e): e is string => Boolean(e))
-  );
-
-  let current: { email: string; role: string }[];
-  try {
-    current = await listGroupMembers(groupEmail);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    await db
-      .from("circle_space_rules")
-      .update({ last_run: { error: `member list failed: ${message}` }, last_run_at: new Date().toISOString() })
-      .eq("id", rule.id);
-    result.errors.push(`${rule.label}: ${message}`);
-    return;
-  }
-
-  const present = new Set(current.map((m) => m.email));
-  const toAdd = [...wanted].filter((e) => !present.has(e));
-
-  // Counted, never acted on: an alias is out of scope, and anybody else in
-  // the group was put there by a person.
-  const aliasDomain = "@campusstores.ca";
-  const shouldNotBeThere = current.filter(
-    (m) => !wanted.has(m.email) && !m.email.endsWith(aliasDomain) && m.role === "MEMBER"
-  ).length;
-
-  let added = 0;
-  const failures: string[] = [];
-  for (const email of toAdd) {
-    try {
-      await addGroupMember(groupEmail, email);
-      added++;
-    } catch (e) {
-      failures.push(`${email}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  await db
-    .from("circle_space_rules")
-    .update({
-      last_run: {
-        holders: wanted.size,
-        inSpace: present.size,
-        queuedAdds: added,
-        queuedRemoves: shouldNotBeThere,
-        ...(failures.length ? { error: failures.join("; ") } : {}),
-      },
-      last_run_at: new Date().toISOString(),
-    })
-    .eq("id", rule.id);
-
-  if (failures.length) result.errors.push(`${rule.label}: ${failures.join("; ")}`);
-}
-
 export async function runConferenceCircleAccessSync(): Promise<{
   spaces: SpaceResult[];
   errors: string[];
@@ -520,13 +411,16 @@ export async function runConferenceCircleAccessSync(): Promise<{
   const result = { spaces: [] as SpaceResult[], errors: [] as string[] };
   const db = createAdminClient();
 
-  // ⚠️ The Circle guard used to sit at the top and return. It now wraps only
-  // the Circle work: a Google group rule has nothing to do with Circle being
-  // configured, and bailing here would have left board membership silently
-  // unsynced whenever a Circle key was missing.
   const client = isCircleConfigured() ? getCircleClient() : null;
 
-  const { data: rows, error } = await db.from("circle_space_rules").select(SPACE_RULE_COLUMNS);
+  // ⛔ Group rules are not loaded here. They run from the button that changes
+  // the board, which reads the membership back and tells the person who
+  // pressed it — see lib/google/governance-group.ts. An hourly tick would be
+  // 8,760 calls a year to confirm a thing that changes once.
+  const { data: rows, error } = await db
+    .from("circle_space_rules")
+    .select(SPACE_RULE_COLUMNS)
+    .or("destination.is.null,destination.eq.circle_space");
   if (error) {
     result.errors.push(`Could not load space rules: ${error.message}`);
     return result;
@@ -534,8 +428,6 @@ export async function runConferenceCircleAccessSync(): Promise<{
 
   const conferenceRules: ConferencePassRule[] = [];
   const surveyRules: SurveyAnswerRule[] = [];
-  const googleRules: { rule: GovernanceRoleRule; groupEmail: string }[] = [];
-
   for (const row of (rows ?? []) as SpaceRuleRow[]) {
     const rule = parseRuleRow(row);
     if (typeof rule === "string") {
@@ -547,25 +439,12 @@ export async function runConferenceCircleAccessSync(): Promise<{
       result.errors.push(`${row.label}: ${destination}`);
       continue;
     }
-    if (destination.kind === "google_group") {
-      if (rule.kind !== "governance_role") {
-        result.errors.push(`${row.label}: only a governance_role rule can point at a Google group`);
-        continue;
-      }
-      googleRules.push({ rule, groupEmail: destination.groupEmail });
-      continue;
-    }
+    // Filtered out by the query above; a hand-written row that slips through
+    // is still not this job's to run.
+    if (destination.kind === "google_group") continue;
     if (rule.kind === "conference_passes") conferenceRules.push(rule);
     else if (rule.kind === "survey_answer") surveyRules.push(rule);
     else result.errors.push(`${row.label}: a governance_role rule needs a Google group destination`);
-  }
-
-  if (googleRules.length > 0) {
-    if (!workspaceConfigured()) {
-      result.errors.push("Google Workspace is not configured, so group rules were skipped.");
-    } else {
-      for (const g of googleRules) await syncGovernanceGroup(db, g.rule, g.groupEmail, result);
-    }
   }
 
   if (!client) {

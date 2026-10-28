@@ -488,7 +488,7 @@ export async function certifyElectionAction(slug: string, formData: FormData): P
 export async function applyBoardTransitionAction(
   slug: string,
   formData: FormData
-): Promise<ActionResult> {
+): Promise<ActionResult & { groups?: string[]; groupsFailed?: boolean }> {
   const guard = await requireBoard();
   if (!guard.ok) return guard;
 
@@ -518,8 +518,17 @@ export async function applyBoardTransitionAction(
   });
   if (!result.ok) return { ok: false, error: result.error };
 
+  // What the groups actually did, carried back to the press. ⛔ This returned
+  // a bare ok before, so the page said "access moved" whether or not a single
+  // person had reached the mailing list.
+  const { describeOutcome } = await import("@/lib/google/governance-group");
+  const groups = result.data.groups.map(describeOutcome);
+  const groupsFailed = result.data.groups.some(
+    (g) => g.error !== null || g.missing.length > 0 || g.failed.length > 0
+  );
+
   revalidatePath(`/admin/elections/${slug}/audit`);
-  return { ok: true };
+  return { ok: true, groups, groupsFailed };
 }
 
 /**

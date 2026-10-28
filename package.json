@@ -18,6 +18,7 @@
     "sync:about-people": "node scripts/sync-about-people.mjs",
     "backfill:invoice-pdf-urls": "node scripts/backfill-invoice-pdf-urls.mjs",
     "check:elections-live": "npx tsx scripts/elections-live-check.mts",
+    "check:board-group": "npx tsx scripts/board-group-probe.mts",
     "check:elections-e2e": "npx tsx scripts/elections-nomination-e2e.mts",
     "check:schema-drift": "node scripts/check-schema-drift.mjs"
   },

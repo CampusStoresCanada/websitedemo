@@ -45,10 +45,10 @@ export default async function ElectionAuditPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ error?: string; announced?: string; moved?: string }>;
+  searchParams: Promise<{ error?: string; announced?: string; moved?: string; groups?: string }>;
 }) {
   const { slug } = await params;
-  const { error, announced, moved } = await searchParams;
+  const { error, announced, moved, groups } = await searchParams;
   const [audit, scrutineers] = await Promise.all([
     getAuditView(slug),
     listScrutineerCandidates(),
@@ -63,9 +63,13 @@ export default async function ElectionAuditPage({
     "use server";
     const { applyBoardTransitionAction } = await import("@/lib/actions/elections");
     const r = await applyBoardTransitionAction(slug, formData);
-    redirect(
-      `/admin/elections/${slug}/audit${r.ok ? "?moved=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
+    if (!r.ok) redirect(`/admin/elections/${slug}/audit?error=${encodeURIComponent(r.error ?? "")}`);
+    // The group lines travel back with the redirect so the person who pressed
+    // reads them, rather than having to go and look at the rules screen.
+    const lines = (r.groups ?? []).join(" | ");
+    const q = new URLSearchParams({ moved: r.groupsFailed ? "failed" : "1" });
+    if (lines) q.set("groups", lines);
+    redirect(`/admin/elections/${slug}/audit?${q.toString()}`);
   }
 
   const sealed = election.status === "sealed" || election.status === "certified";
@@ -124,9 +128,31 @@ export default async function ElectionAuditPage({
         </div>
       )}
       {moved && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            moved === "failed"
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : "border-green-200 bg-green-50 text-green-900"
+          }`}
+        >
           Board access moved. Check the names on the panel below — anybody skipped is listed there
           with the reason, and Circle removals are a separate obligation on the board&apos;s list.
+          {groups && (
+            <ul className="mt-2 space-y-1">
+              {groups.split(" | ").map((line) => (
+                <li key={line}>
+                  {moved === "failed" ? "⚠️ " : "✓ "}
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
+          {moved === "failed" && (
+            <p className="mt-2 font-medium">
+              The mailing list did not fully take. Nothing else is blocked — fix the address or add
+              the person in Workspace, then press this again.
+            </p>
+          )}
         </div>
       )}
 
