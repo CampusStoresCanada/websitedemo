@@ -2161,7 +2161,11 @@ export default function BadgeTemplateEditor({
       const layouts = roleLayoutSnapshot(prev);
       const source = layouts[role];
       const target = cloneDeep(layouts[targetRole]);
-      const targetTheme = cloneDeep(prev.variants[targetRole]);
+      // A type with no colours of its own prints with Default's, so both sides
+      // start there; only a cloned colour layer gives the target its own theme.
+      const sourceTheme = prev.variants[role] ?? prev.variants[DEFAULT_VARIANT];
+      const targetTheme = cloneDeep(prev.variants[targetRole] ?? prev.variants[DEFAULT_VARIANT]);
+      let themeChanged = false;
       const nextLayerOrder = [...target.front.layerOrder];
       const layersToClone: SelectedLayer[] = Array.from(
         new Set(
@@ -2199,16 +2203,19 @@ export default function BadgeTemplateEditor({
           continue;
         }
         if (layerId === "role_background") {
-          targetTheme.frontBackgroundUrl = prev.variants[role].frontBackgroundUrl;
+          targetTheme.frontBackgroundUrl = sourceTheme.frontBackgroundUrl;
+          themeChanged = true;
           continue;
         }
         if (layerId === "role_overlay") {
-          targetTheme.frontOverlayUrl = prev.variants[role].frontOverlayUrl;
+          targetTheme.frontOverlayUrl = sourceTheme.frontOverlayUrl;
+          themeChanged = true;
           continue;
         }
         if (layerId === "role_tint") {
-          targetTheme.mapTintColor = prev.variants[role].mapTintColor;
-          targetTheme.mapTintOpacity = prev.variants[role].mapTintOpacity;
+          targetTheme.mapTintColor = sourceTheme.mapTintColor;
+          targetTheme.mapTintOpacity = sourceTheme.mapTintOpacity;
+          themeChanged = true;
           continue;
         }
         if (layerId === "logo") {
@@ -2289,10 +2296,7 @@ export default function BadgeTemplateEditor({
 
       return {
         ...prev,
-        variants: {
-          ...prev.variants,
-          [targetRole]: targetTheme,
-        },
+        variants: themeChanged ? { ...prev.variants, [targetRole]: targetTheme } : prev.variants,
         variantLayouts: nextLayouts,
       };
     });
