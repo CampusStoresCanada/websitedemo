@@ -312,11 +312,32 @@ export type BadgePersonRecord = {
   city: string | null;
   province: string | null;
   organizationType: string | null;
+  /** Where the logo's content sits inside its file — see logo-fit.ts. Null or
+   *  absent when unmeasured; the renderer then uses a box that cannot clip. */
+  logoFit?: LogoContentBox | null;
   /** What this badge's registration type admits the holder to. Null when the
    *  record was built outside a run and no catalogue graph was available. */
   access: AccessSummary | null;
   /** That same entitlement as a timed, day-ordered list, for the printed back. */
   agenda: AgendaItem[];
+};
+
+/**
+ * Where a logo actually is inside its image file, as fractions of the file.
+ *
+ * Organisations upload whatever they have: a tall crest, a wordmark with a
+ * white margin baked in, a square file with lettering to the very edge. Fitting
+ * the FILE into the badge's circle clips the corners of anything that is not
+ * itself round, and shrinks anything padded. Fitting the CONTENT lets each logo
+ * be as large as the circle allows without losing an edge.
+ */
+export type LogoContentBox = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** Width over height of the content, in pixels. */
+  aspect: number;
 };
 
 export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {

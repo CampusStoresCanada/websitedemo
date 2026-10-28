@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
+import { todayVerdict } from "@/lib/conference/badges/checkin-verdict";
+import type { OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { listDeskCompanyContacts, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
 import {

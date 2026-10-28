@@ -1,4 +1,5 @@
 import { ORG_TYPE } from "@/lib/constants/org-types";
+import { measureLogos } from "@/lib/conference/badges/logo-fit";
 import {
   DEFAULT_BADGE_TEMPLATE_CONFIG_V1,
   badgeLookKey,
@@ -241,7 +242,9 @@ const SITE_LOGO_URL = "/logos/csc-logo.svg";
 function orgLogoUrl(org: Record<string, unknown> | undefined): string | null {
   const declared = typeof org?.logo_url === "string" && org.logo_url.trim() ? org.logo_url : null;
   if (declared) return declared;
-  return org?.organization_type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
+  // ⛔ `type`, not `organization_type`: the latter is an empty legacy column, so
+  // this fallback never fired and every staff badge printed an empty circle.
+  return org?.type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
 }
 
 /**
@@ -333,7 +336,7 @@ function toBadgePerson(
     null;
   const organizationType =
     (typeof row.organization_type === "string" && row.organization_type.trim()) ||
-    (typeof org?.organization_type === "string" && org.organization_type.trim()) ||
+    (typeof org?.type === "string" && org.type.trim()) ||
     null;
   const roomNumber =
     (typeof row.room_number === "string" && row.room_number.trim()) ||
@@ -474,7 +477,7 @@ function blankBadgeRecord(params: {
       seat.organizationProvince ||
       null,
     organizationType:
-      typeof org?.organization_type === "string" ? org.organization_type : null,
+      typeof org?.type === "string" ? org.type : null,
     roomNumber: null,
     access: type.accessSummary,
     agenda: type.agenda,
@@ -654,7 +657,7 @@ export async function buildBadgeJobDocument(params: {
       db
         .from("organizations")
         .select(
-          "id, name, slug, logo_url, latitude, longitude, city, province, organization_type, is_test"
+          "id, name, slug, logo_url, latitude, longitude, city, province, type, is_test"
         )
         .in("id", orgIds),
       db
@@ -990,10 +993,19 @@ export async function buildBadgeJobDocument(params: {
     if (phone) onsiteContact = { name, phone };
   }
 
+  // Each distinct logo measured once, so it can be sized to the circle.
+  const logoFits = await measureLogos(
+    ordered.map((p) => p.logoUrl).filter((u): u is string => Boolean(u))
+  );
+  const fitted = ordered.map((p) => ({
+    ...p,
+    logoFit: p.logoUrl ? logoFits.get(p.logoUrl) ?? null : null,
+  }));
+
   const html = renderJobDocumentHtml({
     title: `Badge Job ${job.id}`,
     template: templateConfig,
-    people: ordered,
+    people: fitted,
     includeBack: true,
     venueAddress: run.venueAddress,
     onsiteContact,

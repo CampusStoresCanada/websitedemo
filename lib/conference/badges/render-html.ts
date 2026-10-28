@@ -9,6 +9,7 @@ import {
   type BadgeSlotText,
   type BadgeTemplateConfigV1,
   type BadgeTextBindingKey,
+  type LogoContentBox,
   resolveBadgeVariant,
 } from "@/lib/conference/badges/template";
 import {
@@ -208,6 +209,43 @@ function resolveLogoUrl(
   }
   const personLogo = person.logoUrl?.trim() || "";
   return personLogo.length > 0 ? personLogo : null;
+}
+
+/**
+ * Size and place the image so its CONTENT is the largest rectangle of its own
+ * shape that fits the frame, centred. Pixel values are relative to the frame.
+ *
+ * For a circle of diameter d the largest a:1 rectangle has its diagonal on the
+ * circle: width d·a/√(1+a²), height d/√(1+a²).
+ */
+function placeLogo(params: {
+  box: LogoContentBox;
+  frameSize: number;
+  circle: boolean;
+  /** Share of the frame the content may use, so it never touches the edge. */
+  fill?: number;
+}): { left: number; top: number; width: number; height: number } {
+  const { box, frameSize, circle } = params;
+  const d = frameSize * (params.fill ?? 0.9);
+  const a = box.aspect > 0 ? box.aspect : 1;
+  let w: number;
+  let h: number;
+  if (circle) {
+    const k = Math.sqrt(1 + a * a);
+    w = (d * a) / k;
+    h = d / k;
+  } else {
+    w = Math.min(d, d * a);
+    h = w / a;
+  }
+  const imgW = w / box.width;
+  const imgH = h / box.height;
+  return {
+    width: imgW,
+    height: imgH,
+    left: (frameSize - w) / 2 - box.left * imgW,
+    top: (frameSize - h) / 2 - box.top * imgH,
+  };
 }
 
 function renderTextBlock(params: {
@@ -904,6 +942,20 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
       : ""
   );
 
+  // A measured logo is placed so its content is as large as the frame allows
+  // without clipping; the person's own logo only, since a static URL is
+  // template art and was sized when it was drawn.
+  const renderLogoImage = (url: string): string => {
+    const circle = front.logo.shape === "circle";
+    const fit = front.bindings.logo === "static_url" ? null : person.logoFit ?? null;
+    if (!fit) {
+      return `<img class="org-logo ${circle ? "circle safe" : ""}" src="${escapeHtml(url)}" alt="" />`;
+    }
+    const frame = front.logo.diameter * scaleX;
+    const at = placeLogo({ box: fit, frameSize: frame, circle });
+    return `<img class="org-logo fitted" src="${escapeHtml(url)}" alt="" style="left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px;" />`;
+  };
+
   frontLayerHtml.set(
     "logo",
     `<div class="org-logo-shell ${front.logo.shape === "circle" ? "circle" : ""}" style="left:${
@@ -911,11 +963,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     }px;top:${(front.logo.y + frontOffsetY) * scaleY}px;width:${
       front.logo.diameter * scaleX
     }px;height:${front.logo.diameter * scaleY}px;">${
-      logoUrl
-        ? `<img class="org-logo ${front.logo.shape === "circle" ? "circle" : ""}" src="${escapeHtml(
-            logoUrl
-          )}" alt="" />`
-        : ""
+      logoUrl ? renderLogoImage(logoUrl) : ""
     }</div>`
   );
 
@@ -1166,9 +1214,10 @@ export function renderJobDocumentHtml(params: {
         inset: 0;
         mix-blend-mode: multiply;
       }
+      /* ⛔ No background of its own. The white disc is the overlay's plate, and
+         a second white circle drawn here never sat exactly on it. */
       .org-logo-shell {
         position: absolute;
-        background: #fff;
         overflow: hidden;
       }
       .org-logo-shell.circle { border-radius: 999px; }
@@ -1181,6 +1230,9 @@ export function renderJobDocumentHtml(params: {
         background: transparent;
       }
       .org-logo.circle { border-radius: 999px; }
+      /* Unmeasured: the square inside the circle, which nothing can poke out of. */
+      .org-logo.safe { inset: 14.6%; width: auto; height: auto; border-radius: 0; }
+      .org-logo.fitted { inset: auto; object-fit: fill; }
       .shape-layer { position: absolute; box-sizing: border-box; }
       .image-layer { position: absolute; }
       .slot-text {
