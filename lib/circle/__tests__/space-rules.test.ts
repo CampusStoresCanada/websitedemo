@@ -59,7 +59,13 @@ describe("validateRuleInput", () => {
     expect(r).toEqual({
       ok: true,
       row: {
+        // A rule that names no destination is a Circle one, and writes the
+        // group columns empty — the shape every rule had before groups existed.
+        destination: "circle_space",
         space_id: 5,
+        google_group_email: null,
+        body_key: null,
+        role_key: null,
         label: "Bookware",
         kind: "survey_answer",
         conference_id: null,

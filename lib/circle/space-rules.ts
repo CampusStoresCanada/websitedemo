@@ -154,9 +154,14 @@ export function parseRuleRow(row: SpaceRuleRow): SpaceRule | string {
 
 /** Input from the admin form, checked before it is written. */
 export type SpaceRuleInput = {
-  spaceId: number;
+  /** Required for a circle_space rule; ignored for a google_group one. */
+  spaceId: number | null;
   label: string;
   kind: string;
+  destination?: string | null;
+  googleGroupEmail?: string | null;
+  bodyKey?: string | null;
+  roleKey?: string | null;
   conferenceId?: string | null;
   passEntityIds?: string[] | null;
   surveyField?: string | null;
@@ -169,22 +174,69 @@ export function validateRuleInput(
   | {
       ok: true;
       /**
-       * ⚠️ The destination columns are deliberately NOT in this shape. The
-       * admin form writes Circle rules only, so deriving the write shape from
-       * the read row would have it offering `destination: null` to a NOT NULL
-       * column. A governance_role rule is written elsewhere; when the form
-       * learns to make one, it gets these fields explicitly rather than by
-       * inheriting them.
+       * ⚠️ `destination` is non-null here even though the read row has it
+       * optional: the column is NOT NULL, so a write must always name one.
+       * Deriving this shape straight from the read row had it offering
+       * `destination: null` to that column.
        */
-      row: Omit<
-        SpaceRuleRow,
-        "id" | "last_run" | "last_run_at" | "destination" | "google_group_email" | "body_key" | "role_key"
-      >;
+      row: Omit<SpaceRuleRow, "id" | "last_run" | "last_run_at" | "destination"> & {
+        destination: string;
+      };
     }
   | { ok: false; error: string } {
-  if (!Number.isInteger(input.spaceId) || input.spaceId <= 0) return { ok: false, error: "Pick a Circle space." };
   const label = input.label.trim();
   if (!label) return { ok: false, error: "Give the rule a label." };
+
+  const destination = input.destination === "google_group" ? "google_group" : "circle_space";
+
+  // The destination decides which target is required, and the database says the
+  // same thing in a CHECK — this is the message a person reads instead of it.
+  if (destination === "circle_space") {
+    if (!Number.isInteger(input.spaceId) || (input.spaceId ?? 0) <= 0)
+      return { ok: false, error: "Pick a Circle space." };
+  }
+
+  const groupEmail = input.googleGroupEmail?.trim().toLowerCase() || null;
+  if (destination === "google_group") {
+    if (!groupEmail) return { ok: false, error: "Give the Google group's address." };
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(groupEmail))
+      return { ok: false, error: "That does not look like an email address." };
+  }
+
+  const target = {
+    destination,
+    space_id: destination === "circle_space" ? input.spaceId : null,
+    google_group_email: destination === "google_group" ? groupEmail : null,
+  };
+
+  if (input.kind === "governance_role") {
+    if (destination !== "google_group")
+      return { ok: false, error: "A role rule keeps a Google group in step, not a Circle space." };
+    const bodyKey = input.bodyKey?.trim();
+    const roleKey = input.roleKey?.trim();
+    // Refused rather than saved empty: a rule with no role matches nobody, and
+    // reads as a broken job rather than an unfinished rule.
+    if (!bodyKey) return { ok: false, error: "Pick a governance body." };
+    if (!roleKey) return { ok: false, error: "Pick a role." };
+    return {
+      ok: true,
+      row: {
+        ...target,
+        label,
+        kind: "governance_role",
+        body_key: bodyKey,
+        role_key: roleKey,
+        conference_id: null,
+        pass_entity_ids: null,
+        survey_field: null,
+        survey_value: null,
+      },
+    };
+  }
+
+  if (destination === "google_group")
+    return { ok: false, error: "Only a role rule can keep a Google group in step." };
+
   if (input.kind === "conference_passes") {
     if (!input.conferenceId) return { ok: false, error: "Pick a conference." };
     const passes = input.passEntityIds ?? null;
@@ -192,7 +244,9 @@ export function validateRuleInput(
     return {
       ok: true,
       row: {
-        space_id: input.spaceId,
+        ...target,
+        body_key: null,
+        role_key: null,
         label,
         kind: "conference_passes",
         conference_id: input.conferenceId,
@@ -209,7 +263,9 @@ export function validateRuleInput(
     return {
       ok: true,
       row: {
-        space_id: input.spaceId,
+        ...target,
+        body_key: null,
+        role_key: null,
         label,
         kind: "survey_answer",
         conference_id: null,
