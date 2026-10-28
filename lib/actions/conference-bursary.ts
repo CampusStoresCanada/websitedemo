@@ -1,12 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { canManageOrganization, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { membershipCoversConference } from "@/lib/conference/membership-gate";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { loadBursaryApplications } from "@/lib/conference/bursary-widget";
 import { isBursaryStatus, type BursaryStatus } from "@/lib/conference/bursary-status";
+import {
+  bursaryRequestGaps,
+  bursaryRequestOpen,
+  isBursaryRequestField,
+  validateBursaryAnswer,
+  type BursaryRequestAnswers,
+} from "@/lib/conference/bursary-request";
+import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -49,60 +57,6 @@ export async function getBursaryProgress(
       sponsorCount,
     },
   };
-}
-
-/**
- * Member-only, gated the same way a booth purchase is — the org's membership
- * has to cover this conference's dates. Vendor Partner orgs apply for
- * sponsorship, not this; this is the travel bursary for member institutions.
- */
-export async function submitBursaryApplication(params: {
-  conferenceId: string;
-  organizationId: string;
-  contactName: string;
-  contactEmail: string;
-  notes?: string;
-}): Promise<Result<{ id: string }>> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const db = createAdminClient();
-
-  const [{ data: org }, { data: conference }] = await Promise.all([
-    db.from("organizations").select("type, membership_expires_at").eq("id", params.organizationId).maybeSingle(),
-    db.from("conference_instances").select("end_date").eq("id", params.conferenceId).maybeSingle(),
-  ]);
-
-  if (org?.type !== "Member") {
-    return { success: false, error: "The delegate travel bursary is for CSC member institutions." };
-  }
-  if (!conference?.end_date || !membershipCoversConference(org.membership_expires_at, conference.end_date)) {
-    return { success: false, error: "Your organization's membership needs to cover this conference's dates to apply." };
-  }
-
-  const { data: existing } = await db
-    .from("conference_bursary_applications")
-    .select("id")
-    .eq("conference_id", params.conferenceId)
-    .eq("organization_id", params.organizationId)
-    .maybeSingle();
-  if (existing) return { success: true, data: { id: existing.id } };
-
-  const { data, error } = await db
-    .from("conference_bursary_applications")
-    .insert({
-      conference_id: params.conferenceId,
-      organization_id: params.organizationId,
-      submitted_by_user_id: auth.ctx.userId,
-      contact_name: params.contactName,
-      contact_email: params.contactEmail,
-      notes: params.notes ?? null,
-    })
-    .select("id")
-    .single();
-
-  if (error) return { success: false, error: error.message };
-  return { success: true, data: { id: data.id } };
 }
 
 /** Admin: review queue for the board. */
@@ -196,3 +150,277 @@ export async function setBursaryApplicationStatus(params: {
   revalidatePath("/admin");
   return { success: true, data: null };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// The travel bursary REQUEST (2026-10-28)
+//
+// Modelled on the benchmarking survey: one row per school per conference that
+// anyone entitled at the school works on, answers saved as they go and checked
+// against one question list (lib/conference/bursary-request.ts), the delegate
+// picked from the school's contacts, and the login that submitted recorded.
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * The new columns are not in the generated types until the migration is
+ * applied and types are regenerated. Same narrow shim the other new tables use.
+ */
+type LooseDb = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  from: (table: string) => any;
+};
+
+const REQUEST_COLUMNS =
+  "id, contact_name, contact_email, status, requested_at, requested_by_user_id, delegate_contact_id, covers_hotel, covers_travel, payment_preference, gm_buyer_confirmed";
+
+type RequestRow = {
+  id: string;
+  contact_name: string;
+  contact_email: string;
+  status: string;
+  requested_at: string | null;
+  requested_by_user_id: string | null;
+} & BursaryRequestAnswers;
+
+export type BursaryRequestView = {
+  answers: BursaryRequestAnswers;
+  /** Submitted as a request, not just registered interest. */
+  submittedAt: string | null;
+  /** Staff decision, once there is one. "submitted" means waiting. */
+  status: string;
+  contacts: StoreContact[];
+  terms: { versionId: string; title: string; content: string } | null;
+  termsAccepted: boolean;
+  open: boolean;
+  closesAt: string | null;
+  /** This person may change it: entitled at the school, open, not yet submitted. */
+  canEdit: boolean;
+  gaps: string[];
+};
+
+/**
+ * Who may fill in a school's request: anyone registered for this conference
+ * from that school, or the school's admin whether or not they are registered.
+ */
+async function canFillBursaryRequest(
+  ctx: Parameters<typeof canManageOrganization>[0] & { userId: string },
+  conferenceId: string,
+  organizationId: string
+): Promise<boolean> {
+  if (canManageOrganization(ctx, organizationId)) return true;
+  const { count } = await createAdminClient()
+    .from("conference_people")
+    .select("id", { count: "exact", head: true })
+    .eq("conference_id", conferenceId)
+    .eq("organization_id", organizationId)
+    .eq("user_id", ctx.userId)
+    .neq("assignment_status", "canceled");
+  return (count ?? 0) > 0;
+}
+
+/** The school must be a member whose membership covers the conference. */
+async function memberCovered(conferenceId: string, organizationId: string): Promise<string | null> {
+  const db = createAdminClient();
+  const [{ data: org }, { data: conference }] = await Promise.all([
+    db.from("organizations").select("type, membership_expires_at").eq("id", organizationId).maybeSingle(),
+    db.from("conference_instances").select("end_date").eq("id", conferenceId).maybeSingle(),
+  ]);
+  if (org?.type !== "Member") return "The travel bursary is for CSC member institutions.";
+  if (!conference?.end_date || !membershipCoversConference(org.membership_expires_at, conference.end_date)) {
+    return "Your institution's membership needs to cover this conference's dates.";
+  }
+  return null;
+}
+
+async function loadClosesAt(conferenceId: string): Promise<string | null> {
+  const { data } = await (createAdminClient() as unknown as LooseDb)
+    .from("conference_instances")
+    .select("bursary_request_closes_at")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  return (data?.bursary_request_closes_at as string | null) ?? null;
+}
+
+/** The newest effective Travel Bursary Terms for this conference, if written. */
+async function loadTerms(conferenceId: string) {
+  const { data } = await createAdminClient()
+    .from("conference_legal_versions")
+    .select("id, content")
+    .eq("conference_id", conferenceId)
+    .eq("document_type", "travel_bursary_terms")
+    .lte("effective_at", new Date().toISOString())
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ? { versionId: data.id, title: "Travel Bursary Terms", content: data.content } : null;
+}
+
+async function loadRequestRow(conferenceId: string, organizationId: string): Promise<RequestRow | null> {
+  const { data } = await (createAdminClient() as unknown as LooseDb)
+    .from("conference_bursary_applications")
+    .select(REQUEST_COLUMNS)
+    .eq("conference_id", conferenceId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  return (data as RequestRow | null) ?? null;
+}
+
+function answersOf(row: RequestRow | null): BursaryRequestAnswers {
+  return {
+    delegate_contact_id: row?.delegate_contact_id ?? null,
+    covers_hotel: row?.covers_hotel ?? null,
+    covers_travel: row?.covers_travel ?? null,
+    payment_preference: row?.payment_preference ?? null,
+    gm_buyer_confirmed: row?.gm_buyer_confirmed ?? null,
+  };
+}
+
+/** A school's request as the person filling it in sees it. */
+export async function getBursaryRequest(params: {
+  conferenceId: string;
+  organizationId: string;
+}): Promise<Result<BursaryRequestView>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const notMember = await memberCovered(params.conferenceId, params.organizationId);
+  if (notMember) return { success: false, error: notMember };
+  if (!(await canFillBursaryRequest(auth.ctx, params.conferenceId, params.organizationId))) {
+    return { success: false, error: "Only people registered from your institution, or its admin, can request travel support." };
+  }
+
+  const [row, { contacts }, terms, closesAt] = await Promise.all([
+    loadRequestRow(params.conferenceId, params.organizationId),
+    loadStoreContacts(params.organizationId),
+    loadTerms(params.conferenceId),
+    loadClosesAt(params.conferenceId),
+  ]);
+  let termsAccepted = false;
+  if (terms) {
+    const { count } = await createAdminClient()
+      .from("legal_acceptances")
+      .select("id", { count: "exact", head: true })
+      .eq("legal_version_id", terms.versionId)
+      .eq("user_id", auth.ctx.userId);
+    termsAccepted = (count ?? 0) > 0;
+  }
+  const answers = answersOf(row);
+  const open = bursaryRequestOpen(closesAt);
+  return {
+    success: true,
+    data: {
+      answers,
+      submittedAt: row?.requested_at ?? null,
+      status: row?.status ?? "submitted",
+      contacts: contacts.filter((c) => !c.isArchived),
+      terms,
+      termsAccepted,
+      open,
+      closesAt,
+      canEdit: open && !row?.requested_at,
+      gaps: bursaryRequestGaps(answers, termsAccepted),
+    },
+  };
+}
+
+/** Save one answer, as benchmarking saves one field: validated, then written. */
+export async function saveBursaryAnswer(params: {
+  conferenceId: string;
+  organizationId: string;
+  field: string;
+  value: unknown;
+}): Promise<Result<null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isBursaryRequestField(params.field)) return { success: false, error: "That question isn't on the request." };
+  const check = validateBursaryAnswer(params.field, params.value);
+  if (!check.valid) return { success: false, error: check.error };
+
+  const notMember = await memberCovered(params.conferenceId, params.organizationId);
+  if (notMember) return { success: false, error: notMember };
+  if (!(await canFillBursaryRequest(auth.ctx, params.conferenceId, params.organizationId))) {
+    return { success: false, error: "Only people registered from your institution, or its admin, can request travel support." };
+  }
+  if (!bursaryRequestOpen(await loadClosesAt(params.conferenceId))) {
+    return { success: false, error: "Travel support requests have closed." };
+  }
+
+  const db = createAdminClient() as unknown as LooseDb;
+  if (params.field === "delegate_contact_id" && check.clean) {
+    const { data: contact } = await db
+      .from("contacts")
+      .select("id")
+      .eq("id", check.clean)
+      .eq("organization_id", params.organizationId)
+      .maybeSingle();
+    if (!contact) return { success: false, error: "That person isn't on your institution's list." };
+  }
+
+  const row = await loadRequestRow(params.conferenceId, params.organizationId);
+  if (row?.requested_at) return { success: false, error: "This request has been submitted and can't be changed." };
+
+  const now = new Date().toISOString();
+  if (row) {
+    const { error } = await db
+      .from("conference_bursary_applications")
+      .update({ [params.field]: check.clean, updated_at: now })
+      .eq("id", row.id);
+    if (error) return { success: false, error: error.message };
+  } else {
+    // contact_name / contact_email are required on the row; the person who
+    // starts the request is who CSC contacts about it. Their own contact row at
+    // this school when they have one, else their login email.
+    const { data: me } = await db
+      .from("contacts")
+      .select("name, email, work_email")
+      .eq("organization_id", params.organizationId)
+      .eq("profile_id", auth.ctx.userId)
+      .is("archived_at", null)
+      .limit(1)
+      .maybeSingle();
+    const email = (me?.work_email as string | null) || (me?.email as string | null) || auth.ctx.userEmail || "";
+    const { error } = await db.from("conference_bursary_applications").insert({
+      conference_id: params.conferenceId,
+      organization_id: params.organizationId,
+      submitted_by_user_id: auth.ctx.userId,
+      contact_name: (me?.name as string | null) || email,
+      contact_email: email,
+      [params.field]: check.clean,
+    });
+    if (error) return { success: false, error: error.message };
+  }
+  return { success: true, data: null };
+}
+
+/** Submit the request. Every question answered and the terms accepted, or nothing. */
+export async function submitBursaryRequest(params: {
+  conferenceId: string;
+  organizationId: string;
+}): Promise<Result<null>> {
+  const view = await getBursaryRequest(params);
+  if (!view.success) return view;
+  if (!view.data.open) return { success: false, error: "Travel support requests have closed." };
+  if (view.data.submittedAt) return { success: true, data: null };
+  if (view.data.gaps.length > 0) return { success: false, error: view.data.gaps[0] };
+
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const now = new Date().toISOString();
+  const { error } = await (createAdminClient() as unknown as LooseDb)
+    .from("conference_bursary_applications")
+    .update({ requested_at: now, requested_by_user_id: auth.ctx.userId, updated_at: now })
+    .eq("conference_id", params.conferenceId)
+    .eq("organization_id", params.organizationId)
+    .is("requested_at", null);
+  if (error) return { success: false, error: error.message };
+
+  await logAuditEventSafe({
+    action: "bursary_request_submitted",
+    entityType: "organization",
+    entityId: params.organizationId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId: params.conferenceId, answers: view.data.answers },
+  });
+  revalidatePath("/admin");
+  return { success: true, data: null };
+}
+

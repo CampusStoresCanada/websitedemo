@@ -45,6 +45,19 @@ export interface BursaryApplicationRow {
   submittedOn: string | null;
   /** Whole days since it arrived. */
   daysWaiting: number;
+  /**
+   * The travel support request, once the school has submitted one. Null means
+   * the row is still only a registration of interest.
+   */
+  request: {
+    delegateName: string | null;
+    delegateTitle: string | null;
+    hotel: boolean;
+    travel: boolean;
+    payment: "reimburse" | "prepay" | null;
+    /** "24 October", in Mountain time. */
+    submittedOn: string | null;
+  } | null;
 }
 
 export interface BursaryQueueData {
@@ -62,6 +75,11 @@ type JoinedRow = {
   status: string;
   created_at: string;
   organizations: { name: string; slug: string | null; province: string | null } | null;
+  requested_at: string | null;
+  covers_hotel: boolean | null;
+  covers_travel: boolean | null;
+  payment_preference: "reimburse" | "prepay" | null;
+  delegate: { name: string | null; role_title: string | null } | null;
 };
 
 function daysSince(createdAt: string): number {
@@ -85,9 +103,16 @@ export async function loadBursaryApplications(
 ): Promise<BursaryApplicationRow[]> {
   const db = createAdminClient();
 
-  const { data, error } = await db
+  // The request columns (2026-10-28) are not in the generated types until
+  // they are regenerated; same narrow shim the other new columns use.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db as unknown as { from: (t: string) => any })
     .from("conference_bursary_applications")
-    .select("id, organization_id, contact_name, contact_email, notes, status, created_at, organizations(name, slug, province)")
+    .select(
+      "id, organization_id, contact_name, contact_email, notes, status, created_at, " +
+        "requested_at, covers_hotel, covers_travel, payment_preference, " +
+        "organizations(name, slug, province), delegate:contacts!conference_bursary_applications_delegate_contact_id_fkey(name, role_title)"
+    )
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: true });
 
@@ -105,6 +130,16 @@ export async function loadBursaryApplications(
     status: r.status,
     submittedOn: formatDayMonth(r.created_at, "America/Edmonton"),
     daysWaiting: daysSince(r.created_at),
+    request: r.requested_at
+      ? {
+          delegateName: r.delegate?.name ?? null,
+          delegateTitle: r.delegate?.role_title ?? null,
+          hotel: r.covers_hotel === true,
+          travel: r.covers_travel === true,
+          payment: r.payment_preference,
+          submittedOn: formatDayMonth(r.requested_at, "America/Edmonton"),
+        }
+      : null,
   }));
 }
 
