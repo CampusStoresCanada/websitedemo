@@ -1972,7 +1972,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             frontBackgroundUrl: null,
           },
         },
@@ -1986,7 +1986,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             frontOverlayUrl: null,
           },
         },
@@ -2000,7 +2000,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             mapTintOpacity: 0,
           },
         },
@@ -4166,7 +4166,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           frontBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4185,7 +4185,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           frontOverlayUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4204,7 +4204,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           backBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4480,7 +4480,7 @@ export default function BadgeTemplateEditor({
                               variants: {
                                 ...prev.variants,
                                 [role]: {
-                                  ...prev.variants[role],
+                                  ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                   frontBackgroundUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4501,7 +4501,7 @@ export default function BadgeTemplateEditor({
                               variants: {
                                 ...prev.variants,
                                 [role]: {
-                                  ...prev.variants[role],
+                                  ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                   frontOverlayUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4523,7 +4523,7 @@ export default function BadgeTemplateEditor({
                                 variants: {
                                   ...prev.variants,
                                   [role]: {
-                                    ...prev.variants[role],
+                                    ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                     mapTintColor: event.target.value,
                                   },
                                 },
@@ -4546,7 +4546,7 @@ export default function BadgeTemplateEditor({
                                 variants: {
                                   ...prev.variants,
                                   [role]: {
-                                    ...prev.variants[role],
+                                    ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                     mapTintOpacity: Number(event.target.value || 0),
                                   },
                                 },
