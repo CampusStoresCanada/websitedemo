@@ -564,7 +564,10 @@ export async function buildBadgeJobDocument(params: {
   // decide which organisations this document needs: a blank badge is printed for
   // a company nobody from that company has been named at, so its organisation
   // would not appear in the roster query at all.
-  const run = await resolveBadgeRun(conferenceId);
+  // A desk reprint can be for a rehearsal person at a test organisation; the
+  // pre-print package never is.
+  const isReprint = job.pipeline_type === "onsite_reprint";
+  const run = await resolveBadgeRun(conferenceId, { includeTestOrganizations: isReprint });
 
   // ⛔ Snapshotted onto the job alongside the arrangement, and read from the job
   // rather than from the operator's current setting. Re-rendering an old job has
@@ -651,7 +654,7 @@ export async function buildBadgeJobDocument(params: {
       db
         .from("organizations")
         .select(
-          "id, name, slug, logo_url, latitude, longitude, city, province, organization_type"
+          "id, name, slug, logo_url, latitude, longitude, city, province, organization_type, is_test"
         )
         .in("id", orgIds),
       db
@@ -851,6 +854,15 @@ export async function buildBadgeJobDocument(params: {
   }
 
   const hydrated = peopleRows
+    // The same exclusion the run applies, for the roster rows it does not see.
+    .filter((row) => {
+      if (isReprint) return true;
+      const orgId =
+        (typeof row.organization_id === "string" && row.organization_id) ||
+        (typeof row.badge_organization_id === "string" && row.badge_organization_id) ||
+        null;
+      return !(orgId && orgById.get(orgId)?.is_test === true);
+    })
     .map((row) =>
       toBadgePerson(row, tokenMap, orgById, contactsByOrgEmail, canonicalPersonById)
     )

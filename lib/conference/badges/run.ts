@@ -114,7 +114,10 @@ function splitDisplayName(display: string): { firstName: string; lastName: strin
  * not an empty one, and reporting "0 badges, success" is the bug this pipeline
  * shipped with.
  */
-export async function resolveBadgeRun(conferenceId: string): Promise<BadgeRun> {
+export async function resolveBadgeRun(
+  conferenceId: string,
+  options: { includeTestOrganizations?: boolean } = {}
+): Promise<BadgeRun> {
   const db = createAdminClient();
 
   // Seats come from the canonical reader — see lib/conference/seats.ts. This
@@ -159,7 +162,7 @@ export async function resolveBadgeRun(conferenceId: string): Promise<BadgeRun> {
       ? db.from("contacts").select("id, first_name, last_name, role_title").in("id", canonicalIds)
       : Promise.resolve({ data: [], error: null }),
     orgIds.length
-      ? db.from("organizations").select("id, name, city, province").in("id", orgIds)
+      ? db.from("organizations").select("id, name, city, province, is_test").in("id", orgIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (contactsRes.error) throw new Error(`Could not load badge identities: ${contactsRes.error.message}`);
@@ -198,6 +201,10 @@ export async function resolveBadgeRun(conferenceId: string): Promise<BadgeRun> {
     // things a registration includes, not things you wear.
     if (seat.entityKind !== "registration") continue;
     const { seatId, entityId, organizationId } = seat;
+    // Test organisations are rehearsal fixtures: the desk needs them, the
+    // print run, its counts and its blanks do not. Same `is_test` the
+    // directory, homepage and member map already honour.
+    if (!options.includeTestOrganizations && orgById.get(organizationId)?.is_test === true) continue;
 
     const person = seat.holderPersonId ? personById.get(seat.holderPersonId) ?? null : null;
     if (person) {

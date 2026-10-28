@@ -278,7 +278,8 @@ export async function loadCheckInFacts(
 ): Promise<CheckInFactsPayload> {
   const db = createAdminClient();
   const [run, dateByDayName, printStock] = await Promise.all([
-    resolveBadgeRun(conferenceId),
+    // The desk rehearses on test organisations, so it sees them.
+    resolveBadgeRun(conferenceId, { includeTestOrganizations: true }),
     loadDayDates(db, conferenceId),
     getBadgePrintStock(conferenceId),
   ]);

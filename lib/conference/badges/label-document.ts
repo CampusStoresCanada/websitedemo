@@ -166,7 +166,7 @@ export async function buildReprintLabelDocument(params: {
   // ⛔ Which badge this person's card is: the badge run's own answer
   // (badgeTypeForPerson), not "any seat they hold" — an event seat would pick
   // the wrong design, and the sticker would land off its card.
-  const run = await resolveBadgeRun(conferenceId);
+  const run = await resolveBadgeRun(conferenceId, { includeTestOrganizations: true });
   const badgeTypeId = badgeTypeForPerson(run, job.person_id as string)?.entityId ?? null;
 
   // The template the cards were printed with — the same rule as the print run.
