@@ -613,7 +613,10 @@ async function insertBadgeEvent(params: {
   payload?: Record<string, unknown>;
 }): Promise<void> {
   const db = createAdminClient();
-  await db.from("badge_print_events").insert({
+  // ⛔ Read the error. The event_type check rejected every preflight_warning
+  // and nothing noticed, because this result was thrown away. An event is the
+  // job's history, not the job: log it loudly, never fail the job over it.
+  const { error } = await db.from("badge_print_events").insert({
     job_id: params.jobId,
     conference_id: params.conferenceId,
     person_id: params.personId,
@@ -623,6 +626,9 @@ async function insertBadgeEvent(params: {
     actor_id: params.actorId,
     payload: (params.payload ?? {}) as unknown as import("@/lib/database.types").Json,
   });
+  if (error) {
+    console.error(`[badges] ${params.eventType} event for job ${params.jobId} not saved: ${error.message}`);
+  }
 }
 
 export async function createPreprintedBadgeJob(params: {

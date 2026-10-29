@@ -768,11 +768,37 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     maxLines: 1,
     lineHeightEm: 1.0,
   });
-  const lastLayout = fitTextLayout(bindingValues.lastName || " ", front.lastName, template.canvas.dpi, {
-    maxLines: front.lastName.maxLines ?? 2,
+  /**
+   * ⛔ A LAST NAME SHRINKS BEFORE IT WRAPS, AND A WRAP MOVES THE TITLE.
+   *
+   * The title sits at a fixed baseline one line below the last name. Fitting
+   * the last name with two lines allowed broke a two-word surname at full size
+   * ("Test Full / Conference" at 29pt) and printed its second line on top of
+   * the title. So: one line, shrinking to the slot's minimum. Only a name that
+   * cannot fit on one line even then wraps, at the minimum size, and the title
+   * moves down by exactly the extra line.
+   */
+  const lastMaxLines = front.lastName.maxLines ?? 2;
+  const lastOneLine = fitTextLayout(bindingValues.lastName || " ", front.lastName, template.canvas.dpi, {
+    maxLines: 1,
     lineHeightEm: 1.02,
   });
-  const titleLayout = fitTextLayout(bindingValues.title, front.title, template.canvas.dpi, {
+  const lastLayout =
+    lastOneLine.overflowed && lastMaxLines > 1
+      ? fitTextLayout(
+          bindingValues.lastName || " ",
+          { ...front.lastName, defaultPt: front.lastName.minPt },
+          template.canvas.dpi,
+          { maxLines: lastMaxLines, lineHeightEm: 1.02 }
+        )
+      : lastOneLine;
+  const lastExtraPx =
+    (lastLayout.lines.length - 1) *
+    designPxFromPt(lastLayout.sizePt, template.canvas.dpi) *
+    lastLayout.lineHeightEm;
+  const titleSlot =
+    lastExtraPx > 0 ? { ...front.title, baselineY: front.title.baselineY + lastExtraPx } : front.title;
+  const titleLayout = fitTextLayout(bindingValues.title, titleSlot, template.canvas.dpi, {
     maxLines: front.title.maxLines ?? 3,
     lineHeightEm: front.title.lineHeight ?? 1.15,
   });
@@ -1037,7 +1063,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     bindingValues.title
       ? renderTextBlock({
           lines: titleLayout.lines,
-          slot: front.title,
+          slot: titleSlot,
           layout: titleLayout,
           dpi: template.canvas.dpi,
           scaleX,

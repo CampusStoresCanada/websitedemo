@@ -153,7 +153,7 @@ export async function finishJob(
     })
     .eq("id", jobId)
     .eq("conference_id", station.conferenceId);
-  await db.from("badge_print_events").insert({
+  const { error: eventError } = await db.from("badge_print_events").insert({
     job_id: jobId,
     conference_id: station.conferenceId,
     person_id: personId,
@@ -165,4 +165,8 @@ export async function finishJob(
     actor_id: station.createdBy,
     payload: { stationId: station.id },
   });
+  // The failure reason exists nowhere else, so losing this insert loses it.
+  if (eventError) {
+    console.error(`[print-station] event for job ${jobId} not saved: ${eventError.message}`);
+  }
 }
