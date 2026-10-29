@@ -13,6 +13,7 @@ import crypto from "node:crypto";
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/database.types";
+import type { GroupSyncOutcome } from "@/lib/google/governance-group";
 import { getProgramsConfig } from "@/lib/policy/engine";
 import { resolveMembershipStatus } from "@/lib/auth/org-level";
 import {
@@ -4298,7 +4299,14 @@ export async function applyBoardTransition(
     effectiveOn: string;
     actorProfileId: string;
   }
-): Promise<Result<{ changed: string[]; skipped: string[]; taskRaised: boolean }>> {
+): Promise<
+  Result<{
+    changed: string[];
+    skipped: string[];
+    taskRaised: boolean;
+    groups: GroupSyncOutcome[];
+  }>
+> {
   const db = createAdminClient();
   const state = await getBoardTransition(slug);
   if (!state) return fail("That election does not exist.");
@@ -4354,10 +4362,30 @@ export async function applyBoardTransition(
     }
   }
 
-  // ⚠️ Circle is NOT touched here. Adds reconcile from circle_space_rules on
-  // their own; removals are the side that drifts, and a board space is the
-  // wrong place to discover that. Raised as an obligation on a person instead
-  // of pretended at in software.
+  // The Google groups that follow a role on this body, done here and proved
+  // here. ⛔ This used to be left to an hourly reconciler, which meant the
+  // button reported success before anything had happened and a failed add
+  // landed in a column nobody opens. Both sides run it: seating adds the new
+  // directors, and standing down adds nobody but reads the membership back,
+  // which is what names the people still on the list below.
+  const { syncGovernanceGroupNow, groupRulesForBody } = await import("@/lib/google/governance-group");
+  const { data: bodyRow } = await db
+    .from("governance_bodies")
+    .select("key")
+    .eq("id", election.bodyId)
+    .maybeSingle();
+
+  const groups: GroupSyncOutcome[] = [];
+  if (bodyRow?.key) {
+    for (const rule of await groupRulesForBody(db, bodyRow.key as string)) {
+      groups.push(await syncGovernanceGroupNow(db, rule, rule.groupEmail));
+    }
+  }
+
+  // ⚠️ Circle is NOT touched here. Circle removals queue and do not reliably
+  // drain, so they stay an obligation on a person rather than something
+  // pretended at in software. That is about Circle: the Google group above is
+  // a synchronous call that either works or says why, so it is done for real.
   let taskRaised = false;
   if (input.side === "outgoing" && state.plan.outgoing.length > 0) {
     // Hangs off a board meeting like every other obligation — that is what
@@ -4373,6 +4401,15 @@ export async function applyBoardTransition(
 
     if (meetingRow) {
       const names = state.plan.outgoing.map((p) => p.name).join(", ");
+      // Read back from Google a moment ago, so these are addresses that are on
+      // the list right now holding no role — not a guess from the roster.
+      const onTheList = groups.flatMap((g) => g.stale);
+      const groupLine =
+        onTheList.length > 0
+          ? `\n\nSTILL ON THE MAILING LIST holding no role: ${onTheList.join(", ")}. ` +
+            `Removing somebody from a Google group is not automatic here — take them off in ` +
+            `Workspace, or say so and it can be made part of this button.`
+          : "";
       const { error } = await db.from("board_action_items").insert({
         meeting_id: meetingRow.id as string,
         title: `Remove the outgoing ${election.cycleYear} directors from the board Circle spaces`,
@@ -4382,7 +4419,8 @@ export async function applyBoardTransition(
           `By hand on purpose. Circle removals queue but do not reliably drain, and the only ` +
           `reconciler is add-only — so a revoke that silently fails never self-heals, and a ` +
           `board space is the wrong place to discover that. Check the member list afterwards ` +
-          `rather than trusting the queue.`,
+          `rather than trusting the queue.` +
+          groupLine,
         assignees: [],
         due_date: input.effectiveOn,
         source: "manual",
@@ -4391,7 +4429,7 @@ export async function applyBoardTransition(
     }
   }
 
-  return ok({ changed, skipped, taskRaised });
+  return ok({ changed, skipped, taskRaised, groups });
 }
 
 /**

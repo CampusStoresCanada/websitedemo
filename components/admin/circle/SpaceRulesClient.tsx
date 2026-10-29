@@ -8,8 +8,13 @@ import { parseUTC } from "@/lib/utils";
 
 export type SpaceRuleView = {
   id: string;
-  spaceId: number;
+  /** Null on a rule whose destination is not a Circle space. */
+  spaceId: number | null;
   spaceName: string | null;
+  destination: string;
+  googleGroupEmail: string | null;
+  bodyKey: string | null;
+  roleKey: string | null;
   label: string;
   kind: string;
   conferenceId: string | null;
@@ -28,13 +33,21 @@ type Props = {
   passes: { id: string; conferenceId: string; name: string }[];
   surveyFields: { field: string; label: string }[];
   surveyAnswers: Record<string, string[]>;
+  bodies: { key: string; name: string }[];
+  /** Body key → the roles people actually hold on it. */
+  rolesByBody: Record<string, string[]>;
 };
+
+type RuleKind = "conference_passes" | "survey_answer" | "governance_role";
 
 type Draft = {
   id: string | null;
   spaceId: string;
   label: string;
-  kind: "conference_passes" | "survey_answer";
+  kind: RuleKind;
+  googleGroupEmail: string;
+  bodyKey: string;
+  roleKey: string;
   conferenceId: string;
   allPasses: boolean;
   passEntityIds: string[];
@@ -51,6 +64,9 @@ function emptyDraft(): Draft {
     spaceId: "",
     label: "",
     kind: "conference_passes",
+    googleGroupEmail: "",
+    bodyKey: "",
+    roleKey: "",
     conferenceId: "",
     allPasses: true,
     passEntityIds: [],
@@ -62,9 +78,17 @@ function emptyDraft(): Draft {
 function draftFrom(r: SpaceRuleView): Draft {
   return {
     id: r.id,
-    spaceId: String(r.spaceId),
+    spaceId: r.spaceId === null ? "" : String(r.spaceId),
     label: r.label,
-    kind: r.kind === "survey_answer" ? "survey_answer" : "conference_passes",
+    kind:
+      r.kind === "survey_answer"
+        ? "survey_answer"
+        : r.kind === "governance_role"
+          ? "governance_role"
+          : "conference_passes",
+    googleGroupEmail: r.googleGroupEmail ?? "",
+    bodyKey: r.bodyKey ?? "",
+    roleKey: r.roleKey ?? "",
     conferenceId: r.conferenceId ?? "",
     allPasses: r.passEntityIds == null,
     passEntityIds: r.passEntityIds ?? [],
@@ -85,6 +109,21 @@ function LastRun({ rule }: { rule: SpaceRuleView }) {
     );
   }
   const r = rule.lastRun;
+  // ⚠️ A group run fills the same counters, but three of these words would be
+  // false about it: there is no space, no invite to wait on, and nothing is
+  // ever removed — queuedRemoves counts who a person should take off by hand.
+  if (rule.destination === "google_group") {
+    return (
+      <span className="text-gray-700">
+        {r.holders ?? 0} hold the role · {r.inSpace ?? 0} in the group
+        {(r.queuedAdds ?? 0) > 0 && <> · {r.queuedAdds} added</>}
+        {(r.queuedRemoves ?? 0) > 0 && (
+          <> · {r.queuedRemoves} to take off by hand</>
+        )}
+        <span className="block text-xs text-gray-400" suppressHydrationWarning>{when}</span>
+      </span>
+    );
+  }
   return (
     <span className="text-gray-700">
       {r.holders ?? 0} qualify · {r.inSpace ?? 0} in space · {r.waitingOnInvite ?? 0} waiting on invite
@@ -98,7 +137,8 @@ function LastRun({ rule }: { rule: SpaceRuleView }) {
 }
 
 export default function SpaceRulesClient(props: Props) {
-  const { rules, spaces, spacesError, conferences, passes, surveyFields, surveyAnswers } = props;
+  const { rules, spaces, spacesError, conferences, passes, surveyFields, surveyAnswers, bodies, rolesByBody } =
+    props;
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,9 +147,17 @@ export default function SpaceRulesClient(props: Props) {
   const confName = new Map(conferences.map((c) => [c.id, c.name]));
   const passName = new Map(passes.map((p) => [p.id, p.name]));
   const fieldLabel = new Map(surveyFields.map((f) => [f.field, f.label]));
-  const takenSpaces = new Set(rules.filter((r) => r.id !== draft?.id).map((r) => r.spaceId));
+  const takenSpaces = new Set(
+    rules.filter((r) => r.id !== draft?.id && r.spaceId !== null).map((r) => r.spaceId as number),
+  );
+
+  const bodyName = new Map(bodies.map((b) => [b.key, b.name]));
 
   function describe(r: SpaceRuleView): string {
+    if (r.kind === "governance_role") {
+      const body = bodyName.get(r.bodyKey ?? "") ?? r.bodyKey ?? "a body";
+      return `Everyone currently holding "${r.roleKey}" on the ${body}`;
+    }
     if (r.kind === "survey_answer") {
       return `Current-member schools whose latest survey answer to "${fieldLabel.get(r.surveyField ?? "") ?? r.surveyField}" includes "${r.surveyValue}"`;
     }
@@ -123,10 +171,18 @@ export default function SpaceRulesClient(props: Props) {
     if (!draft) return;
     setError(null);
     startSave(async () => {
+      // The kind decides the destination: a role rule keeps a Google group in
+      // step, everything else a Circle space. Nobody has to pick twice, and a
+      // combination the database would refuse cannot be expressed.
+      const isRole = draft.kind === "governance_role";
       const result = await saveCircleSpaceRule(draft.id, {
-        spaceId: Number(draft.spaceId),
+        spaceId: isRole ? null : Number(draft.spaceId),
         label: draft.label,
         kind: draft.kind,
+        destination: isRole ? "google_group" : "circle_space",
+        googleGroupEmail: isRole ? draft.googleGroupEmail : null,
+        bodyKey: isRole ? draft.bodyKey : null,
+        roleKey: isRole ? draft.roleKey : null,
         conferenceId: draft.conferenceId || null,
         passEntityIds: draft.allPasses ? null : draft.passEntityIds,
         surveyField: draft.surveyField,
@@ -152,6 +208,10 @@ export default function SpaceRulesClient(props: Props) {
   }
 
   const confPasses = draft ? passes.filter((p) => p.conferenceId === draft.conferenceId) : [];
+  const isRoleRule = draft?.kind === "governance_role";
+  // Only roles someone actually holds: a list of every role a body could have
+  // would offer rules that match nobody.
+  const roleChoices = draft ? (rolesByBody[draft.bodyKey] ?? []) : [];
 
   return (
     <div className="space-y-6">
@@ -159,7 +219,9 @@ export default function SpaceRulesClient(props: Props) {
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-gray-900">Rules</h2>
-            <p className="text-xs text-gray-500 mt-0.5">One rule per space. Changes apply on the next hourly run.</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              One rule per space or group. Changes apply on the next hourly run.
+            </p>
           </div>
           {!draft && (
             <button
@@ -180,7 +242,7 @@ export default function SpaceRulesClient(props: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="px-4 py-2 text-left font-medium text-gray-600">Space</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Destination</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Who belongs</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600 min-w-[14rem]">Last run</th>
                 <th className="px-4 py-2"></th>
@@ -192,7 +254,9 @@ export default function SpaceRulesClient(props: Props) {
                   <td className="px-4 py-3">
                     <div className="font-medium text-gray-900">{r.label}</div>
                     <div className="text-xs text-gray-500">
-                      {r.spaceName ?? "Circle space"} · {r.spaceId}
+                      {r.destination === "google_group"
+                        ? (r.googleGroupEmail ?? "Google group")
+                        : `${r.spaceName ?? "Circle space"} · ${r.spaceId}`}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-700">{describe(r)}</td>
@@ -236,6 +300,29 @@ export default function SpaceRulesClient(props: Props) {
           <h2 className="text-sm font-semibold text-gray-900">{draft.id ? "Edit rule" : "New rule"}</h2>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            {draft.kind === "governance_role" ? (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Google group</label>
+                {draft.id ? (
+                  <p className="text-sm text-gray-700 py-2">
+                    {draft.googleGroupEmail || "Google group"}
+                    <span className="block text-xs text-gray-500">
+                      To use a different group, remove this rule and add a new one.
+                    </span>
+                  </p>
+                ) : (
+                  <input
+                    value={draft.googleGroupEmail}
+                    onChange={(e) => setDraft({ ...draft, googleGroupEmail: e.target.value })}
+                    placeholder="board@campusstores.ca"
+                    className={inputClass}
+                  />
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  People are added, never removed. Taking someone off the group stays a manual step.
+                </p>
+              </div>
+            ) : (
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Circle space</label>
               {draft.id ? (
@@ -277,6 +364,7 @@ export default function SpaceRulesClient(props: Props) {
                 </>
               )}
             </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Label</label>
               <input
@@ -289,13 +377,14 @@ export default function SpaceRulesClient(props: Props) {
           </div>
 
           <fieldset>
-            <legend className="block text-xs font-medium text-gray-700 mb-1">Who belongs in the space</legend>
+            <legend className="block text-xs font-medium text-gray-700 mb-1">Who belongs</legend>
             <div className="flex flex-wrap gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
                   checked={draft.kind === "conference_passes"}
                   onChange={() => setDraft({ ...draft, kind: "conference_passes" })}
+                  disabled={isRoleRule && draft.id !== null}
                 />
                 Conference pass holders
               </label>
@@ -304,13 +393,70 @@ export default function SpaceRulesClient(props: Props) {
                   type="radio"
                   checked={draft.kind === "survey_answer"}
                   onChange={() => setDraft({ ...draft, kind: "survey_answer" })}
+                  disabled={isRoleRule && draft.id !== null}
                 />
                 Schools by benchmarking answer
               </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={isRoleRule}
+                  onChange={() => setDraft({ ...draft, kind: "governance_role" })}
+                  disabled={!isRoleRule && draft.id !== null}
+                />
+                People holding a governance role
+              </label>
             </div>
+            {draft.id !== null && (
+              <p className="mt-1 text-xs text-gray-500">
+                A saved rule keeps its destination. To send the same people somewhere else, add a second rule.
+              </p>
+            )}
           </fieldset>
 
-          {draft.kind === "conference_passes" ? (
+          {isRoleRule ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Body</label>
+                <select
+                  value={draft.bodyKey}
+                  onChange={(e) => setDraft({ ...draft, bodyKey: e.target.value, roleKey: "" })}
+                  className={inputClass}
+                >
+                  <option value="">Pick a body…</option>
+                  {bodies.map((b) => (
+                    <option key={b.key} value={b.key}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Role</label>
+                <select
+                  value={draft.roleKey}
+                  onChange={(e) => setDraft({ ...draft, roleKey: e.target.value })}
+                  disabled={!draft.bodyKey}
+                  className={inputClass}
+                >
+                  <option value="">{draft.bodyKey ? "Pick a role…" : "Pick a body first"}</option>
+                  {roleChoices.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                {draft.bodyKey && roleChoices.length === 0 && (
+                  <p className="mt-1 text-xs text-amber-700">
+                    Nobody holds a role on this body yet, so there is nothing to pick. Fill the roster first.
+                  </p>
+                )}
+              </div>
+              <p className="sm:col-span-2 text-xs text-gray-500">
+                Everyone holding this role today, at their institutional address. Personal addresses are left alone.
+              </p>
+            </div>
+          ) : draft.kind === "conference_passes" ? (
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Conference</label>

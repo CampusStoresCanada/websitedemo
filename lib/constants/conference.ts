@@ -202,6 +202,7 @@ export const LEGAL_DOCUMENT_TYPES = [
   "exhibitor_agreement",
   "speaker_agreement",
   "cancoll_information_sharing",
+  "travel_bursary_terms",
 ] as const;
 
 export type LegalDocumentType = (typeof LEGAL_DOCUMENT_TYPES)[number];
@@ -251,6 +252,7 @@ export const LEGAL_DOCUMENT_LABELS: Record<LegalDocumentType, string> = {
   exhibitor_agreement: "Exhibitor & Booth Agreement",
   speaker_agreement: "Speaker & Presenter Agreement",
   cancoll_information_sharing: "CANCOLL Information Sharing",
+  travel_bursary_terms: "Travel Bursary Terms",
 };
 
 // ---------------------------------------------------------------------------

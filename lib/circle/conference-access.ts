@@ -30,6 +30,7 @@ import { enqueueCircleSync } from "@/lib/circle/sync";
 import { loadSeatHoldings, type SeatHolding } from "@/lib/conference/seats";
 import {
   parseRuleRow,
+  ruleDestination,
   SPACE_RULE_COLUMNS,
   type ConferencePassRule,
   type RuleLastRun,
@@ -183,6 +184,15 @@ async function syncOneSpace(
 ): Promise<void> {
   const { db, client, bucket, result } = ctx;
   const where = `${source} / ${rule.label}`;
+
+  // ⚠️ spaceId became nullable when rules gained a destination — a Google
+  // group rule has no space. This function is Circle-only, so it narrows once
+  // here rather than asserting at each of the nine uses below.
+  const spaceId = rule.spaceId;
+  if (spaceId === null) {
+    await failRule(ctx, rule, `${where}: no Circle space on a rule the Circle job was given`);
+    return;
+  }
   const wanted: HolderContact[] = [];
   let noCircleAccount = 0;
   for (const id of qualifying) {
@@ -193,7 +203,7 @@ async function syncOneSpace(
 
   let roster: Set<string>;
   try {
-    roster = new Set((await client.listSpaceMemberIds(rule.spaceId)).map(String));
+    roster = new Set((await client.listSpaceMemberIds(spaceId)).map(String));
   } catch (e) {
     // Never diff against a roster we could not read: it would re-add everyone.
     await failRule(ctx, rule, `${where}: roster read failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -204,13 +214,13 @@ async function syncOneSpace(
     .from("circle_sync_queue")
     .select("idempotency_key")
     .eq("status", "completed")
-    .like("idempotency_key", `conf-space-%-${rule.spaceId}-%`)
+    .like("idempotency_key", `conf-space-%-${spaceId}-%`)
     .order("created_at", { ascending: true });
   if (oursErr) {
     await failRule(ctx, rule, `${where}: could not read past adds: ${oursErr.message}`);
     return;
   }
-  const addedIds = [...contactsWeAdded(ours ?? [], rule.spaceId)];
+  const addedIds = [...contactsWeAdded(ours ?? [], spaceId)];
   const added = await loadContacts(db, addedIds);
   if (typeof added === "string") {
     await failRule(ctx, rule, `${where}: could not load past adds: ${added}`);
@@ -228,7 +238,7 @@ async function syncOneSpace(
     .select("entity_id")
     .eq("status", "failed")
     .eq("operation", "add_to_space")
-    .like("idempotency_key", `conf-space-add-${rule.spaceId}-%`)
+    .like("idempotency_key", `conf-space-add-${spaceId}-%`)
     .gte("created_at", since);
   if (refusedErr) {
     await failRule(ctx, rule, `${where}: could not read recent refusals: ${refusedErr.message}`);
@@ -242,8 +252,8 @@ async function syncOneSpace(
       operation: "add_to_space",
       entityType: "contact",
       entityId: w.contactId,
-      payload: { spaceId: rule.spaceId, email: w.email },
-      idempotencyKey: addKey(rule.spaceId, w.contactId, bucket),
+      payload: { spaceId: spaceId, email: w.email },
+      idempotencyKey: addKey(spaceId, w.contactId, bucket),
     });
   }
   for (const r of toRemove) {
@@ -251,8 +261,8 @@ async function syncOneSpace(
       operation: "remove_from_space",
       entityType: "contact",
       entityId: r.contactId,
-      payload: { spaceId: rule.spaceId, email: r.email },
-      idempotencyKey: removeKey(rule.spaceId, r.contactId, bucket),
+      payload: { spaceId: spaceId, email: r.email },
+      idempotencyKey: removeKey(spaceId, r.contactId, bucket),
     });
   }
 
@@ -264,7 +274,7 @@ async function syncOneSpace(
     waitingOnInvite: diffAdds.length - toAdd.length,
     queuedRemoves: toRemove.length,
   };
-  result.spaces.push({ conference: source, label: rule.label, spaceId: rule.spaceId, ...counts });
+  result.spaces.push({ conference: source, label: rule.label, spaceId: spaceId, ...counts });
   await recordRun(ctx, rule, counts);
 }
 
@@ -399,16 +409,18 @@ export async function runConferenceCircleAccessSync(): Promise<{
   errors: string[];
 }> {
   const result = { spaces: [] as SpaceResult[], errors: [] as string[] };
-  if (!isCircleConfigured()) return result;
-  const client = getCircleClient();
-  if (!client) return result;
-
   const db = createAdminClient();
-  // Hour bucket: a pending job blocks a duplicate within the hour, but a person
-  // removed and later re-added can still be queued again.
-  const ctx: Ctx = { db, client, bucket: new Date().toISOString().slice(0, 13), result };
 
-  const { data: rows, error } = await db.from("circle_space_rules").select(SPACE_RULE_COLUMNS);
+  const client = isCircleConfigured() ? getCircleClient() : null;
+
+  // ⛔ Group rules are not loaded here. They run from the button that changes
+  // the board, which reads the membership back and tells the person who
+  // pressed it — see lib/google/governance-group.ts. An hourly tick would be
+  // 8,760 calls a year to confirm a thing that changes once.
+  const { data: rows, error } = await db
+    .from("circle_space_rules")
+    .select(SPACE_RULE_COLUMNS)
+    .or("destination.is.null,destination.eq.circle_space");
   if (error) {
     result.errors.push(`Could not load space rules: ${error.message}`);
     return result;
@@ -422,10 +434,28 @@ export async function runConferenceCircleAccessSync(): Promise<{
       result.errors.push(`${row.label}: ${rule}`);
       continue;
     }
+    const destination = ruleDestination(row);
+    if (typeof destination === "string") {
+      result.errors.push(`${row.label}: ${destination}`);
+      continue;
+    }
+    // Filtered out by the query above; a hand-written row that slips through
+    // is still not this job's to run.
+    if (destination.kind === "google_group") continue;
     if (rule.kind === "conference_passes") conferenceRules.push(rule);
-    else surveyRules.push(rule);
+    else if (rule.kind === "survey_answer") surveyRules.push(rule);
+    else result.errors.push(`${row.label}: a governance_role rule needs a Google group destination`);
   }
 
+  if (!client) {
+    if (conferenceRules.length > 0 || surveyRules.length > 0)
+      result.errors.push("Circle is not configured, so space rules were skipped.");
+    return result;
+  }
+
+  // Hour bucket: a pending job blocks a duplicate within the hour, but a person
+  // removed and later re-added can still be queued again.
+  const ctx: Ctx = { db, client, bucket: new Date().toISOString().slice(0, 13), result };
   await syncConferenceSpaces(ctx, conferenceRules);
   for (const rule of surveyRules) await syncSurveySpace(ctx, rule);
   return result;

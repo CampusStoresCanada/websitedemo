@@ -98,6 +98,18 @@ function Row({
           </a>
           {row.submittedOn && ` · ${row.submittedOn}`}
         </p>
+        {row.request ? (
+          <p className="truncate text-[12px] text-gray-700">
+            {[row.request.hotel && "Hotel", row.request.travel && "Travel"].filter(Boolean).join(" + ")}
+            {row.request.payment && ` · ${row.request.payment === "reimburse" ? "reimburse after" : "pay in advance"}`}
+            {row.request.delegateName &&
+              ` · for ${row.request.delegateName}${row.request.delegateTitle ? `, ${row.request.delegateTitle}` : ""}`}
+          </p>
+        ) : (
+          <p className="truncate text-[12px] italic" style={{ color: MUTED }}>
+            Interest only: request not submitted yet
+          </p>
+        )}
         {row.notes && (
           <p className="truncate text-[12px] italic text-gray-600" title={row.notes}>
             {row.notes}

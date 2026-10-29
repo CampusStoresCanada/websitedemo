@@ -22,7 +22,7 @@ export default async function CircleSpaceRulesPage() {
   const today = new Date().toISOString().slice(0, 10);
 
   const circle = getCircleClient();
-  const [rulesRes, confsRes, surveyRes, spacesRes] = await Promise.all([
+  const [rulesRes, confsRes, surveyRes, spacesRes, bodiesRes, roleRes] = await Promise.all([
     db.from("circle_space_rules").select(SPACE_RULE_COLUMNS).order("label"),
     db
       .from("conference_instances")
@@ -36,6 +36,11 @@ export default async function CircleSpaceRulesPage() {
           (e: unknown) => ({ spaces: [], error: e instanceof Error ? e.message : String(e) })
         )
       : Promise.resolve({ spaces: [], error: "Circle is not configured." }),
+    db.from("governance_bodies").select("key, name").order("name"),
+    // The roles that actually exist, rather than a list to keep in step by
+    // hand. A role nobody holds cannot be picked, which is correct: a rule
+    // naming one would match nobody and read as a broken job.
+    db.from("governance_role_assignments").select("body_id, role_key"),
   ]);
 
   const rules = (rulesRes.data ?? []) as SpaceRuleRow[];
@@ -63,11 +68,30 @@ export default async function CircleSpaceRulesPage() {
     answers[field] = [...seen].sort((a, b) => a.localeCompare(b));
   }
 
+  const bodies = (bodiesRes.data ?? []).map((b) => ({ key: b.key as string, name: b.name as string }));
+  const bodyKeyById = new Map(
+    (
+      await db.from("governance_bodies").select("id, key")
+    ).data?.map((b) => [b.id as string, b.key as string]) ?? []
+  );
+  const rolesByBody: Record<string, string[]> = {};
+  for (const r of roleRes.data ?? []) {
+    const key = bodyKeyById.get(r.body_id as string);
+    if (!key) continue;
+    (rolesByBody[key] ??= []).push(r.role_key as string);
+  }
+  for (const key of Object.keys(rolesByBody))
+    rolesByBody[key] = [...new Set(rolesByBody[key])].sort();
+
   const spaceNames = new Map(spacesRes.spaces.map((s) => [s.id, s.name]));
   const views: SpaceRuleView[] = rules.map((r) => ({
     id: r.id,
-    spaceId: Number(r.space_id),
-    spaceName: spaceNames.get(Number(r.space_id)) ?? null,
+    spaceId: r.space_id === null ? null : Number(r.space_id),
+    spaceName: r.space_id === null ? null : spaceNames.get(Number(r.space_id)) ?? null,
+    destination: (r.destination ?? "circle_space") as string,
+    googleGroupEmail: r.google_group_email ?? null,
+    bodyKey: r.body_key ?? null,
+    roleKey: r.role_key ?? null,
     label: r.label,
     kind: r.kind,
     conferenceId: r.conference_id,
@@ -84,7 +108,7 @@ export default async function CircleSpaceRulesPage() {
     <main>
       <AdminPageHeader
         title="Circle Spaces"
-        description="Private Circle spaces kept in step with who qualifies for them. Every hour, people who qualify and have a Circle account are added; people this sync added are removed once they stop qualifying. Anyone added by hand is never removed."
+        description="Destinations kept in step with who qualifies for them — private Circle spaces, and Google groups. Every hour, people who qualify are added; in a Circle space, people this sync added are removed once they stop qualifying. Anyone added by hand is never removed, and nobody is ever removed from a Google group."
         actions={
           <Link
             href="/admin/circle"
@@ -109,6 +133,8 @@ export default async function CircleSpaceRulesPage() {
         passes={(passRows ?? []).map((p) => ({ id: p.id, conferenceId: p.conference_id, name: p.name }))}
         surveyFields={SURVEY_ARRAY_FIELDS.map((f) => ({ field: f.field, label: f.label }))}
         surveyAnswers={answers}
+        bodies={bodies}
+        rolesByBody={rolesByBody}
       />
     </main>
   );
