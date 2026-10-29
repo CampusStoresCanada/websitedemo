@@ -523,8 +523,16 @@ export async function applyBoardTransitionAction(
   // person had reached the mailing list.
   const { describeOutcome } = await import("@/lib/google/governance-group");
   const groups = result.data.groups.map(describeOutcome);
+  // ⛔ stillThere belongs here as much as missing. A removal that Google
+  // accepted and did not perform leaves somebody reading the board's mail
+  // after they left the board, and a green banner over that is the exact
+  // failure this path was rewritten to stop.
   const groupsFailed = result.data.groups.some(
-    (g) => g.error !== null || g.missing.length > 0 || g.failed.length > 0
+    (g) =>
+      g.error !== null ||
+      g.missing.length > 0 ||
+      g.stillThere.length > 0 ||
+      g.failed.length > 0
   );
 
   revalidatePath(`/admin/elections/${slug}/audit`);

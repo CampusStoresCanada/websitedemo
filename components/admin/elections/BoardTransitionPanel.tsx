@@ -83,7 +83,8 @@ export default function BoardTransitionPanel({
       <h2 className="text-sm font-semibold text-gray-900">Board access</h2>
       <p className="mt-1 text-sm text-gray-600">
         Who gains the console and who loses it. The two sides happen months apart, so each is
-        pressed separately and each carries its own date.
+        pressed separately and each carries its own date — when a board stops being the board is a
+        decision the association makes, not something this page assumes.
       </p>
 
       {!certified ? (
@@ -116,8 +117,9 @@ export default function BoardTransitionPanel({
                 Give the incoming directors access
               </p>
               <p className="mt-0.5 text-xs text-gray-500">
-                Records the term and makes them administrators. Circle adds reconcile on their own
-                from the space rules.
+                Records the term, makes them administrators, and puts them on the board mailing
+                lists, reading the membership back from Google to confirm it. Circle adds reconcile
+                on their own from the space rules.
               </p>
               <DatePicker side="incoming" agmDate={agmDate} conferenceEndsOn={conferenceEndsOn} />
               <button
@@ -137,9 +139,15 @@ export default function BoardTransitionPanel({
                 Remove the outgoing directors&apos; access
               </p>
               <p className="mt-0.5 text-xs text-gray-500">
-                Takes the console away and raises a dated obligation on the board&apos;s list to
-                remove them from the Circle spaces and revoke moderator status — that part is by
-                hand, because a Circle revoke that fails does not heal itself.
+                Takes the console away and takes them off the board mailing lists, reading the
+                membership back from Google to confirm it. Circle is still by hand: a Circle revoke
+                that fails does not heal itself, so it is raised as a dated obligation on the
+                board&apos;s list instead of pretended at here.
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                Press this on the date the people above stop being directors — at CSC that is the
+                end of the conference after the meeting, not the meeting itself. It refuses to run
+                early.
               </p>
               <DatePicker side="outgoing" agmDate={agmDate} conferenceEndsOn={conferenceEndsOn} />
               <button

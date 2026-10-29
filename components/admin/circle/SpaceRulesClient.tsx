@@ -109,17 +109,16 @@ function LastRun({ rule }: { rule: SpaceRuleView }) {
     );
   }
   const r = rule.lastRun;
-  // ⚠️ A group run fills the same counters, but three of these words would be
-  // false about it: there is no space, no invite to wait on, and nothing is
-  // ever removed — queuedRemoves counts who a person should take off by hand.
+  // ⚠️ A group run fills the same counters, but two of these words would be
+  // false about it: there is no space and no invite to wait on. A group add or
+  // removal happens at the press and is confirmed by a read back, so both
+  // counters here are things that DID happen, not things queued.
   if (rule.destination === "google_group") {
     return (
       <span className="text-gray-700">
         {r.holders ?? 0} hold the role · {r.inSpace ?? 0} in the group
         {(r.queuedAdds ?? 0) > 0 && <> · {r.queuedAdds} added</>}
-        {(r.queuedRemoves ?? 0) > 0 && (
-          <> · {r.queuedRemoves} to take off by hand</>
-        )}
+        {(r.queuedRemoves ?? 0) > 0 && <> · {r.queuedRemoves} taken off</>}
         <span className="block text-xs text-gray-400" suppressHydrationWarning>{when}</span>
       </span>
     );

@@ -149,8 +149,9 @@ export default async function ElectionAuditPage({
           )}
           {moved === "failed" && (
             <p className="mt-2 font-medium">
-              The mailing list did not fully take. Nothing else is blocked — fix the address or add
-              the person in Workspace, then press this again.
+              The mailing list did not fully take. Nothing else is blocked, and the seating or
+              standing down itself went through — put the membership right in Workspace, or fix the
+              address and press this again.
             </p>
           )}
         </div>

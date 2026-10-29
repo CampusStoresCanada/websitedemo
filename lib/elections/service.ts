@@ -46,6 +46,7 @@ import {
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import {
   buildTransitionPlan,
+  mailingListChange,
   termsEndingBy,
   type BoardTransitionPlan,
   type TransitionPerson,
@@ -4365,9 +4366,15 @@ export async function applyBoardTransition(
   // The Google groups that follow a role on this body, done here and proved
   // here. ⛔ This used to be left to an hourly reconciler, which meant the
   // button reported success before anything had happened and a failed add
-  // landed in a column nobody opens. Both sides run it: seating adds the new
-  // directors, and standing down adds nobody but reads the membership back,
-  // which is what names the people still on the list below.
+  // landed in a column nobody opens.
+  //
+  // Both sides write, and which side it is decides what the outgoing directors
+  // mean. CSC's keep the mailing list through the conference AFTER the meeting,
+  // so at the seating press they are retained — on the list on purpose, not
+  // strays — and only the standing-down press, which cannot run before the date
+  // entered for it, takes them off. An association that ends its board at the
+  // meeting enters that date instead and gets the removal there; nothing here
+  // assumes which protocol applies.
   const { syncGovernanceGroupNow, groupRulesForBody } = await import("@/lib/google/governance-group");
   const { data: bodyRow } = await db
     .from("governance_bodies")
@@ -4375,10 +4382,21 @@ export async function applyBoardTransition(
     .eq("id", election.bodyId)
     .maybeSingle();
 
+  // Which press this is decides what the people listed under "Leaving" mean to
+  // the list: retained at the seating, removed at the standing down. The rule
+  // itself is pure and lives beside the plan, where it can be read and tested
+  // without a database.
+  const listChange = mailingListChange(input.side, state.plan.outgoing);
+
   const groups: GroupSyncOutcome[] = [];
   if (bodyRow?.key) {
     for (const rule of await groupRulesForBody(db, bodyRow.key as string)) {
-      groups.push(await syncGovernanceGroupNow(db, rule, rule.groupEmail));
+      groups.push(
+        await syncGovernanceGroupNow(db, rule, rule.groupEmail, {
+          asOf: input.effectiveOn,
+          ...listChange,
+        })
+      );
     }
   }
 
@@ -4401,15 +4419,38 @@ export async function applyBoardTransition(
 
     if (meetingRow) {
       const names = state.plan.outgoing.map((p) => p.name).join(", ");
-      // Read back from Google a moment ago, so these are addresses that are on
-      // the list right now holding no role — not a guess from the roster.
-      const onTheList = groups.flatMap((g) => g.stale);
-      const groupLine =
-        onTheList.length > 0
-          ? `\n\nSTILL ON THE MAILING LIST holding no role: ${onTheList.join(", ")}. ` +
-            `Removing somebody from a Google group is not automatic here — take them off in ` +
-            `Workspace, or say so and it can be made part of this button.`
-          : "";
+
+      // What the mailing lists actually did, read back from Google a moment
+      // ago. ⛔ Every line below is a fact from that read, never the roster's
+      // opinion of it: the point of saying any of this in a task is that the
+      // officer can act on the part software did not finish.
+      const lines: string[] = [];
+      for (const g of groups) {
+        if (g.error) {
+          lines.push(`${g.groupEmail}: NOT DONE — ${g.error}. Nobody was taken off; do it by hand.`);
+          continue;
+        }
+        if (g.removed.length > 0)
+          lines.push(`${g.groupEmail}: took off ${g.removed.join(", ")}, confirmed by reading it back.`);
+        if (g.stillThere.length > 0)
+          lines.push(
+            `${g.groupEmail}: STILL ON THE LIST after the removal — ${g.stillThere.join(", ")}. ` +
+              `Take them off in Workspace; the delete did not take.`
+          );
+        for (const f of g.failed.filter((f) => f.action === "remove"))
+          lines.push(`${g.groupEmail}: could not remove ${f.email} — ${f.reason}. Do it by hand.`);
+        for (const l of g.leftAlone)
+          lines.push(
+            `${g.groupEmail}: left ${l.email} on the list on purpose — ${l.reason}. ` +
+              `Change it by hand if that is wrong.`
+          );
+        if (g.stale.length > 0)
+          lines.push(
+            `${g.groupEmail}: on the list holding no role and not part of this changeover — ` +
+              `${g.stale.join(", ")}. Nothing touched them; decide whether they belong.`
+          );
+      }
+      const groupLine = lines.length > 0 ? `\n\nMAILING LISTS\n${lines.join("\n")}` : "";
       const { error } = await db.from("board_action_items").insert({
         meeting_id: meetingRow.id as string,
         title: `Remove the outgoing ${election.cycleYear} directors from the board Circle spaces`,

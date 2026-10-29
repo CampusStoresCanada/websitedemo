@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTransitionPlan,
+  mailingListChange,
   resolveEffectiveDate,
   termsEndingBy,
   latestTermPerPerson,
@@ -138,5 +139,38 @@ describe("one row per person, the term they hold now", () => {
   it("keeps an open-ended term whichever order the rows arrive in", () => {
     expect(latestTermPerPerson([row("X", null), row("X", "2026-01-01")])[0].termEnd).toBeNull();
     expect(latestTermPerPerson([row("X", "2026-01-01"), row("X", null)])[0].termEnd).toBeNull();
+  });
+});
+
+describe("what a press means for the board mailing list", () => {
+  const davies = person("Davies", { alreadyHasAccess: true });
+  const ed = person("ExecDirector", { protectedRole: true });
+
+  it("⛔ retains the leavers at the seating press, because CSC's board keeps the list until the conference ends", () => {
+    expect(mailingListChange("incoming", [davies])).toEqual({
+      retain: ["davies@example.invalid"],
+    });
+  });
+
+  it("removes them at the standing-down press, which carries its own later date", () => {
+    expect(mailingListChange("outgoing", [davies])).toEqual({
+      remove: ["davies@example.invalid"],
+    });
+  });
+
+  it("⛔ never names somebody who is on the list for their job, not their seat", () => {
+    expect(mailingListChange("outgoing", [davies, ed])).toEqual({
+      remove: ["davies@example.invalid"],
+    });
+  });
+
+  it("names nobody rather than undefined when a leaver has no address on file", () => {
+    const noEmail = person("Ghost", { email: null });
+    expect(mailingListChange("outgoing", [noEmail])).toEqual({ remove: [] });
+  });
+
+  it("⛔ passes removals on one side only — a seating press can never take anybody off", () => {
+    const seating = mailingListChange("incoming", [davies]);
+    expect(seating.remove).toBeUndefined();
   });
 });

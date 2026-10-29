@@ -133,3 +133,39 @@ export function latestTermPerPerson(rows: DirectorTermRow[]): DirectorTermRow[] 
 export function termsEndingBy(rows: DirectorTermRow[], agmDate: string): DirectorTermRow[] {
   return latestTermPerPerson(rows).filter((r) => r.termEnd !== null && r.termEnd <= agmDate);
 }
+
+/**
+ * What one press means for a mailing list that follows the role.
+ *
+ * The same set of people — the ones the panel listed under "Leaving" — means
+ * two different things depending on which button was pressed, and the
+ * difference is the whole protocol question. At CSC a director stops being a
+ * director at the end of the conference AFTER the meeting, so at the seating
+ * press they are still on the list on purpose and must not be reported as
+ * strays; the standing-down press, which carries its own date and refuses to
+ * run before it, is the one that takes them off. An association that ends its
+ * board at the meeting enters that date for both presses and gets the removal
+ * there instead. Nothing here decides when that is — it only says that
+ * whenever the outgoing press happens, it is the press that removes.
+ *
+ * ⛔ Skips anyone holding a protected role. CSC staff, the Executive Director
+ * and the President are on the board's list because of their job, and a
+ * directorship ending says nothing about that.
+ *
+ * ⛔ Names people. Never "everyone on the list holding no role" — that set
+ * also holds a management company and shared inboxes somebody added on
+ * purpose, and removing those is a decision nobody made here.
+ *
+ * Pure.
+ */
+export function mailingListChange(
+  side: "incoming" | "outgoing",
+  outgoing: TransitionPerson[]
+): { remove?: string[]; retain?: string[] } {
+  const emails = outgoing
+    .filter((p) => !p.protectedRole)
+    .map((p) => p.email?.toLowerCase())
+    .filter((e): e is string => Boolean(e));
+
+  return side === "outgoing" ? { remove: emails } : { retain: emails };
+}
