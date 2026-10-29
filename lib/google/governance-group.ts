@@ -77,6 +77,11 @@ export type GroupSyncRequest = {
    * list until the conference after the meeting: at the seating press their
    * register terms have already ended, and without this they would be named as
    * strays on the very screen that is supposed to be trustworthy.
+   *
+   * Also carries the rule's own declared always-on addresses — a shared inbox,
+   * a management company, a second address for somebody who misses the first.
+   * Those are permanent rather than per-press, which is why they are declared
+   * on the rule and merged in by the caller instead of being worked out here.
    */
   retain?: string[];
 };
@@ -199,6 +204,10 @@ export async function syncGovernanceGroupNow(
     }
   }
 
+  // Hoisted above the removal loop, not just used for the stale report below:
+  // a retained address must survive being named for removal as well as being
+  // counted as drift. Those are the same fact and must not disagree.
+  const retain = new Set((req.retain ?? []).map((e) => e.toLowerCase()));
   const askedToGo = [...new Set((req.remove ?? []).map((e) => e.toLowerCase()))];
   const removed: string[] = [];
   const leftAlone: { email: string; reason: string }[] = [];
@@ -212,6 +221,14 @@ export async function syncGovernanceGroupNow(
     // mistake available here.
     if (wanted.includes(email)) {
       leftAlone.push({ email, reason: "still holds the role on this body" });
+      continue;
+    }
+    // ⛔ A declaration outranks the caller too. Somebody said this address
+    // belongs on the list whatever the roster says, and a press months later
+    // does not revisit that. Reached when a declared address also holds the
+    // role and then appears under "Leaving".
+    if (retain.has(email)) {
+      leftAlone.push({ email, reason: "declared as belonging on this list whatever the roster says" });
       continue;
     }
     if (email.endsWith(ALIAS_DOMAIN)) {
@@ -262,9 +279,9 @@ export async function syncGovernanceGroupNow(
   const spared = new Set(leftAlone.map((l) => l.email));
   const stillThere = askedToGo.filter((e) => nowPresent.has(e) && !spared.has(e));
 
-  const retain = new Set((req.retain ?? []).map((e) => e.toLowerCase()));
   // ⛔ Counted, never acted on. An alias is not a person, a MANAGER or OWNER
-  // was made one by hand, and a retained address is on the list on purpose.
+  // was made one by hand, and a retained address is on the list on purpose —
+  // either for this press or by standing declaration on the rule.
   const stale = after
     .filter(
       (m) =>
@@ -320,10 +337,20 @@ export async function syncGovernanceGroupNow(
 export async function groupRulesForBody(
   db: Db,
   bodyKey: string
-): Promise<{ id: string; label: string; bodyKey: string; roleKey: string; groupEmail: string }[]> {
+): Promise<
+  {
+    id: string;
+    label: string;
+    bodyKey: string;
+    roleKey: string;
+    groupEmail: string;
+    /** Declared on the rule: on this list whatever the roster says. */
+    alwaysMembers: string[];
+  }[]
+> {
   const { data } = await db
     .from("circle_space_rules")
-    .select("id, label, body_key, role_key, google_group_email")
+    .select("id, label, body_key, role_key, google_group_email, always_members")
     .eq("destination", "google_group")
     .eq("kind", "governance_role")
     .eq("body_key", bodyKey);
@@ -336,5 +363,6 @@ export async function groupRulesForBody(
       bodyKey: r.body_key as string,
       roleKey: r.role_key as string,
       groupEmail: (r.google_group_email as string).toLowerCase(),
+      alwaysMembers: ((r.always_members as string[] | null) ?? []).map((e) => e.toLowerCase()),
     }));
 }

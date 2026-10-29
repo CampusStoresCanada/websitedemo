@@ -155,22 +155,78 @@ describe("what a press means for the board mailing list", () => {
   it("removes them at the standing-down press, which carries its own later date", () => {
     expect(mailingListChange("outgoing", [davies])).toEqual({
       remove: ["davies@example.invalid"],
+      retain: [],
     });
   });
 
   it("⛔ never names somebody who is on the list for their job, not their seat", () => {
     expect(mailingListChange("outgoing", [davies, ed])).toEqual({
       remove: ["davies@example.invalid"],
+      retain: [],
     });
   });
 
   it("names nobody rather than undefined when a leaver has no address on file", () => {
     const noEmail = person("Ghost", { email: null });
-    expect(mailingListChange("outgoing", [noEmail])).toEqual({ remove: [] });
+    expect(mailingListChange("outgoing", [noEmail])).toEqual({ remove: [], retain: [] });
   });
 
   it("⛔ passes removals on one side only — a seating press can never take anybody off", () => {
     const seating = mailingListChange("incoming", [davies]);
     expect(seating.remove).toBeUndefined();
+  });
+});
+
+/**
+ * Addresses declared on the rule as belonging on the list whatever the roster
+ * says. Greg is invited to most things through three addresses because
+ * otherwise he says he did not see it, so board@ holds two @campusstores.ca
+ * addresses and one outside domain that the register has never heard of.
+ *
+ * ⛔ These outlast a press. They are not a fact about a changeover, so neither
+ * press may take them off, and neither may name them as strays.
+ */
+describe("the addresses declared as always on the list", () => {
+  const ALWAYS = [
+    "info@campusstores.ca",
+    "greg@campusstores.ca",
+    "greg@mcphersonmanagement.com",
+  ];
+
+  it("retains them at the standing down, alongside removing the leavers", () => {
+    const out = mailingListChange("outgoing", [person("Left")], ALWAYS);
+    expect(out.remove).toEqual(["left@example.invalid"]);
+    expect(out.retain).toEqual(ALWAYS);
+  });
+
+  it("retains them at the seating, together with the leavers CSC keeps on", () => {
+    const out = mailingListChange("incoming", [person("Left")], ALWAYS);
+    expect(out.remove).toBeUndefined();
+    expect(out.retain).toEqual(["left@example.invalid", ...ALWAYS]);
+  });
+
+  it("⛔ never puts a declared address into the removal list by itself", () => {
+    for (const side of ["incoming", "outgoing"] as const) {
+      const out = mailingListChange(side, [], ALWAYS);
+      expect(out.remove ?? []).toEqual([]);
+      expect(out.retain).toEqual(ALWAYS);
+    }
+  });
+
+  it("leaves a declared address in the removal list when it was listed as leaving", () => {
+    // Deliberate: the sync refuses it and reports the refusal, which somebody
+    // can read. Dropping it here would be a silent decision instead.
+    const out = mailingListChange("outgoing", [person("Greg", { email: "greg@mcphersonmanagement.com" })], ALWAYS);
+    expect(out.remove).toEqual(["greg@mcphersonmanagement.com"]);
+    expect(out.retain).toContain("greg@mcphersonmanagement.com");
+  });
+
+  it("tidies what was typed by hand, and behaves as before when none are declared", () => {
+    expect(mailingListChange("outgoing", [], [" GREG@McPhersonManagement.com ", "", "greg@mcphersonmanagement.com"]).retain)
+      .toEqual(["greg@mcphersonmanagement.com"]);
+    expect(mailingListChange("outgoing", [person("Solo")])).toEqual({
+      remove: ["solo@example.invalid"],
+      retain: [],
+    });
   });
 });

@@ -184,3 +184,81 @@ describe("saving a rule from the form", () => {
     });
   });
 });
+
+/**
+ * The declared always-on addresses.
+ *
+ * board@campusstores.ca carries a shared inbox, a management company and a
+ * second address for one person who otherwise misses things. That is a fact
+ * somebody states, never one the register implies, so it is typed into the
+ * rule and read back out — and these pin the shape it is stored in, because
+ * the reader that protects those addresses branches on it.
+ */
+describe("addresses declared as always on the list", () => {
+  const roleInput = {
+    spaceId: null,
+    label: "Board mailing list",
+    kind: "governance_role",
+    destination: "google_group",
+    googleGroupEmail: "board@campusstores.ca",
+    bodyKey: "board_of_directors",
+    roleKey: "director",
+  };
+
+  it("keeps all three of Greg's addresses, tidied and in order", () => {
+    const out = validateRuleInput({
+      ...roleInput,
+      alwaysMembers: [" Info@CampusStores.ca ", "greg@campusstores.ca", "GREG@mcphersonmanagement.com"],
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.row.always_members).toEqual([
+      "info@campusstores.ca",
+      "greg@campusstores.ca",
+      "greg@mcphersonmanagement.com",
+    ]);
+  });
+
+  it("drops the blank lines the textarea leaves behind, and the duplicates", () => {
+    const out = validateRuleInput({
+      ...roleInput,
+      alwaysMembers: ["a@uni.ca", "", "   ", "A@UNI.ca", "b@uni.ca"],
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.row.always_members).toEqual(["a@uni.ca", "b@uni.ca"]);
+  });
+
+  it("⛔ stores nothing declared as NULL, not as an empty array", () => {
+    // Every row written before the column existed holds NULL. A second way of
+    // spelling "none" is how a reader gets one of its two branches wrong.
+    for (const input of [undefined, null, [], ["", "  "]]) {
+      const out = validateRuleInput({ ...roleInput, alwaysMembers: input });
+      expect(out.ok).toBe(true);
+      if (!out.ok) return;
+      expect(out.row.always_members).toBeNull();
+    }
+  });
+
+  it("refuses something that is not an address, naming the one at fault", () => {
+    expect(validateRuleInput({ ...roleInput, alwaysMembers: ["a@uni.ca", "greg"] })).toEqual({
+      ok: false,
+      error: '"greg" does not look like an email address.',
+    });
+  });
+
+  it("holds none on the kinds that keep a Circle space in step", () => {
+    // ⚠️ Written explicitly rather than left off: a rule must never keep a
+    // list belonging to a kind it is no longer.
+    const conf = validateRuleInput({
+      spaceId: 7,
+      label: "All Conference",
+      kind: "conference_passes",
+      destination: "circle_space",
+      conferenceId: "conf-1",
+    });
+    expect(conf.ok).toBe(true);
+    if (!conf.ok) return;
+    expect(conf.row.always_members).toBeNull();
+  });
+});

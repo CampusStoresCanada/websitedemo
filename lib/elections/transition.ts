@@ -154,18 +154,30 @@ export function termsEndingBy(rows: DirectorTermRow[], agmDate: string): Directo
  *
  * ⛔ Names people. Never "everyone on the list holding no role" — that set
  * also holds a management company and shared inboxes somebody added on
- * purpose, and removing those is a decision nobody made here.
+ * purpose, and removing those is a decision nobody made here. Which is what
+ * `alwaysMembers` is: those addresses, declared on the rule by a person,
+ * retained on BOTH presses because they are not a fact about this changeover.
+ * A declared address still appears in `remove` if it was listed as leaving —
+ * the sync refuses it and says so, which somebody can read, rather than being
+ * quietly dropped here where nobody can.
  *
  * Pure.
  */
 export function mailingListChange(
   side: "incoming" | "outgoing",
-  outgoing: TransitionPerson[]
+  outgoing: TransitionPerson[],
+  alwaysMembers: string[] = []
 ): { remove?: string[]; retain?: string[] } {
   const emails = outgoing
     .filter((p) => !p.protectedRole)
     .map((p) => p.email?.toLowerCase())
     .filter((e): e is string => Boolean(e));
 
-  return side === "outgoing" ? { remove: emails } : { retain: emails };
+  const always = [
+    ...new Set(alwaysMembers.map((e) => e.trim().toLowerCase()).filter(Boolean)),
+  ];
+
+  return side === "outgoing"
+    ? { remove: emails, retain: always }
+    : { retain: [...emails, ...always] };
 }

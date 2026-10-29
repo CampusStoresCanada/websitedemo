@@ -92,6 +92,7 @@ export default async function CircleSpaceRulesPage() {
     googleGroupEmail: r.google_group_email ?? null,
     bodyKey: r.body_key ?? null,
     roleKey: r.role_key ?? null,
+    alwaysMembers: r.always_members ?? null,
     label: r.label,
     kind: r.kind,
     conferenceId: r.conference_id,

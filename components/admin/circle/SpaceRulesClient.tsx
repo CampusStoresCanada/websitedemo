@@ -15,6 +15,7 @@ export type SpaceRuleView = {
   googleGroupEmail: string | null;
   bodyKey: string | null;
   roleKey: string | null;
+  alwaysMembers: string[] | null;
   label: string;
   kind: string;
   conferenceId: string | null;
@@ -48,6 +49,8 @@ type Draft = {
   googleGroupEmail: string;
   bodyKey: string;
   roleKey: string;
+  /** The box's raw text, one address a line. Parsed on save, not per keystroke. */
+  alwaysMembers: string;
   conferenceId: string;
   allPasses: boolean;
   passEntityIds: string[];
@@ -67,6 +70,7 @@ function emptyDraft(): Draft {
     googleGroupEmail: "",
     bodyKey: "",
     roleKey: "",
+    alwaysMembers: "",
     conferenceId: "",
     allPasses: true,
     passEntityIds: [],
@@ -89,6 +93,7 @@ function draftFrom(r: SpaceRuleView): Draft {
     googleGroupEmail: r.googleGroupEmail ?? "",
     bodyKey: r.bodyKey ?? "",
     roleKey: r.roleKey ?? "",
+    alwaysMembers: (r.alwaysMembers ?? []).join("\n"),
     conferenceId: r.conferenceId ?? "",
     allPasses: r.passEntityIds == null,
     passEntityIds: r.passEntityIds ?? [],
@@ -155,7 +160,9 @@ export default function SpaceRulesClient(props: Props) {
   function describe(r: SpaceRuleView): string {
     if (r.kind === "governance_role") {
       const body = bodyName.get(r.bodyKey ?? "") ?? r.bodyKey ?? "a body";
-      return `Everyone currently holding "${r.roleKey}" on the ${body}`;
+      const always = r.alwaysMembers ?? [];
+      const plus = always.length > 0 ? `, plus ${always.join(", ")} always` : "";
+      return `Everyone currently holding "${r.roleKey}" on the ${body}${plus}`;
     }
     if (r.kind === "survey_answer") {
       return `Current-member schools whose latest survey answer to "${fieldLabel.get(r.surveyField ?? "") ?? r.surveyField}" includes "${r.surveyValue}"`;
@@ -182,6 +189,7 @@ export default function SpaceRulesClient(props: Props) {
         googleGroupEmail: isRole ? draft.googleGroupEmail : null,
         bodyKey: isRole ? draft.bodyKey : null,
         roleKey: isRole ? draft.roleKey : null,
+        alwaysMembers: isRole ? draft.alwaysMembers.split("\n") : null,
         conferenceId: draft.conferenceId || null,
         passEntityIds: draft.allPasses ? null : draft.passEntityIds,
         surveyField: draft.surveyField,
@@ -318,7 +326,8 @@ export default function SpaceRulesClient(props: Props) {
                   />
                 )}
                 <p className="mt-1 text-xs text-gray-500">
-                  People are added, never removed. Taking someone off the group stays a manual step.
+                  People holding the role are added, and the standing-down press takes the leavers off. Both are
+                  read back from Google before they are reported.
                 </p>
               </div>
             ) : (
@@ -454,6 +463,23 @@ export default function SpaceRulesClient(props: Props) {
               <p className="sm:col-span-2 text-xs text-gray-500">
                 Everyone holding this role today, at their institutional address. Personal addresses are left alone.
               </p>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Always on this list <span className="font-normal text-gray-500">(optional)</span>
+                </label>
+                <textarea
+                  value={draft.alwaysMembers}
+                  onChange={(e) => setDraft({ ...draft, alwaysMembers: e.target.value })}
+                  rows={3}
+                  placeholder={"info@campusstores.ca\ngreg@mcphersonmanagement.com"}
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  One address a line. These stay on the list whoever holds the role: a shared inbox, a management
+                  company, a second address for somebody who misses the first. They are never taken off, and never
+                  reported as someone who should not be there.
+                </p>
+              </div>
             </div>
           ) : draft.kind === "conference_passes" ? (
             <div className="space-y-3">

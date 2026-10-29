@@ -100,6 +100,7 @@ export type SpaceRuleRow = {
   google_group_email?: string | null;
   body_key?: string | null;
   role_key?: string | null;
+  always_members?: string[] | null;
   label: string;
   kind: string;
   conference_id: string | null;
@@ -111,7 +112,7 @@ export type SpaceRuleRow = {
 };
 
 export const SPACE_RULE_COLUMNS =
-  "id, space_id, destination, google_group_email, body_key, role_key, label, kind, conference_id, pass_entity_ids, survey_field, survey_value, last_run, last_run_at";
+  "id, space_id, destination, google_group_email, body_key, role_key, always_members, label, kind, conference_id, pass_entity_ids, survey_field, survey_value, last_run, last_run_at";
 
 /**
  * Where a rule points. Defaults to a Circle space, because every rule written
@@ -162,11 +163,37 @@ export type SpaceRuleInput = {
   googleGroupEmail?: string | null;
   bodyKey?: string | null;
   roleKey?: string | null;
+  /** Addresses that belong in the destination whatever the roster says. */
+  alwaysMembers?: string[] | null;
   conferenceId?: string | null;
   passEntityIds?: string[] | null;
   surveyField?: string | null;
   surveyValue?: string | null;
 };
+
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * The declared always-on addresses, cleaned up: trimmed, lowercased, blanks
+ * dropped, duplicates collapsed.
+ *
+ * ⛔ Empty comes back as null, not as an empty array. Every row written before
+ * this column existed holds NULL and means "none declared"; a second way of
+ * spelling the same thing is how a reader ends up with two branches and gets
+ * one of them wrong.
+ */
+export function normalizeAlwaysMembers(
+  input: string[] | null | undefined
+): { ok: true; value: string[] | null } | { ok: false; error: string } {
+  const seen: string[] = [];
+  for (const raw of input ?? []) {
+    const email = raw.trim().toLowerCase();
+    if (!email) continue;
+    if (!EMAIL.test(email)) return { ok: false, error: `"${raw.trim()}" does not look like an email address.` };
+    if (!seen.includes(email)) seen.push(email);
+  }
+  return { ok: true, value: seen.length > 0 ? seen : null };
+}
 
 export function validateRuleInput(
   input: SpaceRuleInput
@@ -199,7 +226,7 @@ export function validateRuleInput(
   const groupEmail = input.googleGroupEmail?.trim().toLowerCase() || null;
   if (destination === "google_group") {
     if (!groupEmail) return { ok: false, error: "Give the Google group's address." };
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(groupEmail))
+    if (!EMAIL.test(groupEmail))
       return { ok: false, error: "That does not look like an email address." };
   }
 
@@ -218,6 +245,8 @@ export function validateRuleInput(
     // reads as a broken job rather than an unfinished rule.
     if (!bodyKey) return { ok: false, error: "Pick a governance body." };
     if (!roleKey) return { ok: false, error: "Pick a role." };
+    const always = normalizeAlwaysMembers(input.alwaysMembers);
+    if (!always.ok) return { ok: false, error: always.error };
     return {
       ok: true,
       row: {
@@ -226,6 +255,7 @@ export function validateRuleInput(
         kind: "governance_role",
         body_key: bodyKey,
         role_key: roleKey,
+        always_members: always.value,
         conference_id: null,
         pass_entity_ids: null,
         survey_field: null,
@@ -247,6 +277,7 @@ export function validateRuleInput(
         ...target,
         body_key: null,
         role_key: null,
+        always_members: null,
         label,
         kind: "conference_passes",
         conference_id: input.conferenceId,
@@ -266,6 +297,7 @@ export function validateRuleInput(
         ...target,
         body_key: null,
         role_key: null,
+        always_members: null,
         label,
         kind: "survey_answer",
         conference_id: null,

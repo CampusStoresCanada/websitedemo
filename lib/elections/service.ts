@@ -4386,15 +4386,18 @@ export async function applyBoardTransition(
   // the list: retained at the seating, removed at the standing down. The rule
   // itself is pure and lives beside the plan, where it can be read and tested
   // without a database.
-  const listChange = mailingListChange(input.side, state.plan.outgoing);
-
   const groups: GroupSyncOutcome[] = [];
   if (bodyRow?.key) {
     for (const rule of await groupRulesForBody(db, bodyRow.key as string)) {
+      // Per rule, because the declared always-on addresses belong to the list
+      // rather than to this changeover: board@ carries a shared inbox and a
+      // second address for one person who otherwise misses things, and those
+      // outlast every press. Retained on both sides, never removed, never
+      // reported as drift.
       groups.push(
         await syncGovernanceGroupNow(db, rule, rule.groupEmail, {
           asOf: input.effectiveOn,
-          ...listChange,
+          ...mailingListChange(input.side, state.plan.outgoing, rule.alwaysMembers),
         })
       );
     }

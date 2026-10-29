@@ -66,6 +66,7 @@ describe("validateRuleInput", () => {
         google_group_email: null,
         body_key: null,
         role_key: null,
+        always_members: null,
         label: "Bookware",
         kind: "survey_answer",
         conference_id: null,

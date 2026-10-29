@@ -303,3 +303,92 @@ describe("taking the outgoing directors off", () => {
     expect(writes[0].last_run).not.toHaveProperty("error");
   });
 });
+
+/**
+ * Greg is on board@ three times over — info@, greg@campusstores.ca and
+ * greg@mcphersonmanagement.com — because otherwise he says he did not see it.
+ * None of that is derivable from the register, so it is declared on the rule.
+ * Two of the three are @campusstores.ca and were already safe as CSC's own
+ * addresses; the third is an outside domain and is the one these pin.
+ */
+describe("an address declared as belonging on the list whatever the roster says", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    removeGroupMember.mockResolvedValue(undefined);
+  });
+
+  it("⛔ is not reported as drift, so the report does not cry wolf on every run for ever", async () => {
+    const { db } = stubDb(["chair@uni.ca"]);
+    listGroupMembers.mockResolvedValue([
+      member("chair@uni.ca"),
+      member("greg@mcphersonmanagement.com"),
+    ]);
+
+    const declared = await run(db, { retain: ["greg@mcphersonmanagement.com"] });
+    expect(declared.stale).toEqual([]);
+
+    // Undeclared, the same address is drift. The declaration is doing the work,
+    // not some incidental filter.
+    const { db: db2 } = stubDb(["chair@uni.ca"]);
+    const undeclared = await run(db2);
+    expect(undeclared.stale).toEqual(["greg@mcphersonmanagement.com"]);
+  });
+
+  it("⛔ is refused for removal even when the caller names it", async () => {
+    const { db } = stubDb(["chair@uni.ca"]);
+    listGroupMembers.mockResolvedValue([
+      member("chair@uni.ca"),
+      member("greg@mcphersonmanagement.com"),
+    ]);
+
+    const out = await run(db, {
+      remove: ["greg@mcphersonmanagement.com"],
+      retain: ["greg@mcphersonmanagement.com"],
+    });
+
+    expect(removeGroupMember).not.toHaveBeenCalled();
+    expect(out.removed).toEqual([]);
+    expect(out.leftAlone).toEqual([
+      {
+        email: "greg@mcphersonmanagement.com",
+        reason: "declared as belonging on this list whatever the roster says",
+      },
+    ]);
+    // ⚠️ A deliberate refusal is not a failed removal. Counting it here is how
+    // every run would read as broken.
+    expect(out.stillThere).toEqual([]);
+    expect(out.failed).toEqual([]);
+  });
+
+  it("is matched however it was typed, since a person entered it by hand", async () => {
+    const { db } = stubDb([]);
+    listGroupMembers.mockResolvedValue([member("greg@mcphersonmanagement.com")]);
+
+    const out = await run(db, {
+      remove: ["GREG@McPhersonManagement.com"],
+      retain: ["Greg@MCPHERSONMANAGEMENT.com"],
+    });
+    expect(removeGroupMember).not.toHaveBeenCalled();
+    expect(out.stale).toEqual([]);
+  });
+
+  it("still removes the people who really are leaving", async () => {
+    const { db } = stubDb(["chair@uni.ca"]);
+    listGroupMembers
+      .mockResolvedValueOnce([
+        member("chair@uni.ca"),
+        member("left@uni.ca"),
+        member("greg@mcphersonmanagement.com"),
+      ])
+      .mockResolvedValueOnce([member("chair@uni.ca"), member("greg@mcphersonmanagement.com")]);
+
+    const out = await run(db, {
+      remove: ["left@uni.ca", "greg@mcphersonmanagement.com"],
+      retain: ["greg@mcphersonmanagement.com"],
+    });
+    expect(removeGroupMember).toHaveBeenCalledTimes(1);
+    expect(removeGroupMember).toHaveBeenCalledWith("board@campusstores.ca", "left@uni.ca");
+    expect(out.removed).toEqual(["left@uni.ca"]);
+    expect(out.stale).toEqual([]);
+  });
+});

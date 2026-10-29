@@ -3246,6 +3246,7 @@ export type Database = {
       }
       circle_space_rules: {
         Row: {
+          always_members: string[] | null
           body_key: string | null
           conference_id: string | null
           created_at: string
@@ -3265,6 +3266,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          always_members?: string[] | null
           body_key?: string | null
           conference_id?: string | null
           created_at?: string
@@ -3284,6 +3286,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          always_members?: string[] | null
           body_key?: string | null
           conference_id?: string | null
           created_at?: string
