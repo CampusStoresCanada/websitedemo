@@ -1953,7 +1953,231 @@ export async function recordNameOnlyWalkUp(params: {
   return { success: true, data: { canonicalPersonId: created.personId, adminsTold } };
 }
 
-export type RosterExport = "summary" | "dietary" | "accessibility" | "emergency";
+export type RosterExport =
+  | "summary"
+  | "dietary"
+  | "accessibility"
+  | "emergency"
+  | "cancoll_registration"
+  | "cancoll_attendance";
+
+/**
+ * The CANCOLL MOU's reports (Schedule C), about the delegates whose
+ * registration CANCOLL covers: whoever holds a seat on the funded offer
+ * (isFundedOffer), and only those who have agreed to share their details with
+ * CANCOLL (the consent on their own checklist, the same check that ticks it).
+ * MOU 12: name, institution, position title and attendance status only.
+ *
+ *   registration  who, when confirmed, the fee CANCOLL pays, a running total,
+ *                 and the refund to a school whose paid seat was switched to
+ *                 the funded one (conference_funded_conversions).
+ *   attendance    per delegate, their Assigned Schedule: live partner meetings
+ *                 plus what the funded registration adds over the ordinary one
+ *                 (the CANCOLL AGM). Attended = a scan or a staff ruling of
+ *                 attended; excused = a ruling of excused (a cancelled meeting
+ *                 is not on the schedule at all); anything still ahead is
+ *                 upcoming (MOU 8).
+ */
+async function cancollReport(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string,
+  kind: "cancoll_registration" | "cancoll_attendance"
+): Promise<{ header: string[]; rows: string[][] }> {
+  const [{ loadSeatHoldings }, { isFundedOffer }, { PERSON_CHECKS_BULK }] = await Promise.all([
+    import("@/lib/conference/seats"),
+    import("@/lib/conference/entity-pricing"),
+    import("@/lib/conference/checklist-checks"),
+  ]);
+  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+  const funded = seats.filter((s) => s.holderPersonId && isFundedOffer(entitiesById.get(s.entityId)?.attributes));
+
+  // Consent: the policy that carries the CANCOLL information-sharing document.
+  const policy = [...entitiesById.values()].find(
+    (e) => e.kind === "policy" && e.attributes.legal_document_type === "cancoll_information_sharing"
+  );
+  const consented = policy
+    ? await PERSON_CHECKS_BULK.legal_document_accepted!({ db, conferenceId, entityId: policy.id })
+    : new Set<string>();
+
+  const personIds = funded.map((s) => s.holderPersonId!);
+  const orgIds = [...new Set(funded.map((s) => s.organizationId))];
+  const [{ data: people }, { data: orgs }, { data: conversions }] = await Promise.all([
+    personIds.length
+      ? db.from("conference_people").select("id, display_name, role_title, contact_id, canonical_person_id").in("id", personIds)
+      : Promise.resolve({ data: [] }),
+    orgIds.length ? db.from("organizations").select("id, name, is_test").in("id", orgIds) : Promise.resolve({ data: [] }),
+    db.from("conference_funded_conversions").select("seat_id, created_at, refund_cents").eq("conference_id", conferenceId),
+  ]);
+  type PersonRow = {
+    id: string;
+    display_name: string | null;
+    role_title: string | null;
+    contact_id: string | null;
+    canonical_person_id: string | null;
+  };
+  const personById = new Map(((people ?? []) as PersonRow[]).map((p) => [p.id, p]));
+  const contactIds = [...new Set(((people ?? []) as PersonRow[]).map((p) => p.contact_id).filter((id): id is string => !!id))];
+  const { data: contacts } = contactIds.length
+    ? await db.from("contacts").select("id, role_title").in("id", contactIds)
+    : { data: [] as Array<{ id: string; role_title: string | null }> };
+  const titleByContact = new Map((contacts ?? []).map((c) => [c.id as string, (c.role_title as string | null) ?? ""]));
+  const orgRows = (orgs ?? []) as Array<{ id: string; name: string; is_test: boolean | null }>;
+  const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
+  // A test organization's rehearsal seat never goes to CANCOLL.
+  const testOrgIds = new Set(orgRows.filter((o) => o.is_test === true).map((o) => o.id));
+  // A paid seat switched to the funded one is funded from the switch, and the
+  // school is refunded what it paid (MOU 5.5/5.6, conference-funded-conversion.ts).
+  const conversionBySeat = new Map(
+    ((conversions ?? []) as Array<{ seat_id: string; created_at: string; refund_cents: number | null }>).map((c) => [
+      c.seat_id,
+      c,
+    ])
+  );
+
+  const delegates = funded
+    .map((seat) => {
+      const person = personById.get(seat.holderPersonId!);
+      const consentKey = person?.contact_id || person?.canonical_person_id || "";
+      return {
+        seat,
+        consented: Boolean(consentKey) && consented.has(consentKey),
+        name: person?.display_name?.trim() || seat.holderName || "",
+        institution: orgName.get(seat.organizationId) ?? "",
+        title: (person?.contact_id ? titleByContact.get(person.contact_id) : "") || person?.role_title?.trim() || "",
+        confirmedAt: conversionBySeat.get(seat.seatId)?.created_at ?? seat.seatedAt ?? "",
+        refundCents: conversionBySeat.get(seat.seatId)?.refund_cents ?? null,
+      };
+    })
+    .filter((d) => d.consented && !testOrgIds.has(d.seat.organizationId))
+    .sort((a, b) => a.confirmedAt.localeCompare(b.confirmedAt) || a.name.localeCompare(b.name));
+  const day = (iso: string) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : "");
+
+  if (kind === "cancoll_registration") {
+    let running = 0;
+    return {
+      header: ["Institution", "Delegate", "Position title", "Date confirmed", "Registration fee (CAD)", "Refund issued", "Running count", "Running value (CAD)"],
+      rows: delegates.map((d, i) => {
+        const cents = Number(entitiesById.get(d.seat.entityId)?.attributes.funder_unit_cents ?? 0);
+        running += cents;
+        const refund = d.refundCents != null ? (d.refundCents / 100).toFixed(2) : "";
+        return [d.institution, d.name, d.title, day(d.confirmedAt), (cents / 100).toFixed(2), refund, String(i + 1), (running / 100).toFixed(2)];
+      }),
+    };
+  }
+
+  // Attendance. What the funded registration adds over the one it stands in
+  // for is CANCOLL's own part of the Assigned Schedule: the AGM.
+  const [{ getConferenceScheduleTimeline }, { loadMeetingConfirmations }] = await Promise.all([
+    import("@/lib/conference/schedule-service"),
+    import("@/lib/conference/schedule-ops"),
+  ]);
+  const extraByOffer = new Map<string, string[]>();
+  for (const offerId of new Set(delegates.map((d) => d.seat.entityId))) {
+    const offer = entitiesById.get(offerId);
+    const base = entitiesById.get(String(offer?.attributes.funds_offer_id ?? ""));
+    const baseTargets = new Set((base?.refs ?? []).map((r) => r.toEntityId));
+    extraByOffer.set(
+      offerId,
+      (offer?.refs ?? [])
+        .filter((r) => (r.role === "involved_in" || r.role === "includes") && !baseTargets.has(r.toEntityId))
+        .map((r) => r.toEntityId)
+        .filter((id) => {
+          const target = entitiesById.get(id);
+          return target != null && target.kind !== "day";
+        })
+    );
+  }
+  const extraIds = [...new Set([...extraByOffer.values()].flat())];
+
+  const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
+  const startsAt = new Map(timeline.programItems.map((item) => [item.id, item.startsAt] as const));
+  const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
+  const [confirmations, { data: eventRows }] = await Promise.all([
+    loadMeetingConfirmations(db, meetings.map((m) => m.meetingAssignment!.scheduleId)),
+    extraIds.length
+      ? db
+          .from("conference_check_in_events")
+          .select("person_id, entity_id, confirmed_by, ruling, result_state")
+          .eq("conference_id", conferenceId)
+          .eq("is_test", false)
+          .in("entity_id", extraIds)
+          .order("checked_in_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+  ]);
+  // Per person and event: scanned in, then the newest staff ruling wins.
+  const eventOutcome = new Map<string, "attended" | "absent" | "excused">();
+  for (const row of (eventRows ?? []) as Array<{
+    person_id: string | null;
+    entity_id: string | null;
+    confirmed_by: string | null;
+    ruling: string | null;
+    result_state: string;
+  }>) {
+    if (!row.person_id || !row.entity_id) continue;
+    const key = `${row.person_id}|${row.entity_id}`;
+    if (row.confirmed_by === "staff" && row.ruling) eventOutcome.set(key, row.ruling as "attended" | "absent" | "excused");
+    else if (["valid", "not_on_ticket"].includes(row.result_state)) eventOutcome.set(key, "attended");
+  }
+
+  const now = Date.now();
+  const isPast = (iso: string | null | undefined) => Boolean(iso) && Date.parse(iso!) <= now;
+  return {
+    header: [
+      "Institution",
+      "Delegate",
+      "Position title",
+      "Assigned elements",
+      "Attended",
+      "Excused",
+      "Not attended",
+      "Upcoming",
+      "CANCOLL AGM",
+      "Status",
+    ],
+    rows: delegates.map((d) => {
+      const personId = d.seat.holderPersonId!;
+      const outcomes: Array<"attended" | "excused" | "absent" | "upcoming"> = [];
+      for (const m of meetings) {
+        if (!m.meetingAssignment!.delegateSeatIds.includes(d.seat.seatId)) continue;
+        const confirmation = confirmations.get(m.meetingAssignment!.scheduleId);
+        const ruling = confirmation?.rulings[personId]?.ruling;
+        outcomes.push(
+          confirmation?.confirmedPersonIds.includes(personId)
+            ? "attended"
+            : ruling === "excused"
+              ? "excused"
+              : isPast(m.startsAt)
+                ? "absent"
+                : "upcoming"
+        );
+      }
+      const agmWords: string[] = [];
+      for (const id of extraByOffer.get(d.seat.entityId) ?? []) {
+        const outcome = eventOutcome.get(`${personId}|${id}`) ?? (isPast(startsAt.get(id)) ? "absent" : "upcoming");
+        outcomes.push(outcome);
+        agmWords.push(outcome === "attended" ? "Attended" : outcome === "excused" ? "Excused" : outcome === "upcoming" ? "Upcoming" : "Not attended");
+      }
+      const count = (o: string) => String(outcomes.filter((x) => x === o).length);
+      const status = outcomes.includes("absent")
+        ? "Non-attendance recorded"
+        : outcomes.includes("upcoming")
+          ? "Not yet held"
+          : "Full compliance";
+      return [
+        d.institution,
+        d.name,
+        d.title,
+        String(outcomes.length),
+        count("attended"),
+        count("excused"),
+        count("absent"),
+        count("upcoming"),
+        agmWords.join("; ") || "Not assigned",
+        status,
+      ];
+    }),
+  };
+}
 
 type RosterPersonFields = {
   contact_email: string | null;
@@ -1985,6 +2209,32 @@ export async function exportConferenceRoster(
   if (!auth.ok) return { success: false, error: auth.error };
   const db = createAdminClient();
 
+  // Quoted, and a leading = + - @ is defused so a spreadsheet never runs a cell.
+  const cell = (value: string) => `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replaceAll('"', '""')}"`;
+  const finish = async (header: string[], lines: string[]) => {
+    await logAuditEventSafe({
+      action: "conference_registration_exported",
+      entityType: "conference_instance",
+      entityId: conferenceId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { preset: kind, row_count: lines.length, source: "war_room_roster" },
+    });
+    return {
+      success: true as const,
+      data: {
+        filename: `conference-${kind}-${new Date().toISOString().slice(0, 10)}.csv`,
+        csv: [header.map(cell).join(","), ...lines].join("\n"),
+        rows: lines.length,
+      },
+    };
+  };
+
+  if (kind === "cancoll_registration" || kind === "cancoll_attendance") {
+    const report = await cancollReport(db, conferenceId, kind);
+    return finish(report.header, report.rows.map((row) => row.map(cell).join(",")));
+  }
+
   const [{ loadDoorRoster }, { readPreferences }, { parsePrintSort, PRINT_SORT_PREFERENCE_KEY }] = await Promise.all([
     import("@/lib/conference/attendance"),
     import("@/lib/profile/preferences"),
@@ -2006,7 +2256,10 @@ export async function exportConferenceRoster(
 
   const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
   type Row = { name: string; organizationName: string };
-  const columns: Record<RosterExport, { header: string[]; row: (r: Row, p: RosterPersonFields | undefined) => string[] | null }> = {
+  const columns: Record<
+    Exclude<RosterExport, "cancoll_registration" | "cancoll_attendance">,
+    { header: string[]; row: (r: Row, p: RosterPersonFields | undefined) => string[] | null }
+  > = {
     summary: {
       header: ["Name", "Organization", "Email", "Mobile", "Checked in"],
       row: (r, p) => [
@@ -2034,29 +2287,10 @@ export async function exportConferenceRoster(
     },
   };
 
-  // Quoted, and a leading = + - @ is defused so a spreadsheet never runs a cell.
-  const cell = (value: string) => `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replaceAll('"', '""')}"`;
   const spec = columns[kind];
   const lines = roster
     .map((r) => spec.row(r, byPerson.get(r.personId)))
     .filter((row): row is string[] => row !== null)
     .map((row) => row.map(cell).join(","));
-
-  await logAuditEventSafe({
-    action: "conference_registration_exported",
-    entityType: "conference_instance",
-    entityId: conferenceId,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: { preset: kind, row_count: lines.length, source: "war_room_roster" },
-  });
-
-  return {
-    success: true,
-    data: {
-      filename: `conference-${kind}-${new Date().toISOString().slice(0, 10)}.csv`,
-      csv: [spec.header.map(cell).join(","), ...lines].join("\n"),
-      rows: lines.length,
-    },
-  };
+  return finish(spec.header, lines);
 }

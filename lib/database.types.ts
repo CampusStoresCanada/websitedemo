@@ -4548,6 +4548,57 @@ export type Database = {
           },
         ]
       }
+      conference_funded_conversions: {
+        Row: {
+          actor_id: string | null
+          conference_id: string
+          created_at: string
+          from_entity_id: string
+          funded_purchase_id: string
+          holder_person_id: string | null
+          id: string
+          organization_id: string
+          reason: string | null
+          refund_cents: number | null
+          refund_id: string | null
+          seat_id: string
+          source_order_id: string | null
+          to_entity_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          conference_id: string
+          created_at?: string
+          from_entity_id: string
+          funded_purchase_id: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id: string
+          reason?: string | null
+          refund_cents?: number | null
+          refund_id?: string | null
+          seat_id: string
+          source_order_id?: string | null
+          to_entity_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          conference_id?: string
+          created_at?: string
+          from_entity_id?: string
+          funded_purchase_id?: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id?: string
+          reason?: string | null
+          refund_cents?: number | null
+          refund_id?: string | null
+          seat_id?: string
+          source_order_id?: string | null
+          to_entity_id?: string
+        }
+        Relationships: []
+      }
       conference_instances: {
         Row: {
           badge_preprint_at: string | null

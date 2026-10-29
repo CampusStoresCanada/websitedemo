@@ -104,6 +104,25 @@ export function DataView({
           />
         </div>
       </section>
+      {/* The CANCOLL MOU's Schedule C reports. Only delegates whose registration
+          CANCOLL covers and who agreed to share their details with CANCOLL. */}
+      <section className="rounded-xl border border-gray-200 bg-white px-4">
+        <h3 className="pt-3 text-xs font-semibold uppercase tracking-wide text-gray-500">CANCOLL reports</h3>
+        <div className="divide-y divide-gray-100">
+          <OperateRow
+            title="Registration report"
+            due="1 Dec and 4 Feb"
+            state="Each CANCOLL-covered delegate: institution, name, position title, date confirmed, the fee, any refund to the school, and the running total."
+            extra={button("cancoll_registration")}
+          />
+          <OperateRow
+            title="Attendance report"
+            due="6 Mar"
+            state="Each CANCOLL-covered delegate's partner meetings and the CANCOLL AGM: attended, excused, not attended, and their status."
+            extra={button("cancoll_attendance")}
+          />
+        </div>
+      </section>
     </div>
   );
 }
