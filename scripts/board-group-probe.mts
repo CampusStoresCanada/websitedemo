@@ -89,8 +89,20 @@ for (const rule of rules) {
   console.log(`holders of "${rule.roleKey}" as of ${asOf}: ${wanted.length}`);
   console.log(`in the group: ${members.length}`);
   console.log(`would be ADDED by a press: ${wanted.filter((e) => !present.has(e)).join(", ") || "(nobody)"}`);
+  // ⛔ Mirrors syncGovernanceGroupNow's own filter, declared addresses
+  // included. A probe that answered this differently from the reader would be
+  // worse than no probe: it would report drift the press does not see, or miss
+  // drift the press does.
+  if (rule.alwaysMembers.length > 0)
+    console.log(`declared as always on it: ${rule.alwaysMembers.join(", ")}`);
   const stale = members
-    .filter((m) => !wanted.includes(m.email) && !m.email.endsWith("@campusstores.ca") && m.role === "MEMBER")
+    .filter(
+      (m) =>
+        !wanted.includes(m.email) &&
+        !rule.alwaysMembers.includes(m.email) &&
+        !m.email.endsWith("@campusstores.ca") &&
+        m.role === "MEMBER"
+    )
     .map((m) => m.email);
   console.log(`on the list holding no role: ${stale.length}${stale.length ? ` — ${stale.join(", ")}` : ""}`);
   console.log("  ⛔ reported only. A press removes the directors it listed as Leaving, not this set.");
@@ -105,6 +117,9 @@ if (argv.includes("--run")) {
     const outcome = await syncGovernanceGroupNow(db, rule, rule.groupEmail, {
       asOf,
       remove: toRemove.length > 0 ? toRemove : undefined,
+      // The same declaration the press honours, so --remove cannot take off an
+      // address somebody said belongs there whatever the roster says.
+      retain: rule.alwaysMembers,
     });
     console.log(describeOutcome(outcome));
     console.log(
