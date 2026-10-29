@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   addKeyDate,
   updateKeyDate,
@@ -49,14 +49,20 @@ function countsExpected(style: string | null): number | null {
  */
 export default function KeyDatesEditor({
   benchmarkingId,
-  initialDates,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+  */
+  dates,
+  onDatesChange: setDates,
   isReadOnly,
   isSemesterBased,
   inventoryCountStyle,
   profileSuggestions,
 }: {
   benchmarkingId: string;
-  initialDates: KeyDate[];
+  dates: KeyDate[];
+  onDatesChange: Dispatch<SetStateAction<KeyDate[]>>;
   isReadOnly: boolean;
   /** Semesters are only worth asking for where the year has them. */
   isSemesterBased: boolean;
@@ -77,16 +83,7 @@ export default function KeyDatesEditor({
    */
   profileSuggestions: { title: string; date: string }[];
 }) {
-  const [dates, setDates] = useState<KeyDate[]>(initialDates);
   const [error, setError] = useState<string | null>(null);
-  /*
-    Suggestions taken in this sitting.
-
-    The server recomputes which profile dates are still missing on a page load,
-    and this screen no longer reloads, so an adopted suggestion would otherwise
-    sit there inviting a second click and a duplicate row.
-  */
-  const [adopted, setAdopted] = useState<string[]>([]);
 
   const kinds = KEY_DATE_KINDS.filter(
     (k) => k.value !== "semester" || isSemesterBased,
@@ -144,7 +141,7 @@ export default function KeyDatesEditor({
       // to reveal a date we added for them can discard what they just typed.
       if (latest) setDates(latest);
     })();
-  }, [benchmarkingId, isReadOnly, expectedCounts, countDates]);
+  }, [benchmarkingId, isReadOnly, expectedCounts, countDates, setDates]);
 
   /*
     Semester rows held by a store that has since said it does not run semesters.
@@ -153,8 +150,22 @@ export default function KeyDatesEditor({
   */
   const orphanedSemesters = !isSemesterBased && have("semester");
 
+  /*
+    Which suggestions are still worth offering.
+
+    ⛔ Read off the dates themselves, never a list of "taken in this sitting".
+    The server recomputes this on a page load and this screen does not reload,
+    so a tally kept beside the list went back to empty the moment the store
+    left §1 and returned, putting an adopted suggestion back on offer with a
+    button that makes a duplicate.
+
+    Keyed `label|date`, which is the rule loadProfileKeyDateSuggestions applies
+    server-side — so the two agree, including that editing an adopted date
+    offers the original again.
+  */
+  const taken = new Set(dates.map((d) => `${d.label}|${d.occursOn ?? ""}`));
   const pendingSuggestions = profileSuggestions.filter(
-    (s) => !adopted.includes(`${s.title}|${s.date}`),
+    (s) => !taken.has(`${s.title}|${s.date}`),
   );
 
   const patch = (id: string, fn: (d: KeyDate) => KeyDate) =>
@@ -227,7 +238,6 @@ export default function KeyDatesEditor({
                     });
                     if (res.dates) {
                       setDates(res.dates);
-                      setAdopted((prev) => [...prev, `${sug.title}|${sug.date}`]);
                     } else if (res.error) {
                       setError(res.error);
                     }

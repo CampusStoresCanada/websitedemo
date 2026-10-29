@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import BusyButton from "./BusyButton";
 import {
   addCompetitor,
@@ -22,14 +22,19 @@ import { COMPETITOR_KINDS } from "@/lib/benchmarking/competitor-kinds";
  */
 export default function CompetitorsEditor({
   benchmarkingId,
-  initialRows,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+  */
+  rows,
+  onRowsChange: setRows,
   isReadOnly,
 }: {
   benchmarkingId: string;
-  initialRows: CompetitorRow[];
+  rows: CompetitorRow[];
+  onRowsChange: Dispatch<SetStateAction<CompetitorRow[]>>;
   isReadOnly: boolean;
 }) {
-  const [rows, setRows] = useState<CompetitorRow[]>(initialRows);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
 

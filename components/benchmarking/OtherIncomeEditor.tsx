@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import BusyButton from "./BusyButton";
 import {
-  seedServiceIncome,
   addOtherIncome,
   updateOtherIncome,
   removeOtherIncome,
@@ -24,14 +23,20 @@ import Explain from "./Explain";
  */
 export default function OtherIncomeEditor({
   benchmarkingId,
-  initialRows,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+  */
+  rows,
+  onRowsChange: setRows,
   merchandiseTotal,
   courseMaterialsTotal,
   centralFunding,
   isReadOnly,
 }: {
   benchmarkingId: string;
-  initialRows: OtherIncomeRow[];
+  rows: OtherIncomeRow[];
+  onRowsChange: Dispatch<SetStateAction<OtherIncomeRow[]>>;
   merchandiseTotal: number;
   courseMaterialsTotal: number;
   /**
@@ -45,24 +50,17 @@ export default function OtherIncomeEditor({
   centralFunding: number;
   isReadOnly: boolean;
 }) {
-  const [rows, setRows] = useState<OtherIncomeRow[]>(initialRows);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Pull in a line for each service the store said it currently offers.
-  useEffect(() => {
-    if (isReadOnly) return;
-    let cancelled = false;
-    void seedServiceIncome(benchmarkingId).then((r) => {
-      // ⛔ Never a page reload. Saves in this form are debounced by 800ms, so
-      // reloading to reveal seeded rows can discard the figure somebody just
-      // typed in another section.
-      if (!cancelled && r.rows.length > 0) setRows(r.rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [benchmarkingId, isReadOnly]);
+  /*
+    ⛔ Seeding the service lines moved up to the form, which mounts once.
+
+    Run from here it fired every time the store opened §4, and its result
+    replaces the list wholesale — so a row deleted on purpose came back, and
+    anything typed in the 800ms before a debounced save landed could be
+    overwritten by the server's older copy of the same rows.
+  */
 
   const otherTotal = rows.reduce(
     (s, r) => s + (r.countsAsIncome ? (r.amount ?? 0) : 0),

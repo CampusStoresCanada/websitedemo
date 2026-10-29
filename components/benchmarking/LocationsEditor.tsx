@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   addLocation,
   updateLocation,
@@ -44,14 +44,23 @@ const SPACE_FIELDS = [
 
 export default function LocationsEditor({
   benchmarkingId,
-  initialLocations,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+
+    §2 and §3 ask for square footage per location, so the form needs the live
+    list anyway: a location added here has to be pickable in the category grid
+    without a reload.
+  */
+  locations,
+  onLocationsChange: setLocations,
   isReadOnly,
 }: {
   benchmarkingId: string;
-  initialLocations: SurveyLocation[];
+  locations: SurveyLocation[];
+  onLocationsChange: Dispatch<SetStateAction<SurveyLocation[]>>;
   isReadOnly: boolean;
 }) {
-  const [locations, setLocations] = useState<SurveyLocation[]>(initialLocations);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
