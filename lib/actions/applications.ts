@@ -1035,7 +1035,7 @@ export async function approveApplication(
  * renewing. Shared by approveApplication and by a merge into an existing org
  * that holds no membership, so a returning school is priced exactly like a new
  * one. Returns the Stripe hosted URL, or "" if invoicing failed (non-fatal:
- * the approval email then points at /account/billing instead).
+ * the approval email then points at /org/billing instead).
  */
 async function invoiceFirstMembershipPeriod(orgId: string): Promise<string> {
   try {
@@ -1059,9 +1059,11 @@ async function invoiceFirstMembershipPeriod(orgId: string): Promise<string> {
 
     const invoice = await createProgramInvoice(orgId, invoiceOptions);
 
-    // Finalize and send via Stripe
-    await finalizeAndSendInvoice(invoice.id);
-    return `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`;
+    // Finalize and send via Stripe. Use the pay link Stripe returns: one built
+    // from the invoice id opens "Invoice not found" (Red River College got
+    // exactly that in its approval email, 2026-10-30).
+    const sent = await finalizeAndSendInvoice(invoice.id);
+    return sent.hostedInvoiceUrl ?? "";
   } catch (err) {
     console.error("Invoice creation failed:", err);
     // Non-fatal — admin can manually create invoice
@@ -1075,7 +1077,7 @@ async function sendApplicationApprovedEmail(
   applicationType: "member" | "partner",
   stripeInvoiceUrl: string
 ): Promise<void> {
-  const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
+  const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/org/billing`;
   const approvedContent = await applicationApprovedEmail(
     applicantName ?? "there",
     applicationType,
@@ -1844,7 +1846,7 @@ export async function resendApplicationInvite(
     try {
       const { data: invoice } = await db
         .from("invoices")
-        .select("id, stripe_invoice_id, status")
+        .select("id, hosted_invoice_url, status")
         .eq("organization_id", app.organization_id)
         .in("status", Array.from(UNPAID_INVOICE_STATUSES))
         .order("created_at", { ascending: false })
@@ -1853,7 +1855,7 @@ export async function resendApplicationInvite(
 
       if (!invoice) {
         // Nothing outstanding — skip the payment nudge entirely. This used to
-        // fall through to /account/billing whenever the lookup missed, which
+        // fall through to the billing page whenever the lookup missed, which
         // meant an org that had already PAID got a "[Reminder] complete your
         // payment" email every time an admin resent their invite. The lookup
         // misses for paid orgs by design, so the fallback fired precisely in
@@ -1861,9 +1863,11 @@ export async function resendApplicationInvite(
         return { success: sentInvite, error: sentInvite ? undefined : "Failed to send invite" };
       }
 
-      const paymentUrl = invoice.stripe_invoice_id
-        ? `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`
-        : `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
+      // The pay link Stripe issued, stored at finalize. Never build one from
+      // the invoice id — that URL opens Stripe's "Invoice not found".
+      const paymentUrl = invoice.hosted_invoice_url
+        ? invoice.hosted_invoice_url
+        : `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/org/billing`;
 
       const approvedContent = await applicationApprovedEmail(
         app.applicant_name ?? "there",

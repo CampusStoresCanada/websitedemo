@@ -157,6 +157,10 @@ beforeEach(() => {
   mocks.orgUpdates.length = 0;
   mocks.transitionMembershipState.mockResolvedValue({ success: true });
   mocks.createProgramInvoice.mockResolvedValue({ id: "inv-1", stripe_invoice_id: "in_123" });
+  mocks.finalizeAndSendInvoice.mockResolvedValue({
+    success: true,
+    hostedInvoiceUrl: "https://invoice.stripe.com/i/acct_1/live_abc?s=ap",
+  });
   mocks.applicationApprovedEmail.mockResolvedValue({ subject: "Approved", html: "<p/>" });
 });
 
@@ -189,7 +193,8 @@ describe("mergeApplicationIntoOrganization", () => {
     expect(mocks.applicationApprovedEmail).toHaveBeenCalledWith(
       "Ken Hansen",
       "member",
-      "https://invoice.stripe.com/i/in_123"
+      // The link Stripe issued, never one built from the invoice id.
+      "https://invoice.stripe.com/i/acct_1/live_abc?s=ap"
     );
     expect(mocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({ to: "khansen2@rrc.ca", subject: "Approved" })

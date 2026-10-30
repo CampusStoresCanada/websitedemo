@@ -338,7 +338,7 @@ export async function createProgramInvoice(
 export async function finalizeAndSendInvoice(
   invoiceId: string,
   options: { notify?: boolean } = {}
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; hostedInvoiceUrl?: string | null }> {
   const notify = options.notify ?? true;
   const db = createAdminClient();
 
@@ -376,7 +376,10 @@ export async function finalizeAndSendInvoice(
     })
     .eq("id", invoiceId);
 
-  return { success: true };
+  // The pay link, exactly as Stripe issued it. Never build one from the
+  // invoice id: `invoice.stripe.com/i/<in_…>` is not a real URL and opens
+  // Stripe's "Invoice not found" page.
+  return { success: true, hostedInvoiceUrl: finalized.hosted_invoice_url ?? null };
 }
 
 // ─────────────────────────────────────────────────────────────────
