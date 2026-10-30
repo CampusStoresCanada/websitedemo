@@ -120,7 +120,7 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
     db
       .from("organizations")
       .select(
-        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, renewal_notifications_paused_until, renewal_pause_reason, memberships(status, fte, program_key)"
+        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, renewal_notifications_paused_until, renewal_pause_reason, memberships(status, program_key)"
       )
       // Filled in once programs resolves — see below. Left broad here since
       // this destructure runs concurrently with getProgramsConfig().
@@ -204,14 +204,15 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
     const type = o.type as RenewalDirectoryOrgType;
     const program = programByOrgType.get(type);
 
-    // Phase 4: `memberships` now owns status/fte going forward (mirrored
-    // from organizations by transition_membership_state() and the various
-    // fte/cancoll write paths — see lib/membership/mirror.ts) — prefer it,
-    // falling back to the organizations columns when no matching row exists
-    // (same fallback posture as resolveMembershipStatus in lib/auth/org-level.ts).
+    // Phase 4: `memberships` now owns status going forward (mirrored from
+    // organizations by transition_membership_state()) — prefer it, falling
+    // back to the organizations column when no matching row exists (same
+    // fallback posture as resolveMembershipStatus in lib/auth/org-level.ts).
+    // FTE is read from organizations only: that is the one FTE, and the one
+    // pricing reads (see MEMBERSHIP_OWNED_ORG_FIELDS in lib/membership/pricing.ts).
     const membership = (o.memberships ?? []).find((m) => m.program_key === program?.key) ?? null;
     const membershipStatus = membership?.status ?? o.membership_status;
-    const fte = membership?.fte ?? o.fte;
+    const fte = o.fte;
 
     // Tier-class badge only applies to programs billed through the FTE
     // metric engine (CSC's "Member" program today) — resolved through the
