@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   finalizeAndSendInvoice: vi.fn(),
   sendEmail: vi.fn(),
   applicationApprovedEmail: vi.fn(),
+  mirrorFieldsToMembership: vi.fn(),
   orgUpdates: [] as Record<string, unknown>[],
 }));
 
@@ -35,6 +36,9 @@ vi.mock("@/lib/supabase/user-lookup", () => ({
 }));
 vi.mock("@/lib/membership/state-machine", () => ({
   transitionMembershipState: mocks.transitionMembershipState,
+}));
+vi.mock("@/lib/membership/mirror", () => ({
+  mirrorFieldsToMembership: mocks.mirrorFieldsToMembership,
 }));
 vi.mock("@/lib/membership/renewal-activation", () => ({
   activateMembershipRenewal: vi.fn(),
@@ -114,6 +118,9 @@ function mockDb(target: { membership_status: string | null; type: string }) {
     name: "Red River Polytech",
     email: null,
     website: "bookstore.rrc.ca",
+    fte: 12571,
+    is_cancoll_member: false,
+    cancoll_tier: null,
     ...target,
   };
   const results: Record<string, { list: unknown; one: unknown }> = {
@@ -165,6 +172,15 @@ describe("mergeApplicationIntoOrganization", () => {
       "applied",
       "approved",
     ]);
+    // The invoice prices off the memberships row, which the RPC creates bare.
+    expect(mocks.mirrorFieldsToMembership).toHaveBeenCalledWith(
+      "org-rrc",
+      expect.objectContaining({ fte: 12571 }),
+      expect.objectContaining({ orgType: "Member" })
+    );
+    expect(mocks.mirrorFieldsToMembership.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createProgramInvoice.mock.invocationCallOrder[0]
+    );
     expect(mocks.createProgramInvoice).toHaveBeenCalledWith(
       "org-rrc",
       expect.objectContaining({ billingPeriodStart: "2026-09-01" })
@@ -188,6 +204,7 @@ describe("mergeApplicationIntoOrganization", () => {
     expect(result.success).toBe(true);
     expect(mocks.orgUpdates[0]).not.toHaveProperty("type");
     expect(mocks.transitionMembershipState).not.toHaveBeenCalled();
+    expect(mocks.mirrorFieldsToMembership).not.toHaveBeenCalled();
     expect(mocks.createProgramInvoice).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });

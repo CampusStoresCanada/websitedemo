@@ -10,6 +10,7 @@ import {
 } from "@/lib/auth/guards";
 import { findUserByEmail } from "@/lib/supabase/user-lookup";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
+import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 import {
   activateMembershipRenewal,
   computeNewExpiresAt,
@@ -1211,6 +1212,27 @@ export async function mergeApplicationIntoOrganization(
       "Application approved by admin (merged into existing organization)",
       transitionMetadata
     );
+
+    // The RPC creates the memberships row with a status and nothing else, but
+    // the invoice below prices off that row's FTE, not the org's. Carry over
+    // what the org already has on file, or a returning school with a known
+    // FTE is billed at the fallback price.
+    const { data: onFile } = await db
+      .from("organizations")
+      .select("fte, is_cancoll_member, cancoll_tier")
+      .eq("id", targetOrgId)
+      .single();
+    if (onFile) {
+      await mirrorFieldsToMembership(
+        targetOrgId,
+        {
+          fte: onFile.fte,
+          is_cancoll_member: onFile.is_cancoll_member ?? undefined,
+          cancoll_tier: onFile.cancoll_tier,
+        },
+        { orgType: profileUpdate.type as string, source: "mergeApplicationIntoOrganization" }
+      );
+    }
   }
 
   // 2. Link the application to the existing org instead of a new one.
