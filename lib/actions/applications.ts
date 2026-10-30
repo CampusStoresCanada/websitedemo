@@ -934,34 +934,7 @@ export async function approveApplication(
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
   } else {
-    try {
-      // A brand-new org joining within the pre-renewal skip-stub window
-      // isn't worth billing a small prorated stub for the dying cycle's
-      // last few days — sign them up starting with the upcoming full cycle
-      // at full price instead (mirrors the same case in
-      // priceMembershipRenewalForOrg / priceProspectiveMembershipCents).
-      const { cycle_start_month_day: cycleStartMonthDay, pre_renewal_skip_stub_days: skipStubDays } =
-        await getRenewalConfig();
-      const now = new Date();
-      const withinSkipWindow = isWithinPreRenewalSkipWindow(now, cycleStartMonthDay, skipStubDays);
-
-      const { billingPeriodStart, billingPeriodEnd } = withinSkipWindow
-        ? await computeNewExpiresAt(nextCycleStartOnOrAfter(now, cycleStartMonthDay))
-        : await computeNewExpiresAt(null);
-
-      const invoiceOptions = withinSkipWindow
-        ? { billingPeriodStart, billingPeriodEnd }
-        : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now };
-
-      const invoice = await createProgramInvoice(org.id, invoiceOptions);
-
-      // Finalize and send via Stripe
-      await finalizeAndSendInvoice(invoice.id);
-      stripeInvoiceUrl = `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`;
-    } catch (err) {
-      console.error("Invoice creation failed:", err);
-      // Non-fatal — admin can manually create invoice
-    }
+    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id);
   }
 
   // 6. Create user account and send invite
@@ -1044,21 +1017,74 @@ export async function approveApplication(
   // page with nothing owed) would be wrong. The account invite in step 6
   // already gets them into the app and on to the next onboarding step.
   if (app.applicant_email && !isPaidFirstBoothApplication) {
-    const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
-    const approvedContent = await applicationApprovedEmail(
-      app.applicant_name ?? "there",
+    await sendApplicationApprovedEmail(
+      app.applicant_email,
+      app.applicant_name,
       applicationType,
-      paymentUrl
+      stripeInvoiceUrl
     );
-    await sendEmail({
-      to: app.applicant_email,
-      subject: approvedContent.subject,
-      html: approvedContent.html,
-    });
   }
 
   revalidateApplicationSurfaces();
   return { success: true };
+}
+
+/**
+ * Raise and send the first dues invoice for an org that is joining, not
+ * renewing. Shared by approveApplication and by a merge into an existing org
+ * that holds no membership, so a returning school is priced exactly like a new
+ * one. Returns the Stripe hosted URL, or "" if invoicing failed (non-fatal:
+ * the approval email then points at /account/billing instead).
+ */
+async function invoiceFirstMembershipPeriod(orgId: string): Promise<string> {
+  try {
+    // A brand-new org joining within the pre-renewal skip-stub window
+    // isn't worth billing a small prorated stub for the dying cycle's
+    // last few days — sign them up starting with the upcoming full cycle
+    // at full price instead (mirrors the same case in
+    // priceMembershipRenewalForOrg / priceProspectiveMembershipCents).
+    const { cycle_start_month_day: cycleStartMonthDay, pre_renewal_skip_stub_days: skipStubDays } =
+      await getRenewalConfig();
+    const now = new Date();
+    const withinSkipWindow = isWithinPreRenewalSkipWindow(now, cycleStartMonthDay, skipStubDays);
+
+    const { billingPeriodStart, billingPeriodEnd } = withinSkipWindow
+      ? await computeNewExpiresAt(nextCycleStartOnOrAfter(now, cycleStartMonthDay))
+      : await computeNewExpiresAt(null);
+
+    const invoiceOptions = withinSkipWindow
+      ? { billingPeriodStart, billingPeriodEnd }
+      : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now };
+
+    const invoice = await createProgramInvoice(orgId, invoiceOptions);
+
+    // Finalize and send via Stripe
+    await finalizeAndSendInvoice(invoice.id);
+    return `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`;
+  } catch (err) {
+    console.error("Invoice creation failed:", err);
+    // Non-fatal — admin can manually create invoice
+    return "";
+  }
+}
+
+async function sendApplicationApprovedEmail(
+  to: string,
+  applicantName: string | null,
+  applicationType: "member" | "partner",
+  stripeInvoiceUrl: string
+): Promise<void> {
+  const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
+  const approvedContent = await applicationApprovedEmail(
+    applicantName ?? "there",
+    applicationType,
+    paymentUrl
+  );
+  await sendEmail({
+    to,
+    subject: approvedContent.subject,
+    html: approvedContent.html,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1070,10 +1096,17 @@ export async function approveApplication(
 // a new contact at an existing member, etc). Instead of creating a new
 // organization, links the application to the matched org, refreshes its
 // profile with the freshly-submitted details, and grants the applicant
-// login access — but never generates a new invoice, since the matched
-// org is presumably already billed. A pre-paid booth purchase attached
-// to the application is still fulfilled, since that's honoring money
-// already collected, not issuing a new charge.
+// login access. A pre-paid booth purchase attached to the application is
+// still fulfilled, since that's honoring money already collected.
+//
+// Whether it bills depends on the matched org. One that already holds a
+// membership (any status) is already billed, so the merge never invoices it.
+// One that holds NO membership — a former member that left before the
+// software, sitting on file as a Non-Member — is joining, so it gets the
+// same membership start, first invoice and approval email as
+// approveApplication. Red River College (2026-10) is the case: the merge
+// left it with a login and nothing to pay, and no other button could start
+// a membership from no status.
 
 export async function mergeApplicationIntoOrganization(
   applicationId: string,
@@ -1135,6 +1168,18 @@ export async function mergeApplicationIntoOrganization(
   setIfPresent("company_description", appData.company_description as string);
   setIfPresent("email", app.applicant_email as string);
 
+  // A target with no membership is joining. Its type has to be set before the
+  // status transition below: the RPC only mirrors a memberships row for a
+  // Member / Vendor Partner org, and the invoice is priced off the type.
+  const applicationType = app.application_type as "member" | "partner";
+  const startsMembership = target.membershipStatus === null;
+  const isPaidFirstBoothApplication = Boolean(
+    app.paid_at && app.paid_booth_entity_id && app.paid_conference_id
+  );
+  if (startsMembership) {
+    profileUpdate.type = applicationType === "member" ? "Member" : "Vendor Partner";
+  }
+
   const { error: updateOrgError } = await db
     .from("organizations")
     .update(profileUpdate)
@@ -1145,6 +1190,29 @@ export async function mergeApplicationIntoOrganization(
     return { success: false, error: `Failed to update organization: ${updateOrgError.message}` };
   }
 
+  if (startsMembership) {
+    const transitionMetadata = { application_id: applicationId, previous_type: target.type };
+    const applied = await transitionMembershipState(
+      targetOrgId,
+      "applied",
+      "admin",
+      userId,
+      "Application merged into an existing organization with no membership",
+      transitionMetadata
+    );
+    if (!applied.success) {
+      return { success: false, error: `Failed to start membership: ${applied.error}` };
+    }
+    await transitionMembershipState(
+      targetOrgId,
+      "approved",
+      "admin",
+      userId,
+      "Application approved by admin (merged into existing organization)",
+      transitionMetadata
+    );
+  }
+
   // 2. Link the application to the existing org instead of a new one.
   await db
     .from("signup_applications")
@@ -1153,7 +1221,7 @@ export async function mergeApplicationIntoOrganization(
       status: "approved",
       reviewed_by: userId,
       reviewed_at: new Date().toISOString(),
-      review_notes: `Merged into existing organization "${target.name}" (${targetOrgId}) by admin ${userId} — duplicate match on: ${target.matchReasons.join(", ")}. No new invoice generated.`,
+      review_notes: `Merged into existing organization "${target.name}" (${targetOrgId}) by admin ${userId} — duplicate match on: ${target.matchReasons.join(", ")}. ${startsMembership ? "Org held no membership, so membership started and first invoice raised." : "No new invoice generated."}`,
       updated_at: new Date().toISOString(),
     })
     .eq("id", applicationId);
@@ -1205,18 +1273,22 @@ export async function mergeApplicationIntoOrganization(
   );
 
   // 5. Honor a pre-paid booth purchase carried on the application, if any.
-  // This fulfills money already collected — not a new charge — so unlike
-  // step 6 below, it still runs on a merge.
-  if (app.paid_at && app.paid_booth_entity_id && app.paid_conference_id) {
+  // This fulfills money already collected — not a new charge — so it runs
+  // on every merge.
+  let stripeInvoiceUrl = "";
+  if (isPaidFirstBoothApplication) {
+    // Non-null: isPaidFirstBoothApplication already confirmed both are set.
+    const paidBoothEntityId = app.paid_booth_entity_id!;
+    const paidConferenceId = app.paid_conference_id!;
     try {
       const [{ data: booth }, { data: conference }] = await Promise.all([
-        db.from("conference_entities").select("price_cents").eq("id", app.paid_booth_entity_id).maybeSingle(),
-        db.from("conference_instances").select("end_date").eq("id", app.paid_conference_id).maybeSingle(),
+        db.from("conference_entities").select("price_cents").eq("id", paidBoothEntityId).maybeSingle(),
+        db.from("conference_instances").select("end_date").eq("id", paidConferenceId).maybeSingle(),
       ]);
       await db.rpc("mint_prospective_booth_purchase", {
-        p_conference_id: app.paid_conference_id,
+        p_conference_id: paidConferenceId,
         p_organization_id: targetOrgId,
-        p_booth_entity_id: app.paid_booth_entity_id,
+        p_booth_entity_id: paidBoothEntityId,
         p_price_cents: booth?.price_cents ?? 0,
         p_buyer: `application:${applicationId}`,
       });
@@ -1245,9 +1317,11 @@ export async function mergeApplicationIntoOrganization(
       console.error("Booth minting / membership activation failed for pre-paid merge application:", err);
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
+  } else if (startsMembership) {
+    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(targetOrgId);
   }
-  // No invoice is created for the non-pre-paid case — merging never
-  // triggers a fresh charge against an org that's presumably already billed.
+  // Otherwise no invoice: the org already holds a membership, so it is
+  // already billed and a merge must not charge it again.
 
   // 6. Grant login access. Reuse an existing auth account for this email
   // if one already exists (common — the merged org's real admin likely
@@ -1324,6 +1398,18 @@ export async function mergeApplicationIntoOrganization(
     // Non-fatal — admin can manually invite via People.
   }
 
+  // 7. Approval email with the payment link, on the same terms as
+  // approveApplication's step 7.
+  if (startsMembership && app.applicant_email && !isPaidFirstBoothApplication) {
+    await sendApplicationApprovedEmail(
+      app.applicant_email,
+      app.applicant_name,
+      applicationType,
+      stripeInvoiceUrl
+    );
+  }
+
+  revalidateApplicationSurfaces();
   return { success: true };
 }
 

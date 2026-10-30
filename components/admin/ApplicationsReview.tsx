@@ -659,7 +659,10 @@ function ExpandedView({
                     <p className="text-[11px] text-gray-500 mt-0.5">
                       Updates {match.name}&apos;s profile with the application&apos;s details,
                       links this application to it, and grants {app.applicant_name || "the applicant"} org_admin
-                      login — no new invoice is created.
+                      login —{" "}
+                      {match.membershipStatus
+                        ? "no new invoice is created."
+                        : `${match.name} holds no membership, so this also makes it a ${app.application_type === "partner" ? "Vendor Partner" : "Member"}, sends the first invoice and the approval email.`}
                     </p>
                   </div>
                 )}
