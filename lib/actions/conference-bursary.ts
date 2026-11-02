@@ -172,7 +172,7 @@ type LooseDb = {
 };
 
 const REQUEST_COLUMNS =
-  "id, contact_name, contact_email, status, requested_at, requested_by_user_id, delegate_contact_id, covers_hotel, covers_travel, payment_preference, gm_buyer_confirmed";
+  "id, contact_name, contact_email, status, requested_at, requested_by_user_id, delegate_contact_id, covers_hotel, covers_travel, payment_preference, gm_buyer_confirmed, notes";
 
 type RequestRow = {
   id: string;
@@ -259,6 +259,7 @@ function answersOf(row: RequestRow | null): BursaryRequestAnswers {
     covers_travel: row?.covers_travel ?? null,
     payment_preference: row?.payment_preference ?? null,
     gm_buyer_confirmed: row?.gm_buyer_confirmed ?? null,
+    notes: row?.notes ?? null,
   };
 }
 

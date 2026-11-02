@@ -19,6 +19,7 @@ const complete: BursaryRequestAnswers = {
   covers_travel: false,
   payment_preference: "reimburse",
   gm_buyer_confirmed: true,
+  notes: null,
 };
 
 describe("the question list", () => {
@@ -35,6 +36,20 @@ describe("the question list", () => {
     expect(validateBursaryAnswer("payment_preference", "cash").valid).toBe(false);
     expect(validateBursaryAnswer("delegate_contact_id", "not-an-id").valid).toBe(false);
     expect(validateBursaryAnswer("delegate_contact_id", null)).toEqual({ valid: true, clean: null });
+  });
+
+  it("keeps the additional-help answer as trimmed text, and blank as nothing", () => {
+    expect(validateBursaryAnswer("notes", "  Airport parking in Whitehorse  ")).toEqual({
+      valid: true,
+      clean: "Airport parking in Whitehorse",
+    });
+    expect(validateBursaryAnswer("notes", "   ")).toEqual({ valid: true, clean: null });
+    expect(validateBursaryAnswer("notes", "x".repeat(2001)).valid).toBe(false);
+    expect(validateBursaryAnswer("notes", 5).valid).toBe(false);
+  });
+
+  it("does not need the additional-help answer to submit", () => {
+    expect(bursaryRequestGaps({ ...complete, notes: null }, true)).toEqual([]);
   });
 });
 

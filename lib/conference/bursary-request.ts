@@ -12,6 +12,11 @@
  * purchase of General Merchandise for their institution". One request per
  * school. Reimbursement after the conference is preferred to CSC paying in
  * advance. The Travel Bursary Terms must be accepted to submit.
+ *
+ * Board, 2026-10-29 (confirmed by Steve 2026-11-02): a school whose cost is
+ * still a barrier says what more it needs, and the board decides case by case.
+ * That answer is optional and lives on the row's existing `notes` column,
+ * which the staff queue already shows.
  */
 
 export const BURSARY_PAYMENT_PREFERENCES = ["reimburse", "prepay"] as const;
@@ -33,6 +38,7 @@ export const BURSARY_REQUEST_FIELDS = [
   "covers_travel",
   "payment_preference",
   "gm_buyer_confirmed",
+  "notes",
 ] as const;
 export type BursaryRequestField = (typeof BURSARY_REQUEST_FIELDS)[number];
 
@@ -42,7 +48,12 @@ export type BursaryRequestAnswers = {
   covers_travel: boolean | null;
   payment_preference: BursaryPaymentPreference | null;
   gm_buyer_confirmed: boolean | null;
+  /** "I need additional help": what more the school needs. Optional. */
+  notes: string | null;
 };
+
+/** Longest "I need additional help" answer kept. */
+export const BURSARY_NOTES_MAX = 2000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -71,6 +82,14 @@ export function validateBursaryAnswer(
       return typeof value === "string" && (BURSARY_PAYMENT_PREFERENCES as readonly string[]).includes(value)
         ? { valid: true, clean: value }
         : { valid: false, error: "Choose how you'd like to be paid." };
+    case "notes": {
+      if (typeof value !== "string") return { valid: false, error: "That answer should be text." };
+      const clean = value.trim();
+      if (clean.length > BURSARY_NOTES_MAX) {
+        return { valid: false, error: `Please keep this under ${BURSARY_NOTES_MAX} characters.` };
+      }
+      return { valid: true, clean: clean || null };
+    }
   }
 }
 

@@ -25,7 +25,7 @@ const SOURCES: Record<string, SourceResolver> = {
   /**
    * The travel bursary: the school's approved request. Its people file the
    * claim, and the claim covers what the request asked for: hotel, travel
-   * (airfare or mileage), or both.
+   * (airfare, train or mileage), or both.
    */
   conference_bursary_applications: async (sourceId) => {
     const { data } = await createAdminClient()
@@ -34,7 +34,7 @@ const SOURCES: Record<string, SourceResolver> = {
       .eq("id", sourceId)
       .maybeSingle();
     if (!data) return null;
-    const keys = [...(data.covers_hotel ? ["hotel"] : []), ...(data.covers_travel ? ["airfare", "mileage"] : [])];
+    const keys = [...(data.covers_hotel ? ["hotel"] : []), ...(data.covers_travel ? ["airfare", "train", "mileage"] : [])];
     return {
       canEdit: (ctx) => canFillBursaryRequest(ctx, data.conference_id, data.organization_id),
       allowedKeys: () => keys,

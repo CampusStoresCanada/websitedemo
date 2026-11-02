@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveBursaryAnswer, submitBursaryRequest, type BursaryRequestView } from "@/lib/actions/conference-bursary";
 import {
+  BURSARY_NOTES_MAX,
   BURSARY_PAYMENT_LABELS,
   BURSARY_PAYMENT_PREFERENCES,
   GM_BUYER_RULE,
@@ -79,7 +80,16 @@ export default function BursaryRequestForm({
           {[answers.covers_hotel && "hotel", answers.covers_travel && "travel"].filter(Boolean).join(" and ")}.{" "}
           {answers.payment_preference ? BURSARY_PAYMENT_LABELS[answers.payment_preference] : ""}.
         </p>
+        {answers.notes && <p className="mt-1">You also told us: {answers.notes}</p>}
         <p className="mt-1">Campus Stores Canada will be in touch about the amount.</p>
+        {/* The terms changed after this request went in (v2, 2026-11-02): the
+            school agrees to the current version here, by the same control. */}
+        {!view.termsAccepted && view.terms && (
+          <div className="mt-4 text-gray-800">
+            <p className="mb-2 font-medium">The Travel Bursary Terms have been updated. Please read and agree to them.</p>
+            <AgreeToDocument versionId={view.terms.versionId} title={view.terms.title} content={view.terms.content} />
+          </div>
+        )}
       </div>
     );
   }
@@ -121,7 +131,7 @@ export default function BursaryRequestForm({
           </label>
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={answers.covers_travel === true} onChange={(e) => save("covers_travel", e.target.checked)} />
-            Travel (economy airfare, or mileage)
+            Travel (economy airfare, train, or mileage)
           </label>
         </section>
 
@@ -150,6 +160,27 @@ export default function BursaryRequestForm({
             />
             <span>This delegate is {GM_BUYER_RULE}.</span>
           </label>
+        </section>
+
+        <section>
+          <label className="block font-medium text-gray-900" htmlFor="bursary-notes">
+            I need additional help <span className="font-normal text-gray-500">(optional)</span>
+          </label>
+          <p className="mt-0.5 text-gray-600">
+            If cost is still a barrier after this support, tell us what you need. The board looks at each request
+            and can&apos;t promise to meet every one.
+          </p>
+          <textarea
+            id="bursary-notes"
+            rows={3}
+            maxLength={BURSARY_NOTES_MAX}
+            defaultValue={answers.notes ?? ""}
+            onBlur={(e) => {
+              const next = e.target.value.trim() || null;
+              if (next !== answers.notes) save("notes", next);
+            }}
+            className="mt-1 w-full max-w-xl rounded-md border border-gray-300 px-2 py-1.5"
+          />
         </section>
       </fieldset>
 
