@@ -34,6 +34,7 @@ import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
 import { getTemplate, renderTemplateContent } from "@/lib/comms/templates";
 import { taskFor } from "./committee-workstreams";
 import { BENCHMARKING_REMINDERS } from "./lifecycle";
+import { parseSupabaseTimestamp, isValidDate } from "@/lib/time/supabase-timestamp";
 import { CAPABILITIES } from "@/lib/auth/capability-names";
 import type { StageMessage } from "@/lib/elections/messages";
 
@@ -138,6 +139,14 @@ interface RecipientRow {
   organization_id: string;
   contact_id: string | null;
   invited_at: string | null;
+  /**
+   * When the chase last reached them.
+   *
+   * Null when it never has — and a FAILED send leaves it null, because
+   * markReminded only stamps it when Resend accepted the message. That is
+   * deliberate: a partial failure must stay retryable immediately.
+   */
+  reminded_at: string | null;
   reminder_count: number;
   organizations: { name: string; is_test?: boolean | null } | null;
   contacts: { name: string | null; first_name: string | null; email: string | null; work_email: string | null } | null;
@@ -147,6 +156,34 @@ function recipientEmail(r: RecipientRow): string | null {
   // Work address first: this is a message about their job, and a personal
   // address on a contact row is often a legacy import rather than a preference.
   return r.contacts?.work_email?.trim() || r.contacts?.email?.trim() || null;
+}
+
+/**
+ * Chased so recently that chasing again is a duplicate, not the next step.
+ *
+ * ⛔ The guard the invitation always had and the chase never did. On 2026-10-30
+ * the reminder button was pressed, the page came back looking exactly as it had
+ * before, so it was pressed again — and all 52 stores received the same email
+ * twice, seventeen seconds apart. Nothing on this path looked at what had
+ * already gone out.
+ *
+ * The invitation blocks on `invited_at` outright. A reminder cannot: the series
+ * is MEANT to send five times. So the floor is time rather than existence, and
+ * the dial is `minimumGapDays` — already the number planReminderSeries uses to
+ * refuse two steps landing too close together. One dial, both meanings of "too
+ * soon", so a cadence change cannot leave the two disagreeing.
+ *
+ * This stops a SECOND press, which is what happened. Two presses racing inside
+ * the same second would both read the same pre-send state and still double —
+ * that needs a lock, and is a different bug from this one.
+ */
+function remindedWithinGap(r: RecipientRow, now: number): boolean {
+  if (!r.reminded_at) return false;
+  const last = parseSupabaseTimestamp(r.reminded_at);
+  // An unparseable stamp must not block the chase: the cost of a missed
+  // reminder is lower than the cost of a cycle that cannot chase at all.
+  if (!isValidDate(last)) return false;
+  return now - last.getTime() < BENCHMARKING_REMINDERS.minimumGapDays * 86_400_000;
 }
 
 function recipientName(r: RecipientRow): string {
@@ -181,7 +218,7 @@ async function loadRecipients(
   let q = db
     .from("benchmarking_recipients")
     .select(
-      "id, organization_id, contact_id, invited_at, reminder_count, organizations(name, is_test), contacts(name, first_name, email, work_email)",
+      "id, organization_id, contact_id, invited_at, reminded_at, reminder_count, organizations(name, is_test), contacts(name, first_name, email, work_email)",
     )
     .eq("survey_id", surveyId);
 
@@ -268,6 +305,7 @@ export type BlockedReason =
   | "already_submitted"
   | "never_invited"
   | "no_address"
+  | "reminded_recently"
 ;
 
 export interface PlannedSend {
@@ -368,10 +406,19 @@ export async function planReminders(surveyId: string): Promise<SendPlan | null> 
 
   const willSend: PlannedSend[] = [];
   const blocked: PlannedSend[] = [];
+  const now = Date.now();
 
   for (const r of recipients) {
     if (done.has(r.organization_id)) blocked.push(planLine(r, "already_submitted"));
     else if (!r.invited_at) blocked.push(planLine(r, "never_invited"));
+    /*
+      ⛔ Before no_address, and it costs nothing: a store that was never
+      successfully mailed has a null reminded_at, so it falls through to the
+      address problem on its own. Ordering it here means that after a send the
+      panel reads "52 chased in the last 2 days" rather than burying the one
+      fact the operator needs — that the chase already went out.
+    */
+    else if (remindedWithinGap(r, now)) blocked.push(planLine(r, "reminded_recently"));
     else if (!recipientEmail(r)) blocked.push(planLine(r, "no_address"));
     else willSend.push(planLine(r));
   }
