@@ -4,6 +4,7 @@ import {
   quickbooksConferenceRefundExportRun,
   quickbooksMiscReceiptExportRun,
 } from "@/lib/quickbooks/conference-export";
+import { quickbooksExpenseBillExportRun } from "@/lib/quickbooks/expense-bills";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +17,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [receipts, refunds, miscReceipts] = await Promise.all([
+    const [receipts, refunds, miscReceipts, expenseBills] = await Promise.all([
       quickbooksConferenceReceiptExportRun(),
       quickbooksConferenceRefundExportRun(),
       quickbooksMiscReceiptExportRun(),
+      quickbooksExpenseBillExportRun(),
     ]);
-    return NextResponse.json({ receipts, refunds, miscReceipts });
+    return NextResponse.json({ receipts, refunds, miscReceipts, expenseBills });
   } catch (error) {
     console.error("[cron/qbo-conference-export] Unhandled error:", error);
     return NextResponse.json(

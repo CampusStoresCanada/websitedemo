@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
-import { getBursaryRequest } from "@/lib/actions/conference-bursary";
+import { getBursaryClaim, getBursaryRequest } from "@/lib/actions/conference-bursary";
+import { getExpenseClaim } from "@/lib/actions/expense-claims";
+import ExpenseClaimForm from "@/components/expenses/ExpenseClaimForm";
 import { loginWithNext } from "@/lib/auth/login-redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 import BursaryRequestForm from "./BursaryRequestForm";
@@ -49,6 +51,10 @@ export default async function BursaryRequestPage({
   }
 
   const request = await getBursaryRequest({ conferenceId: conference.id, organizationId: school.id });
+  // Once the request is approved, the expense claim follows it on this page.
+  const claimRef = await getBursaryClaim({ conferenceId: conference.id, organizationId: school.id });
+  const claim =
+    claimRef.success && claimRef.data ? await getExpenseClaim(claimRef.data.claimId) : null;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">
@@ -58,6 +64,18 @@ export default async function BursaryRequestPage({
         <BursaryRequestForm conferenceId={conference.id} organizationId={school.id} view={request.data} />
       ) : (
         <p className="mt-4 text-sm text-gray-600">{request.error}</p>
+      )}
+      {claim?.success && (
+        <section className="mt-10">
+          <h2 className="text-xl font-semibold text-gray-900">Your expense claim</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            After the conference, claim what you spent and attach your receipts. Two Campus Stores Canada
+            approvers review every claim before it&apos;s paid.
+          </p>
+          <div className="mt-4">
+            <ExpenseClaimForm view={claim.data} />
+          </div>
+        </section>
       )}
     </main>
   );

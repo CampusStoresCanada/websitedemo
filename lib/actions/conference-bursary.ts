@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { canManageOrganization, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { membershipCoversConference } from "@/lib/conference/membership-gate";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -16,6 +16,7 @@ import {
 } from "@/lib/conference/bursary-request";
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
+import { canFillBursaryRequest } from "@/lib/conference/bursary-access";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -203,26 +204,6 @@ export type BursaryRequestView = {
   canEdit: boolean;
   gaps: string[];
 };
-
-/**
- * Who may fill in a school's request: anyone registered for this conference
- * from that school, or the school's admin whether or not they are registered.
- */
-async function canFillBursaryRequest(
-  ctx: Parameters<typeof canManageOrganization>[0] & { userId: string },
-  conferenceId: string,
-  organizationId: string
-): Promise<boolean> {
-  if (canManageOrganization(ctx, organizationId)) return true;
-  const { count } = await createAdminClient()
-    .from("conference_people")
-    .select("id", { count: "exact", head: true })
-    .eq("conference_id", conferenceId)
-    .eq("organization_id", organizationId)
-    .eq("user_id", ctx.userId)
-    .neq("assignment_status", "canceled");
-  return (count ?? 0) > 0;
-}
 
 /** The school must be a member whose membership covers the conference. */
 async function memberCovered(conferenceId: string, organizationId: string): Promise<string | null> {
@@ -432,3 +413,66 @@ export async function submitBursaryRequest(params: {
   return { success: true, data: null };
 }
 
+
+// ─────────────────────────────────────────────────────────────────
+// The expense claim that follows an approved request
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * The school's travel expense claim, opened on first visit once its request is
+ * approved. The claim itself is the general expense module's
+ * (lib/expenses/); the bursary only supplies the program and the request it
+ * hangs from. Null when there is nothing to claim yet.
+ */
+export async function getBursaryClaim(params: {
+  conferenceId: string;
+  organizationId: string;
+}): Promise<Result<{ claimId: string } | null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const { data: request } = await db
+    .from("conference_bursary_applications")
+    .select("id, status")
+    .eq("conference_id", params.conferenceId)
+    .eq("organization_id", params.organizationId)
+    .maybeSingle();
+  if (!request || !["approved", "fulfilled"].includes(request.status)) return { success: true, data: null };
+
+  const { data: program } = await db
+    .from("expense_programs")
+    .select("id")
+    .eq("conference_id", params.conferenceId)
+    .eq("is_active", true)
+    .like("slug", "travel-bursary-%")
+    .maybeSingle();
+  if (!program) return { success: true, data: null };
+
+  const find = () =>
+    db
+      .from("expense_claims")
+      .select("id")
+      .eq("program_id", program.id)
+      .eq("source_table", "conference_bursary_applications")
+      .eq("source_id", request.id)
+      .maybeSingle();
+
+  const { data: existing } = await find();
+  if (existing) return { success: true, data: { claimId: existing.id } };
+
+  if (!(await canFillBursaryRequest(auth.ctx, params.conferenceId, params.organizationId))) {
+    return { success: true, data: null };
+  }
+  const { error } = await db.from("expense_claims").insert({
+    program_id: program.id,
+    organization_id: params.organizationId,
+    source_table: "conference_bursary_applications",
+    source_id: request.id,
+    created_by_user_id: auth.ctx.userId,
+  });
+  // A colleague opening it at the same moment wins the unique index; read theirs.
+  if (error && error.code !== "23505") return { success: false, error: error.message };
+  const { data: created } = await find();
+  return created ? { success: true, data: { claimId: created.id } } : { success: false, error: "Could not open the claim." };
+}

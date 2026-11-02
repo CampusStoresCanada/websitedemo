@@ -136,6 +136,12 @@ export const NAV_GROUPS: NavGroup[] = [
         matchPrefix: "/admin/board/financials",
       },
       {
+        href: "/admin/expenses",
+        label: "Expense Claims",
+        description: "Review expense claims and their receipts. Two approvers send each one to QuickBooks.",
+        matchPrefix: "/admin/expenses",
+      },
+      {
         href: "/admin/elections",
         label: "Elections",
         title: "Board Elections",

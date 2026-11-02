@@ -3251,12 +3251,12 @@ export type Database = {
           conference_id: string | null
           created_at: string
           created_by: string | null
+          destination: string
+          google_group_email: string | null
           id: string
           kind: string
           label: string
           last_run: Json | null
-          destination: string
-          google_group_email: string | null
           last_run_at: string | null
           pass_entity_ids: string[] | null
           role_key: string | null
@@ -3271,12 +3271,12 @@ export type Database = {
           conference_id?: string | null
           created_at?: string
           created_by?: string | null
+          destination?: string
+          google_group_email?: string | null
           id?: string
           kind: string
           label: string
           last_run?: Json | null
-          destination?: string
-          google_group_email?: string | null
           last_run_at?: string | null
           pass_entity_ids?: string[] | null
           role_key?: string | null
@@ -3291,12 +3291,12 @@ export type Database = {
           conference_id?: string | null
           created_at?: string
           created_by?: string | null
+          destination?: string
+          google_group_email?: string | null
           id?: string
           kind?: string
           label?: string
           last_run?: Json | null
-          destination?: string
-          google_group_email?: string | null
           last_run_at?: string | null
           pass_entity_ids?: string[] | null
           role_key?: string | null
@@ -3937,10 +3937,17 @@ export type Database = {
           conference_id: string
           contact_email: string
           contact_name: string
+          covers_hotel: boolean | null
+          covers_travel: boolean | null
           created_at: string
+          delegate_contact_id: string | null
+          gm_buyer_confirmed: boolean | null
           id: string
           notes: string | null
           organization_id: string
+          payment_preference: string | null
+          requested_at: string | null
+          requested_by_user_id: string | null
           status: string
           submitted_by_user_id: string | null
           updated_at: string
@@ -3949,10 +3956,17 @@ export type Database = {
           conference_id: string
           contact_email: string
           contact_name: string
+          covers_hotel?: boolean | null
+          covers_travel?: boolean | null
           created_at?: string
+          delegate_contact_id?: string | null
+          gm_buyer_confirmed?: boolean | null
           id?: string
           notes?: string | null
           organization_id: string
+          payment_preference?: string | null
+          requested_at?: string | null
+          requested_by_user_id?: string | null
           status?: string
           submitted_by_user_id?: string | null
           updated_at?: string
@@ -3961,10 +3975,17 @@ export type Database = {
           conference_id?: string
           contact_email?: string
           contact_name?: string
+          covers_hotel?: boolean | null
+          covers_travel?: boolean | null
           created_at?: string
+          delegate_contact_id?: string | null
+          gm_buyer_confirmed?: boolean | null
           id?: string
           notes?: string | null
           organization_id?: string
+          payment_preference?: string | null
+          requested_at?: string | null
+          requested_by_user_id?: string | null
           status?: string
           submitted_by_user_id?: string | null
           updated_at?: string
@@ -3975,6 +3996,34 @@ export type Database = {
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_bursary_applications_delegate_contact_id_fkey"
+            columns: ["delegate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_bursary_applications_delegate_contact_id_fkey"
+            columns: ["delegate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_bursary_applications_delegate_contact_id_fkey"
+            columns: ["delegate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_bursary_applications_delegate_contact_id_fkey"
+            columns: ["delegate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
           {
@@ -4551,6 +4600,121 @@ export type Database = {
           },
         ]
       }
+      conference_funded_conversions: {
+        Row: {
+          actor_id: string | null
+          conference_id: string
+          created_at: string
+          from_entity_id: string
+          funded_purchase_id: string
+          holder_person_id: string | null
+          id: string
+          organization_id: string
+          reason: string | null
+          refund_cents: number | null
+          refund_id: string | null
+          seat_id: string
+          source_order_id: string | null
+          to_entity_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          conference_id: string
+          created_at?: string
+          from_entity_id: string
+          funded_purchase_id: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id: string
+          reason?: string | null
+          refund_cents?: number | null
+          refund_id?: string | null
+          seat_id: string
+          source_order_id?: string | null
+          to_entity_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          conference_id?: string
+          created_at?: string
+          from_entity_id?: string
+          funded_purchase_id?: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id?: string
+          reason?: string | null
+          refund_cents?: number | null
+          refund_id?: string | null
+          seat_id?: string
+          source_order_id?: string | null
+          to_entity_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_funded_conversions_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_from_entity_id_fkey"
+            columns: ["from_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_funded_purchase_id_fkey"
+            columns: ["funded_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "entity_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_holder_person_id_fkey"
+            columns: ["holder_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_seat_id_fkey"
+            columns: ["seat_id"]
+            isOneToOne: false
+            referencedRelation: "entity_balance_seats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_source_order_id_fkey"
+            columns: ["source_order_id"]
+            isOneToOne: false
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_funded_conversions_to_entity_id_fkey"
+            columns: ["to_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conference_instances: {
         Row: {
           badge_preprint_at: string | null
@@ -4560,6 +4724,7 @@ export type Database = {
           booth_sales_general_open_at: string | null
           booth_sales_sponsor_open_at: string | null
           bursary_goal_cents: number | null
+          bursary_request_closes_at: string | null
           cart_reservation_minutes: number
           catering_cutoff: string | null
           circle_spaces: Json
@@ -4603,6 +4768,7 @@ export type Database = {
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
           bursary_goal_cents?: number | null
+          bursary_request_closes_at?: string | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
           circle_spaces?: Json
@@ -4646,6 +4812,7 @@ export type Database = {
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
           bursary_goal_cents?: number | null
+          bursary_request_closes_at?: string | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
           circle_spaces?: Json
@@ -7662,6 +7829,407 @@ export type Database = {
           },
         ]
       }
+      expense_claim_approvals: {
+        Row: {
+          approved_at: string
+          approver_user_id: string
+          claim_id: string
+          id: string
+        }
+        Insert: {
+          approved_at?: string
+          approver_user_id: string
+          claim_id: string
+          id?: string
+        }
+        Update: {
+          approved_at?: string
+          approver_user_id?: string
+          claim_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_claim_approvals_approver_user_id_fkey"
+            columns: ["approver_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claim_approvals_claim_id_fkey"
+            columns: ["claim_id"]
+            isOneToOne: false
+            referencedRelation: "expense_claims"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_claim_lines: {
+        Row: {
+          amount_cents: number
+          category_key: string
+          claim_id: string
+          created_at: string
+          description: string | null
+          distance_km: number | null
+          id: string
+          tax_cents: number
+          updated_at: string
+        }
+        Insert: {
+          amount_cents?: number
+          category_key: string
+          claim_id: string
+          created_at?: string
+          description?: string | null
+          distance_km?: number | null
+          id?: string
+          tax_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          category_key?: string
+          claim_id?: string
+          created_at?: string
+          description?: string | null
+          distance_km?: number | null
+          id?: string
+          tax_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_claim_lines_claim_id_fkey"
+            columns: ["claim_id"]
+            isOneToOne: false
+            referencedRelation: "expense_claims"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_claim_receipts: {
+        Row: {
+          content_type: string
+          created_at: string
+          file_name: string
+          id: string
+          line_id: string
+          size_bytes: number | null
+          storage_path: string
+          uploaded_by_user_id: string | null
+        }
+        Insert: {
+          content_type: string
+          created_at?: string
+          file_name: string
+          id?: string
+          line_id: string
+          size_bytes?: number | null
+          storage_path: string
+          uploaded_by_user_id?: string | null
+        }
+        Update: {
+          content_type?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          line_id?: string
+          size_bytes?: number | null
+          storage_path?: string
+          uploaded_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_claim_receipts_line_id_fkey"
+            columns: ["line_id"]
+            isOneToOne: false
+            referencedRelation: "expense_claim_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claim_receipts_uploaded_by_user_id_fkey"
+            columns: ["uploaded_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_claims: {
+        Row: {
+          approved_at: string | null
+          claimant_contact_id: string | null
+          created_at: string
+          created_by_user_id: string | null
+          decided_at: string | null
+          decided_by_user_id: string | null
+          decision_note: string | null
+          id: string
+          organization_id: string
+          payee_address_line1: string | null
+          payee_address_line2: string | null
+          payee_city: string | null
+          payee_country: string | null
+          payee_email: string | null
+          payee_name: string | null
+          payee_phone: string | null
+          payee_postal_code: string | null
+          payee_province: string | null
+          payee_type: string | null
+          program_id: string
+          qbo_bill_id: string | null
+          qbo_vendor_id: string | null
+          source_id: string | null
+          source_table: string | null
+          status: string
+          submitted_at: string | null
+          submitted_by_user_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          claimant_contact_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          decided_at?: string | null
+          decided_by_user_id?: string | null
+          decision_note?: string | null
+          id?: string
+          organization_id: string
+          payee_address_line1?: string | null
+          payee_address_line2?: string | null
+          payee_city?: string | null
+          payee_country?: string | null
+          payee_email?: string | null
+          payee_name?: string | null
+          payee_phone?: string | null
+          payee_postal_code?: string | null
+          payee_province?: string | null
+          payee_type?: string | null
+          program_id: string
+          qbo_bill_id?: string | null
+          qbo_vendor_id?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          status?: string
+          submitted_at?: string | null
+          submitted_by_user_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          claimant_contact_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          decided_at?: string | null
+          decided_by_user_id?: string | null
+          decision_note?: string | null
+          id?: string
+          organization_id?: string
+          payee_address_line1?: string | null
+          payee_address_line2?: string | null
+          payee_city?: string | null
+          payee_country?: string | null
+          payee_email?: string | null
+          payee_name?: string | null
+          payee_phone?: string | null
+          payee_postal_code?: string | null
+          payee_province?: string | null
+          payee_type?: string | null
+          program_id?: string
+          qbo_bill_id?: string | null
+          qbo_vendor_id?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          status?: string
+          submitted_at?: string | null
+          submitted_by_user_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_claims_claimant_contact_id_fkey"
+            columns: ["claimant_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_claimant_contact_id_fkey"
+            columns: ["claimant_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_claimant_contact_id_fkey"
+            columns: ["claimant_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_claimant_contact_id_fkey"
+            columns: ["claimant_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_decided_by_user_id_fkey"
+            columns: ["decided_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: false
+            referencedRelation: "expense_programs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_claims_submitted_by_user_id_fkey"
+            columns: ["submitted_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_program_categories: {
+        Row: {
+          cap_cents: number | null
+          choice_group: string | null
+          help: string | null
+          id: string
+          key: string
+          label: string
+          measure: string
+          program_id: string
+          rate_cents_per_km: number | null
+          requires_receipt: boolean
+          sort: number
+        }
+        Insert: {
+          cap_cents?: number | null
+          choice_group?: string | null
+          help?: string | null
+          id?: string
+          key: string
+          label: string
+          measure?: string
+          program_id: string
+          rate_cents_per_km?: number | null
+          requires_receipt?: boolean
+          sort?: number
+        }
+        Update: {
+          cap_cents?: number | null
+          choice_group?: string | null
+          help?: string | null
+          id?: string
+          key?: string
+          label?: string
+          measure?: string
+          program_id?: string
+          rate_cents_per_km?: number | null
+          requires_receipt?: boolean
+          sort?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_program_categories_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: false
+            referencedRelation: "expense_programs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expense_programs: {
+        Row: {
+          approvals_required: number
+          closes_at: string | null
+          conference_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          opens_at: string | null
+          payee_types: string[]
+          qbo_expense_account_id: string | null
+          qbo_tax_code_id: string | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          approvals_required?: number
+          closes_at?: string | null
+          conference_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          opens_at?: string | null
+          payee_types?: string[]
+          qbo_expense_account_id?: string | null
+          qbo_tax_code_id?: string | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          approvals_required?: number
+          closes_at?: string | null
+          conference_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          opens_at?: string | null
+          payee_types?: string[]
+          qbo_expense_account_id?: string | null
+          qbo_tax_code_id?: string | null
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_programs_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       explain_requests: {
         Row: {
           created_at: string
@@ -10283,6 +10851,7 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
+          quickbooks_vendor_id: string | null
           renewal_notifications_paused_until: string | null
           renewal_pause_reason: string | null
           renewal_pause_set_at: string | null
@@ -10400,6 +10969,7 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
+          quickbooks_vendor_id?: string | null
           renewal_notifications_paused_until?: string | null
           renewal_pause_reason?: string | null
           renewal_pause_set_at?: string | null
@@ -10517,6 +11087,7 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
+          quickbooks_vendor_id?: string | null
           renewal_notifications_paused_until?: string | null
           renewal_pause_reason?: string | null
           renewal_pause_set_at?: string | null
@@ -11810,6 +12381,56 @@ export type Database = {
             columns: ["conference_order_id"]
             isOneToOne: false
             referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qbo_expense_bill_queue: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          expense_claim_id: string
+          id: string
+          lease_expires_at: string | null
+          max_retries: number
+          next_retry_at: string | null
+          processed_at: string | null
+          qbo_bill_id: string | null
+          retry_count: number
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          expense_claim_id: string
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_bill_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          expense_claim_id?: string
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_bill_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_expense_bill_queue_expense_claim_id_fkey"
+            columns: ["expense_claim_id"]
+            isOneToOne: true
+            referencedRelation: "expense_claims"
             referencedColumns: ["id"]
           },
         ]
@@ -15095,6 +15716,10 @@ export type Database = {
         Args: { p_approval_id: string; p_notes?: string }
         Returns: string
       }
+      approve_expense_claim: {
+        Args: { p_approver: string; p_claim_id: string }
+        Returns: string
+      }
       assign_grant_seat: {
         Args: {
           p_actor_id: string
@@ -15152,6 +15777,21 @@ export type Database = {
       confirm_booth_sale: {
         Args: { p_booth_id: string; p_order_id: string; p_org_id: string }
         Returns: string
+      }
+      convert_registration_to_funded: {
+        Args: {
+          p_actor_id: string
+          p_conference_id: string
+          p_cumulative_refund_cents: number
+          p_funded_entity_id: string
+          p_organization_id: string
+          p_reason: string
+          p_refund_cents: number
+          p_refund_id: string
+          p_seat_id: string
+          p_source_order_id: string
+        }
+        Returns: Json
       }
       create_conference_order_from_cart: {
         Args: {
@@ -15320,6 +15960,7 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
+          quickbooks_vendor_id: string | null
           renewal_notifications_paused_until: string | null
           renewal_pause_reason: string | null
           renewal_pause_set_at: string | null

@@ -26,7 +26,7 @@ import { QBApiError } from "./client";
 
 type Db = ReturnType<typeof createAdminClient>;
 
-/** The five worker queues. All share one row shape (id, status, retry_count,
+/** The worker queues. All share one row shape (id, status, retry_count,
  *  max_retries, next_retry_at, lease_expires_at, error_message, processed_at)
  *  and differ only in which document id they write back on success. */
 export const QB_QUEUE_TABLES = [
@@ -35,6 +35,7 @@ export const QB_QUEUE_TABLES = [
   "qbo_conference_receipt_queue",
   "qbo_conference_refund_queue",
   "qbo_misc_receipt_queue",
+  "qbo_expense_bill_queue",
 ] as const;
 
 export type QBQueueTable = (typeof QB_QUEUE_TABLES)[number];
@@ -141,6 +142,7 @@ const RESULT_ID_COLUMN: Record<QBQueueTable, string> = {
   qbo_conference_receipt_queue: "qbo_sales_receipt_id",
   qbo_conference_refund_queue: "qbo_refund_receipt_id",
   qbo_misc_receipt_queue: "qbo_sales_receipt_id",
+  qbo_expense_bill_queue: "qbo_bill_id",
 };
 
 /**
