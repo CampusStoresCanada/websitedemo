@@ -1072,11 +1072,14 @@ export default function MemberProfile({
                       </span>
                     </>
                   )}
-                  {(benchmarking?.pos_system || (editMode && canEditThisOrg && benchmarking)) && (
+                  {(benchmarking?.pos_system?.length || (editMode && canEditThisOrg && benchmarking)) && (
                     <>
                       <span className="text-gray-500">POS System</span>
+                      {/* pos_system is text[]. Rendering the array bare let React
+                          concatenate two values with no separator, and an empty
+                          array is truthy so it showed a blank instead of "—". */}
                       <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "pos_system", benchmarking!.id, organization.id)}>
-                        {benchmarking?.pos_system || "—"}
+                        {benchmarking?.pos_system?.length ? benchmarking.pos_system.join(", ") : "—"}
                       </span>
                     </>
                   )}

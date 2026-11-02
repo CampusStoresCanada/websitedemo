@@ -66,9 +66,12 @@ export function getPoolForLens(
       return members.filter((o) => o.enrollmentFte != null);
     case "pos_platform":
       if (subFilters.posFilter) {
-        return members.filter((o) => o.posSystem === subFilters.posFilter);
+        // Containment, not equality — pos_system is text[]. `=== value` compared a
+        // string against an array object and matched nothing, so the facet read
+        // "Bookware 12" and selecting it emptied the map.
+        return members.filter((o) => o.posSystem?.includes(subFilters.posFilter!));
       }
-      return members.filter((o) => o.posSystem != null);
+      return members.filter((o) => o.posSystem != null && o.posSystem.length > 0);
     case "services":
       if (subFilters.serviceFilter) {
         return members.filter((o) => o.servicesOffered?.includes(subFilters.serviceFilter!));
@@ -96,7 +99,7 @@ export function applyCompoundFilters(
     result = result.filter((o) => o.province === filters.province);
   }
   if (filters.pos && currentLens !== "pos_platform") {
-    result = result.filter((o) => o.posSystem === filters.pos);
+    result = result.filter((o) => o.posSystem?.includes(filters.pos!));
   }
   if (filters.service && currentLens !== "services") {
     result = result.filter((o) => o.servicesOffered?.includes(filters.service!));
@@ -132,9 +135,14 @@ export function countByField(
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const org of orgs) {
-    const val = org[field];
-    if (val && val !== "Out of Canada") {
-      counts[val] = (counts[val] || 0) + 1;
+    const raw = org[field];
+    // posSystem is text[]; the scalar fields stay scalar. Counting the array as a
+    // single key happened to work via string coercion at one value and silently
+    // produced an "A,B" bucket at two.
+    for (const val of Array.isArray(raw) ? raw : raw ? [raw] : []) {
+      if (val && val !== "Out of Canada") {
+        counts[val] = (counts[val] || 0) + 1;
+      }
     }
   }
   return counts;
@@ -176,7 +184,7 @@ export function computeGroupSummary(
   if (lens !== "pos_platform") {
     const counts: Record<string, number> = {};
     for (const o of orgs) {
-      if (o.posSystem) counts[o.posSystem] = (counts[o.posSystem] || 0) + 1;
+      for (const pos of o.posSystem ?? []) counts[pos] = (counts[pos] || 0) + 1;
     }
     const entries = Object.entries(counts).sort(([, a], [, b]) => b - a);
     topPos = entries[0] ? entries[0][0] : null;

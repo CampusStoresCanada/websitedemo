@@ -38,8 +38,9 @@ export interface HomeMapOrg {
   fte: number | null;
   /** Enrollment FTE from benchmarking — for By Scale lens */
   enrollmentFte: number | null;
-  /** POS system from benchmarking — for Same Platform lens */
-  posSystem: string | null;
+  /** POS systems from benchmarking — for Same Platform lens. Multi-select since
+   * 20260930100000_benchmarking_systems_multiselect; a store may run more than one. */
+  posSystem: string[] | null;
   /** Services offered from benchmarking — for Services Offered lens */
   servicesOffered: string[] | null;
   /** Operations mandate from benchmarking — for Operating Model lens */
@@ -52,8 +53,8 @@ export interface HomeMapOrg {
   paymentOptions: string[] | null;
   /** Shopping services from benchmarking (e.g., Online, In-Store) */
   shoppingServices: string[] | null;
-  /** LMS system from benchmarking */
-  lmsSystem: string | null;
+  /** LMS systems from benchmarking — multi-select, same migration as pos_system. */
+  lmsSystem: string[] | null;
   /** Social media platforms from benchmarking */
   socialMediaPlatforms: string[] | null;
   /** Institution type from benchmarking */
@@ -85,7 +86,7 @@ interface HomeOrgRecord extends HomeMapOrg {
 
 interface BenchmarkingSlice {
   orgId: string;
-  posSystem: string | null;
+  posSystem: string[] | null;
   enrollmentFte: number | null;
   numLocations: number | null;
   totalSquareFootage: number | null;
@@ -93,7 +94,7 @@ interface BenchmarkingSlice {
   operationsMandate: string | null;
   paymentOptions: string[] | null;
   shoppingServices: string[] | null;
-  lmsSystem: string | null;
+  lmsSystem: string[] | null;
   socialMediaPlatforms: string[] | null;
   institutionType: string | null;
   fulltimeEmployees: number | null;
@@ -130,7 +131,7 @@ export interface MapStory {
     teaserMasked: boolean;
     fte: number | null;
     numLocations: number | null;
-    posSystem: string | null;
+    posSystem: string[] | null;
   };
 }
 
@@ -382,10 +383,14 @@ function findCommonTraits(
 
   const traits: string[] = [];
 
-  // Shared POS system
+  // Shared POS system — per value. A Map keyed by the array itself keys by object
+  // identity, so two stores on the same POS produced two entries of one and
+  // `count >= 2` never fired.
   const posCounts = new Map<string, number>();
   for (const s of slices) {
-    if (s.posSystem) posCounts.set(s.posSystem, (posCounts.get(s.posSystem) ?? 0) + 1);
+    for (const pos of s.posSystem ?? []) {
+      posCounts.set(pos, (posCounts.get(pos) ?? 0) + 1);
+    }
   }
   for (const [pos, count] of posCounts) {
     if (count >= 2) traits.push(`${count} run ${pos}`);
@@ -414,10 +419,12 @@ function findCommonTraits(
     traits.push(`Shared services: ${sharedServices.slice(0, 3).join(", ")}`);
   }
 
-  // Shared LMS
+  // Shared LMS — per value, same reason as POS above.
   const lmsCounts = new Map<string, number>();
   for (const s of slices) {
-    if (s.lmsSystem) lmsCounts.set(s.lmsSystem, (lmsCounts.get(s.lmsSystem) ?? 0) + 1);
+    for (const lms of s.lmsSystem ?? []) {
+      lmsCounts.set(lms, (lmsCounts.get(lms) ?? 0) + 1);
+    }
   }
   for (const [lms, count] of lmsCounts) {
     if (count >= 2) traits.push(`${count} on ${lms}`);
@@ -460,7 +467,7 @@ async function createSpotlightStory(
   if (org.fte) details.push(`${org.fte.toLocaleString()} FTE`);
   if (bench?.numLocations && bench.numLocations > 1)
     details.push(`${bench.numLocations} locations`);
-  if (bench?.posSystem) details.push(`runs ${bench.posSystem}`);
+  if (bench?.posSystem?.length) details.push(`runs ${bench.posSystem.join(", ")}`);
 
   const description =
     details.length > 0
@@ -547,7 +554,14 @@ async function fetchMapOrgsWithBenchmarking(
     if (benchByOrg.has(orgId)) continue; // first row = latest year
     benchByOrg.set(orgId, {
       orgId,
-      posSystem: (row.pos_system as string | null) ?? null,
+      // ⛔ `pos_system` is text[] (20260930100000_benchmarking_systems_multiselect).
+      // It was read here as `as string | null` — a hand-written type forced onto a
+      // generated one, which is how a column type change passes tsc in silence.
+      // The cast made `posSystem` an ARRAY at runtime while every consumer treated
+      // it as a string: Map keys went by identity so the POS story bucketed 25
+      // stores into 25 buckets of one, `=== value` filters matched nothing, and
+      // DirectoryTable's `.toLowerCase()` threw. Follow servicesOffered below.
+      posSystem: Array.isArray(row.pos_system) ? (row.pos_system as string[]) : null,
       enrollmentFte: typeof row.enrollment_fte === "number" ? row.enrollment_fte : null,
       numLocations: typeof row.num_store_locations === "number" ? row.num_store_locations : null,
       totalSquareFootage: typeof row.total_square_footage === "number" ? row.total_square_footage : null,
@@ -555,7 +569,7 @@ async function fetchMapOrgsWithBenchmarking(
       operationsMandate: (row.operations_mandate as string | null) ?? null,
       paymentOptions: Array.isArray(row.payment_options) ? (row.payment_options as string[]) : null,
       shoppingServices: Array.isArray(row.shopping_services) ? (row.shopping_services as string[]) : null,
-      lmsSystem: (row.lms_system as string | null) ?? null,
+      lmsSystem: Array.isArray(row.lms_system) ? (row.lms_system as string[]) : null,
       socialMediaPlatforms: Array.isArray(row.social_media_platforms) ? (row.social_media_platforms as string[]) : null,
       institutionType: (row.institution_type as string | null) ?? null,
       fulltimeEmployees: typeof row.fulltime_employees === "number" ? row.fulltime_employees : null,
@@ -762,13 +776,16 @@ export async function getHomePageData(viewerIsAdmin = false): Promise<HomePageDa
   }
 
   // --- POS ecosystem (orgs sharing a POS system, 2+) ---
+  // One bucket per POS VALUE, not per array. A store running two platforms belongs
+  // to both ecosystems, which is the point of the multi-select.
   const orgsByPos = new Map<string, HomeMapOrg[]>();
   for (const org of members) {
     const bench = benchByOrg.get(org.id);
-    if (!bench?.posSystem) continue;
-    const current = orgsByPos.get(bench.posSystem) ?? [];
-    current.push(org);
-    orgsByPos.set(bench.posSystem, current);
+    for (const pos of bench?.posSystem ?? []) {
+      const current = orgsByPos.get(pos) ?? [];
+      current.push(org);
+      orgsByPos.set(pos, current);
+    }
   }
   for (const [pos, orgs] of orgsByPos) {
     if (orgs.length < 2) continue;

@@ -41,7 +41,7 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
   // Member viewing a partner org — show a fit-aware partner briefing
   const showMemberPartnerView = !!memberProfile && org.type === "Vendor Partner";
   const hasOperationalData = !!(
-    org.posSystem ||
+    (org.posSystem && org.posSystem.length > 0) ||
     org.operationsMandate ||
     (org.servicesOffered && org.servicesOffered.length > 0) ||
     (org.paymentOptions && org.paymentOptions.length > 0) ||
@@ -49,7 +49,7 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
   );
 
   const hasTechData = !!(
-    org.lmsSystem ||
+    (org.lmsSystem && org.lmsSystem.length > 0) ||
     (org.socialMediaPlatforms && org.socialMediaPlatforms.length > 0)
   );
 
@@ -507,21 +507,28 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Operations</p>
               </div>
               <div className="p-3 space-y-2.5">
-                {org.posSystem && (
+                {org.posSystem && org.posSystem.length > 0 && (
                   <div className="flex items-center gap-2.5">
                     <span className="text-[10px] text-gray-500 w-16 flex-shrink-0 uppercase tracking-wider">POS</span>
-                    {onFilterByValue ? (
-                      <button
-                        type="button"
-                        onClick={() => onFilterByValue(null, { pos: org.posSystem! })}
-                        className="text-sm font-medium text-gray-900 hover:text-[#EE2A2E] hover:underline transition-colors"
-                        title={`Show all using ${org.posSystem}`}
-                      >
-                        {org.posSystem}
-                      </button>
-                    ) : (
-                      <span className="text-sm font-medium text-gray-900">{org.posSystem}</span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {org.posSystem.map((pos) =>
+                        onFilterByValue ? (
+                          <button
+                            key={pos}
+                            type="button"
+                            onClick={() => onFilterByValue(null, { pos })}
+                            className="text-sm font-medium text-gray-900 hover:text-[#EE2A2E] hover:underline transition-colors"
+                            title={`Show all using ${pos}`}
+                          >
+                            {pos}
+                          </button>
+                        ) : (
+                          <span key={pos} className="text-sm font-medium text-gray-900">
+                            {pos}
+                          </span>
+                        )
+                      )}
+                    </div>
                   </div>
                 )}
                 {org.operationsMandate && (
@@ -632,10 +639,10 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Technology</p>
               </div>
               <div className="p-3 space-y-2.5">
-                {org.lmsSystem && (
+                {org.lmsSystem && org.lmsSystem.length > 0 && (
                   <div className="flex items-center gap-2.5">
                     <span className="text-[10px] text-gray-500 w-16 flex-shrink-0 uppercase tracking-wider">LMS</span>
-                    <span className="text-sm font-medium text-gray-900">{org.lmsSystem}</span>
+                    <span className="text-sm font-medium text-gray-900">{org.lmsSystem.join(", ")}</span>
                   </div>
                 )}
                 {org.socialMediaPlatforms && org.socialMediaPlatforms.length > 0 && (

@@ -474,18 +474,18 @@ export default function MapAttract({
               <p className="text-xs text-gray-600">
                 {[story.spotlight.city, story.spotlight.province].filter(Boolean).join(", ")}
               </p>
-              {(story.spotlight.fte || story.spotlight.posSystem) && (
+              {(story.spotlight.fte || story.spotlight.posSystem?.length) && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {story.spotlight.fte && (
                     <span className="rounded-md bg-gray-200/70 px-2 py-0.5 text-xs text-gray-700">
                       {story.spotlight.fte.toLocaleString()} FTE
                     </span>
                   )}
-                  {story.spotlight.posSystem && (
+                  {story.spotlight.posSystem?.length ? (
                     <span className="rounded-md bg-gray-200/70 px-2 py-0.5 text-xs text-gray-700">
-                      {story.spotlight.posSystem}
+                      {story.spotlight.posSystem.join(", ")}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               )}
             </div>
