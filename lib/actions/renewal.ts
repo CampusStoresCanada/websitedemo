@@ -3,13 +3,14 @@
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
-import { createProgramInvoice, finalizeAndSendInvoice } from "@/lib/stripe/billing";
+import { createProgramInvoice, finalizeAndSendInvoice, setInvoicePayer } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { computeNewExpiresAt } from "@/lib/membership/renewal-activation";
 import { getActivePolicySet } from "@/lib/policy/engine";
 import { sendTransactional } from "@/lib/comms/send";
 import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
 import { resolveOptOutScope } from "@/lib/renewal/opt-out-scope";
+import { logAuditEventSafe } from "@/lib/ops/audit";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -662,4 +663,54 @@ export async function renewMembershipNow(
 
   const stripeInvoice = await stripe.invoices.retrieve(stripeInvoiceId);
   return { success: true, invoiceUrl: stripeInvoice.hosted_invoice_url ?? undefined };
+}
+
+/**
+ * The /org/billing Pay button. Puts the admin who clicked on the org's Stripe
+ * customer, records who it was, and returns Stripe's own pay link to send them
+ * to. Every admin gets the invoice email; whoever clicks through here is the
+ * one paying, so Stripe's receipt goes to them.
+ *
+ * A POST (server action), never a GET link: Safe Links pre-clicks every URL
+ * in an email, and a GET that moved the customer would hand the receipt to
+ * whichever admin's mail scanner ran last.
+ */
+export async function openInvoicePayment(
+  invoiceId: string
+): Promise<{ success: true; url: string } | { success: false; error: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { ctx } = auth;
+
+  const db = createAdminClient();
+  const { data: invoice } = await db
+    .from("invoices")
+    .select("id, organization_id, status, stripe_invoice_id, hosted_invoice_url")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!invoice?.organization_id) return { success: false, error: "Invoice not found" };
+  if (!isGlobalAdmin(ctx.globalRole) && !canManageOrganization(ctx, invoice.organization_id)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+  if (invoice.status !== "invoiced" || !invoice.stripe_invoice_id) {
+    return { success: false, error: "This invoice is not open for payment." };
+  }
+
+  // The link exactly as Stripe issued it; invoices finalized before the URL
+  // was captured are read from Stripe.
+  let url = invoice.hosted_invoice_url;
+  if (!url) url = (await stripe.invoices.retrieve(invoice.stripe_invoice_id)).hosted_invoice_url ?? null;
+  if (!url) return { success: false, error: "Stripe has no payment page for this invoice." };
+
+  if (ctx.userEmail) await setInvoicePayer(invoice.id, ctx.userEmail);
+
+  await logAuditEventSafe({
+    action: "invoice_payment_opened",
+    entityType: "invoice",
+    entityId: invoice.id,
+    actorId: ctx.userId,
+    details: { organization_id: invoice.organization_id, payer_email: ctx.userEmail },
+  });
+
+  return { success: true, url };
 }

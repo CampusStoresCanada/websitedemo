@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   transitionMembershipState: vi.fn(),
   createProgramInvoice: vi.fn(),
   finalizeAndSendInvoice: vi.fn(),
+  setInvoicePayer: vi.fn(),
   sendEmail: vi.fn(),
   applicationApprovedEmail: vi.fn(),
   mirrorFieldsToMembership: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock("@/lib/stripe/billing", () => ({
   createStripeCustomer: vi.fn(),
   createProgramInvoice: mocks.createProgramInvoice,
   finalizeAndSendInvoice: mocks.finalizeAndSendInvoice,
+  setInvoicePayer: mocks.setInvoicePayer,
 }));
 vi.mock("@/lib/email/send", () => ({
   sendEmail: mocks.sendEmail,
@@ -190,6 +192,8 @@ describe("mergeApplicationIntoOrganization", () => {
       expect.objectContaining({ billingPeriodStart: "2026-09-01" })
     );
     expect(mocks.finalizeAndSendInvoice).toHaveBeenCalledWith("inv-1");
+    // The approval email hands Ken the pay link, so Ken is the payer.
+    expect(mocks.setInvoicePayer).toHaveBeenCalledWith("inv-1", "khansen2@rrc.ca");
     expect(mocks.applicationApprovedEmail).toHaveBeenCalledWith(
       "Ken Hansen",
       "member",

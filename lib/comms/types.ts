@@ -70,6 +70,10 @@ export type TemplateKey =
   | "partnership_renewal_reminder"
   | "partnership_grace_reminder"
   | "partnership_suspended"
+  // Billing. Every invoice, every program: sent to ALL org admins in place of
+  // Stripe's own invoice email, which reaches one address. See
+  // finalizeAndSendInvoice in lib/stripe/billing.ts.
+  | "invoice_issued"
   // User management
   | "org_user_invited"
   | "org_user_added_to_org"

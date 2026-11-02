@@ -22,6 +22,7 @@ import {
   createStripeCustomer,
   createProgramInvoice,
   finalizeAndSendInvoice,
+  setInvoicePayer,
 } from "@/lib/stripe/billing";
 import {
   sendEmail,
@@ -935,7 +936,7 @@ export async function approveApplication(
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
   } else {
-    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id);
+    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id, app.applicant_email);
   }
 
   // 6. Create user account and send invite
@@ -1037,7 +1038,7 @@ export async function approveApplication(
  * one. Returns the Stripe hosted URL, or "" if invoicing failed (non-fatal:
  * the approval email then points at /org/billing instead).
  */
-async function invoiceFirstMembershipPeriod(orgId: string): Promise<string> {
+async function invoiceFirstMembershipPeriod(orgId: string, applicantEmail: string | null): Promise<string> {
   try {
     // A brand-new org joining within the pre-renewal skip-stub window
     // isn't worth billing a small prorated stub for the dying cycle's
@@ -1063,6 +1064,9 @@ async function invoiceFirstMembershipPeriod(orgId: string): Promise<string> {
     // from the invoice id opens "Invoice not found" (Red River College got
     // exactly that in its approval email, 2026-10-30).
     const sent = await finalizeAndSendInvoice(invoice.id);
+    // The approval email hands the applicant this link directly, so they are
+    // the payer: put them on the org's Stripe customer for the receipt.
+    if (applicantEmail) await setInvoicePayer(invoice.id, applicantEmail);
     return sent.hostedInvoiceUrl ?? "";
   } catch (err) {
     console.error("Invoice creation failed:", err);
@@ -1342,7 +1346,7 @@ export async function mergeApplicationIntoOrganization(
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
   } else if (startsMembership) {
-    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(targetOrgId);
+    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(targetOrgId, app.applicant_email);
   }
   // Otherwise no invoice: the org already holds a membership, so it is
   // already billed and a merge must not charge it again.

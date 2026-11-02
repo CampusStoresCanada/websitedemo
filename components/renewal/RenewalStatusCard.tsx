@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { parseUTC } from "@/lib/utils";
-import { optOutOfRenewal } from "@/lib/actions/renewal";
+import { openInvoicePayment, optOutOfRenewal } from "@/lib/actions/renewal";
 import { useRouter } from "next/navigation";
 
 // ─────────────────────────────────────────────────────────────────
@@ -16,13 +16,14 @@ interface RenewalStatusCardProps {
   membershipExpiresAt: string | null;
   gracePeriodStartedAt: string | null;
   graceDays: number;
-  /** The most recent renewal invoice, if any */
+  /** The invoice the page is about (the one an email linked to, else the latest), if any */
   renewalInvoice: {
     id: string;
+    /** "Renewal Invoice", or "Invoice" for one that is not dues */
+    label: string;
     status: string;
     totalCents: number;
     dueDate: string | null;
-    stripeInvoiceUrl: string | null;
   } | null;
   /** Whether the current user can manage this org (org_admin or global admin) */
   canManage: boolean;
@@ -88,6 +89,21 @@ export function RenewalStatusCard({
   const [optOutLoading, setOptOutLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [payLoading, setPayLoading] = useState(false);
+
+  // Through our action, not a direct Stripe link: it puts the admin who
+  // clicked on the org's Stripe customer so the receipt goes to them.
+  async function handlePay(invoiceId: string) {
+    setPayLoading(true);
+    setError(null);
+    const result = await openInvoicePayment(invoiceId);
+    if (result.success) {
+      window.location.assign(result.url);
+      return;
+    }
+    setError(result.error);
+    setPayLoading(false);
+  }
 
   const status = membershipStatus ?? "unknown";
   const config = STATUS_CONFIG[status] ?? {
@@ -211,7 +227,7 @@ export function RenewalStatusCard({
         {renewalInvoice && (
           <div className="pt-2 border-t border-gray-200/60 space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Renewal Invoice</span>
+              <span className="text-sm text-gray-600">{renewalInvoice.label}</span>
               <span className="text-sm text-gray-900">
                 ${(renewalInvoice.totalCents / 100).toFixed(2)}
               </span>
@@ -227,17 +243,16 @@ export function RenewalStatusCard({
                   </>
                 )}
               </span>
-              {renewalInvoice.stripeInvoiceUrl &&
-                renewalInvoice.status !== "paid" && (
-                  <a
-                    href={renewalInvoice.stripeInvoiceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-medium text-[#EE2A2E] hover:text-[#D92327] underline"
-                  >
-                    Pay Now
-                  </a>
-                )}
+              {renewalInvoice.status === "invoiced" && canManage && (
+                <button
+                  type="button"
+                  onClick={() => handlePay(renewalInvoice.id)}
+                  disabled={payLoading}
+                  className="text-xs font-medium text-[#EE2A2E] hover:text-[#D92327] underline disabled:opacity-50"
+                >
+                  {payLoading ? "Opening…" : "Pay Now"}
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -4,7 +4,6 @@ import { requireAuthenticated, isGlobalAdmin, canManageOrganization } from "@/li
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrganizations } from "@/lib/data";
 import { getRenewalConfig } from "@/lib/policy/engine";
-import { stripe } from "@/lib/stripe/client";
 import { RenewalStatusCard } from "@/components/renewal/RenewalStatusCard";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { loginWithNext } from "@/lib/auth/login-redirect";
@@ -20,12 +19,13 @@ interface OrgOption {
 export default async function OrgBillingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; invoice?: string }>;
 }) {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/org/billing"));
-
   const query = await searchParams;
+  const auth = await requireAuthenticated();
+  // Carry ?org and ?invoice through sign-in: the "invoice ready" email lands here.
+  if (!auth.ok) redirect(loginWithNext("/org/billing", query));
+
   const db = createAdminClient();
   const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
 
@@ -83,40 +83,37 @@ export default async function OrgBillingPage({
 
   const renewalConfig = await getRenewalConfig();
 
-  const { data: invoiceRow } = await db
-    .from("invoices")
-    .select("id, status, total_cents, due_date, stripe_invoice_id")
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // The invoice an "invoice ready" email linked to, when it belongs to this
+  // org; otherwise the latest one.
+  const invoiceColumns = "id, type, status, total_cents, due_date";
+  const { data: linkedInvoice } = query.invoice
+    ? await db
+        .from("invoices")
+        .select(invoiceColumns)
+        .eq("id", query.invoice)
+        .eq("organization_id", org.id)
+        .maybeSingle()
+    : { data: null };
+  const { data: latestInvoice } = linkedInvoice
+    ? { data: null }
+    : await db
+        .from("invoices")
+        .select(invoiceColumns)
+        .eq("organization_id", org.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+  const invoiceRow = linkedInvoice ?? latestInvoice;
 
-  let renewalInvoice: {
-    id: string;
-    status: string;
-    totalCents: number;
-    dueDate: string | null;
-    stripeInvoiceUrl: string | null;
-  } | null = null;
-
-  if (invoiceRow) {
-    let stripeInvoiceUrl: string | null = null;
-    if (invoiceRow.stripe_invoice_id) {
-      try {
-        const stripeInvoice = await stripe.invoices.retrieve(invoiceRow.stripe_invoice_id);
-        stripeInvoiceUrl = stripeInvoice.hosted_invoice_url ?? null;
-      } catch (err) {
-        console.error(`[org/billing] Failed to retrieve Stripe invoice ${invoiceRow.stripe_invoice_id}:`, err);
+  const renewalInvoice = invoiceRow
+    ? {
+        id: invoiceRow.id,
+        label: invoiceRow.type === "membership" || invoiceRow.type === "partnership" ? "Renewal Invoice" : "Invoice",
+        status: invoiceRow.status,
+        totalCents: invoiceRow.total_cents,
+        dueDate: invoiceRow.due_date,
       }
-    }
-    renewalInvoice = {
-      id: invoiceRow.id,
-      status: invoiceRow.status,
-      totalCents: invoiceRow.total_cents,
-      dueDate: invoiceRow.due_date,
-      stripeInvoiceUrl,
-    };
-  }
+    : null;
 
   return (
     <main className="max-w-3xl mx-auto py-8 px-4 space-y-6">
