@@ -6,6 +6,7 @@ import type { TierIcon } from "@/lib/sponsorship/types";
 import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { viewerMaySeeCancoll, gateCancoll } from "@/lib/visibility/cancoll";
+import { canonicalSystems } from "@/lib/benchmarking/system-aliases";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -561,7 +562,13 @@ async function fetchMapOrgsWithBenchmarking(
       // it as a string: Map keys went by identity so the POS story bucketed 25
       // stores into 25 buckets of one, `=== value` filters matched nothing, and
       // DirectoryTable's `.toLowerCase()` threw. Follow servicesOffered below.
-      posSystem: Array.isArray(row.pos_system) ? (row.pos_system as string[]) : null,
+      // Aliased for the directory and map, which GROUP and COUNT these answers —
+      // see lib/benchmarking/system-aliases.ts. Read-time only: the store's own
+      // profile still shows the words it filed.
+      posSystem: canonicalSystems(
+        "pos_system",
+        Array.isArray(row.pos_system) ? (row.pos_system as string[]) : null
+      ),
       enrollmentFte: typeof row.enrollment_fte === "number" ? row.enrollment_fte : null,
       numLocations: typeof row.num_store_locations === "number" ? row.num_store_locations : null,
       totalSquareFootage: typeof row.total_square_footage === "number" ? row.total_square_footage : null,
@@ -569,7 +576,10 @@ async function fetchMapOrgsWithBenchmarking(
       operationsMandate: (row.operations_mandate as string | null) ?? null,
       paymentOptions: Array.isArray(row.payment_options) ? (row.payment_options as string[]) : null,
       shoppingServices: Array.isArray(row.shopping_services) ? (row.shopping_services as string[]) : null,
-      lmsSystem: Array.isArray(row.lms_system) ? (row.lms_system as string[]) : null,
+      lmsSystem: canonicalSystems(
+        "lms_system",
+        Array.isArray(row.lms_system) ? (row.lms_system as string[]) : null
+      ),
       socialMediaPlatforms: Array.isArray(row.social_media_platforms) ? (row.social_media_platforms as string[]) : null,
       institutionType: (row.institution_type as string | null) ?? null,
       fulltimeEmployees: typeof row.fulltime_employees === "number" ? row.fulltime_employees : null,

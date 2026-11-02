@@ -147,7 +147,10 @@ export const FIELD_REGISTRY: Record<string, FieldDef> = {
   // Select all that apply: a store mid-migration runs two, and the columns are
   // text[] as of the FY2026 rebuild. allowOther keeps the type-and-Enter escape
   // open, so a system we have not heard of is recorded rather than refused.
-  pos_system:              { type: "multiselect", allowOther: true, options: ["Carleton Technologies - Bookware", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Ratex", "Waterloo Information Systems (WISL)", "Built in house"] },
+  // "Prism" is the family, not one era of it: PrismRBS and PrismPOS - MOSAIC are
+  // the same product at different times, so the option offered here is the label
+  // lib/benchmarking/system-aliases.ts renders those variants down to.
+  pos_system:              { type: "multiselect", allowOther: true, options: ["Carleton Technologies - Bookware", "Prism", "Lightspeed", "NetSuite", "MBS", "Ratex", "Waterloo Information Systems (WISL)", "Built in house"] },
   ebook_delivery_system:   { type: "multiselect", allowOther: true, options: ["CEI", "VitalSource", "Kivuto", "Built in house"] },
   student_info_system:     { type: "multiselect", allowOther: true, options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution"] },
   lms_system:              { type: "multiselect", allowOther: true, options: ["D2L/Brightspace", "Moodle", "Canvas", "Blackboard", "LEA"] },
