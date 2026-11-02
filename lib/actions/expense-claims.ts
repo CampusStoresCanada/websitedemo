@@ -25,6 +25,7 @@ import {
   type ExpenseClaimView,
 } from "@/lib/expenses/claims";
 import { resolveClaimSource } from "@/lib/expenses/sources";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -53,6 +54,69 @@ async function editableClaim(claimId: string): Promise<
     return { ok: false, error: "Claims for this program aren't open." };
   }
   return { ok: true, ctx: auth.ctx, row, db };
+}
+
+type ClaimTemplate = "expense_claim_received" | "expense_claim_returned" | "expense_claim_rejected" | "expense_claim_approved";
+
+const dollars = (cents: number) =>
+  (cents / 100).toLocaleString("en-CA", { style: "currency", currency: "CAD" });
+
+/**
+ * Tell the people who filled the claim in (whoever opened it and whoever
+ * submitted it, once each) where it stands. Never throws: the decision it
+ * follows is already recorded, and a failed email must not read as a failed
+ * decision. Returns how many were sent.
+ */
+async function tellClaimant(claimId: string, templateKey: ClaimTemplate, ctx: AuthContext): Promise<number> {
+  try {
+    const db = createAdminClient();
+    const row = await loadClaimRow(db, claimId);
+    if (!row) return 0;
+    const ids = [...new Set([row.created_by_user_id, row.submitted_by_user_id].filter((id): id is string => !!id))];
+    if (ids.length === 0) return 0;
+
+    const [emails, { data: profiles }, source, view] = await Promise.all([
+      lookupUserEmailsByIds(db, ids),
+      db.from("profiles").select("id, display_name").in("id", ids),
+      resolveClaimSource(row.source_table, row.source_id),
+      buildClaimView(db, row, ctx),
+    ]);
+    if (!view) return 0;
+    const names = new Map((profiles ?? []).map((p) => [p.id, p.display_name as string | null]));
+    const people = new Map<string, string | null>();
+    for (const id of ids) {
+      const email = emails[id]?.trim().toLowerCase();
+      if (email && !people.has(email)) people.set(email, names.get(id) ?? null);
+    }
+    if (people.size === 0) return 0;
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const { sendTransactionalBatch } = await import("@/lib/comms/send");
+    const results = await sendTransactionalBatch({
+      templateKey,
+      recipients: [...people].map(([to, name]) => ({
+        to,
+        variables: {
+          first_name: name?.trim().split(/\s+/)[0] || "there",
+          organization_name: view.organizationName || "your organization",
+          program_name: view.program.name,
+          claim_total: dollars(view.totals.totalCents),
+          payee_name: row.payee_name || view.organizationName,
+          // Staff's own words, typed into a box: escaped, and their line breaks kept.
+          decision_note: (row.decision_note ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\n/g, "<br>"),
+          claim_url: `${appUrl}${source?.path ?? "/"}`,
+        },
+      })),
+    });
+    return results.filter((r) => r.success).length;
+  } catch (err) {
+    console.warn(`[expense-claims] ${templateKey} email failed`, err);
+    return 0;
+  }
 }
 
 async function touch(db: ReturnType<typeof createAdminClient>, claimId: string) {
@@ -287,6 +351,7 @@ export async function submitExpenseClaim(claimId: string): Promise<Result<null>>
     actorType: "user",
     details: { organizationId: gate.row.organization_id, totals: view.totals, payeeType: view.payee.type },
   });
+  await tellClaimant(gate.row.id, "expense_claim_received", gate.ctx);
   revalidatePath("/admin/expenses");
   return { success: true, data: null };
 }
@@ -334,6 +399,8 @@ export async function approveExpenseClaim(claimId: string): Promise<Result<{ out
     actorId: auth.ctx.userId,
     actorType: "user",
   });
+  // Only the approval that completes it: the first of two tells nobody anything.
+  if (outcome === "approved") await tellClaimant(claimId, "expense_claim_approved", auth.ctx);
   revalidatePath("/admin/expenses");
   return { success: true, data: { outcome } };
 }
@@ -380,6 +447,7 @@ export async function decideExpenseClaim(params: {
     actorType: "user",
     details: { note },
   });
+  await tellClaimant(params.claimId, params.decision === "returned" ? "expense_claim_returned" : "expense_claim_rejected", auth.ctx);
   revalidatePath("/admin/expenses");
   return { success: true, data: null };
 }

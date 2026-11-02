@@ -17,6 +17,8 @@ export type ClaimSource = {
   canEdit: (ctx: AuthContext, claim: { organization_id: string }) => Promise<boolean>;
   /** The program slots open to this claim. Null means all of them. */
   allowedKeys: () => readonly string[] | null;
+  /** The page the claimant files this claim on, from the site root. Emails link to it. */
+  path: string;
 };
 
 type SourceResolver = (sourceId: string) => Promise<ClaimSource | null>;
@@ -30,7 +32,7 @@ const SOURCES: Record<string, SourceResolver> = {
   conference_bursary_applications: async (sourceId) => {
     const { data } = await createAdminClient()
       .from("conference_bursary_applications")
-      .select("conference_id, organization_id, covers_hotel, covers_travel")
+      .select("conference_id, organization_id, covers_hotel, covers_travel, conference:conference_instances(year, edition_code)")
       .eq("id", sourceId)
       .maybeSingle();
     if (!data) return null;
@@ -38,6 +40,7 @@ const SOURCES: Record<string, SourceResolver> = {
     return {
       canEdit: (ctx) => canFillBursaryRequest(ctx, data.conference_id, data.organization_id),
       allowedKeys: () => keys,
+      path: data.conference ? `/conference/${data.conference.year}/${data.conference.edition_code}/bursary` : "/",
     };
   },
 };

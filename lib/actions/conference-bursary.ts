@@ -17,6 +17,7 @@ import {
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
 import { canFillBursaryRequest } from "@/lib/conference/bursary-access";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -97,6 +98,74 @@ export async function listBursaryApplications(conferenceId: string): Promise<
   }
 }
 
+type BursaryTemplate = "bursary_request_received" | "bursary_request_approved" | "bursary_request_denied";
+
+/**
+ * Tell the school about its own request: the person who started it (the
+ * request's contact) and the login that submitted it, once each. Never throws:
+ * the write it follows has already happened, and a failed email must not read
+ * as a failed decision. Returns how many were sent.
+ */
+async function tellRequesters(applicationId: string, templateKey: BursaryTemplate): Promise<number> {
+  try {
+    const db = createAdminClient() as unknown as LooseDb;
+    const { data: row } = await db
+      .from("conference_bursary_applications")
+      .select(
+        "contact_name, contact_email, requested_by_user_id, organization:organizations(name), conference:conference_instances(id, name, year, edition_code)"
+      )
+      .eq("id", applicationId)
+      .maybeSingle();
+    if (!row?.conference) return 0;
+
+    const people = new Map<string, string | null>();
+    const add = (email: string | null | undefined, name: string | null | undefined) => {
+      const key = email?.trim().toLowerCase();
+      if (key && !people.has(key)) people.set(key, name?.trim() || null);
+    };
+    add(row.contact_email, row.contact_name !== row.contact_email ? row.contact_name : null);
+    if (row.requested_by_user_id) {
+      const admin = createAdminClient();
+      const [emails, { data: profile }] = await Promise.all([
+        lookupUserEmailsByIds(admin, [row.requested_by_user_id]),
+        admin.from("profiles").select("display_name").eq("id", row.requested_by_user_id).maybeSingle(),
+      ]);
+      add(emails[row.requested_by_user_id], profile?.display_name);
+    }
+    if (people.size === 0) return 0;
+
+    const { data: program } = await db
+      .from("expense_programs")
+      .select("opens_at, closes_at")
+      .eq("conference_id", row.conference.id)
+      .eq("is_active", true)
+      .like("slug", "travel-bursary-%")
+      .maybeSingle();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const { sendTransactionalBatch } = await import("@/lib/comms/send");
+    const results = await sendTransactionalBatch({
+      templateKey,
+      recipients: [...people].map(([to, name]) => ({
+        to,
+        variables: {
+          first_name: name?.split(/\s+/)[0] || "there",
+          organization_name: row.organization?.name ?? "your institution",
+          conference_name: row.conference.name ?? "the conference",
+          request_url: `${appUrl}/conference/${row.conference.year}/${row.conference.edition_code}/bursary`,
+          // The claim window opens on its first day; formatDeadline reads an
+          // exclusive boundary, so a minute in names that same day.
+          claims_open_date: formatDeadline(program?.opens_at ? new Date(Date.parse(program.opens_at) + 60_000).toISOString() : null) ?? "after the conference",
+          claims_close_date: formatDeadline(program?.closes_at) ?? "the deadline",
+        },
+      })),
+    });
+    return results.filter((r) => r.success).length;
+  } catch (err) {
+    console.warn(`[bursary] ${templateKey} email failed`, err);
+    return 0;
+  }
+}
+
 /**
  * Admin: record the decision a human made on one application.
  *
@@ -148,6 +217,9 @@ export async function setBursaryApplicationStatus(params: {
       organizationId: before.organization_id,
     },
   });
+
+  if (params.status === "approved") await tellRequesters(params.applicationId, "bursary_request_approved");
+  if (params.status === "denied") await tellRequesters(params.applicationId, "bursary_request_denied");
 
   revalidatePath("/admin");
   return { success: true, data: null };
@@ -394,13 +466,17 @@ export async function submitBursaryRequest(params: {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
   const now = new Date().toISOString();
-  const { error } = await (createAdminClient() as unknown as LooseDb)
+  const { data: submitted, error } = await (createAdminClient() as unknown as LooseDb)
     .from("conference_bursary_applications")
     .update({ requested_at: now, requested_by_user_id: auth.ctx.userId, updated_at: now })
     .eq("conference_id", params.conferenceId)
     .eq("organization_id", params.organizationId)
-    .is("requested_at", null);
+    .is("requested_at", null)
+    .select("id");
   if (error) return { success: false, error: error.message };
+  // Only the click that actually submitted it sends the receipt; a double
+  // click updates nothing the second time.
+  if (submitted?.[0]?.id) await tellRequesters(submitted[0].id as string, "bursary_request_received");
 
   await logAuditEventSafe({
     action: "bursary_request_submitted",
