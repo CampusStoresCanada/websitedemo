@@ -12,6 +12,7 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { loadDirectoryCompleteness } from "@/lib/publication/completeness-loader";
 import { computeOrgLegalCompleteness } from "./legal-acceptance";
+import { declaredSeatsToFill } from "./seats";
 import type { CheckType, StaffCheckType } from "./checklist-check-types";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
@@ -96,19 +97,9 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
 
       // "All purchased seats assigned" is only the right definition of done
       // when the org intends to use every seat it bought — someone who buys 4
-      // and is sending 1 isn't behind, they're done. Their declared number is
-      // what complete means instead, capped at the real seat count so a stale
-      // over-declaration can never make this impossible to satisfy.
-      //
-      // A later purchase can raise the real count past what they saw when they
-      // declared — said "using 1 of 4", then bought 2 more, now holding 6. The
-      // old "1" no longer reflects a decision about the extra seats, so it is
-      // treated as stale and falls through to strict until they re-declare.
-      if (intent && total <= intent.declared_against_total) {
-        if (assignedCount < Math.min(intent.intended_quantity, total)) return false;
-        continue;
-      }
-      if (assignedCount < total) return false;
+      // and is sending 1 isn't behind, they're done. The rule, including when
+      // a declaration goes stale, lives in declaredSeatsToFill.
+      if (assignedCount < (declaredSeatsToFill(total, intent) ?? total)) return false;
     }
     return true;
   },

@@ -39,7 +39,7 @@
  */
 
 import { resolveAccess } from "@/lib/conference/entity-commerce";
-import { loadSeatHoldings } from "@/lib/conference/seats";
+import { dropDeclinedSeats, loadSeatHoldings, loadUsageIntents } from "@/lib/conference/seats";
 import { isFundedOffer } from "@/lib/conference/entity-pricing";
 import {
   badgeNames,
@@ -82,14 +82,21 @@ export async function loadAttendance(
   db: any,
   conferenceId: string
 ): Promise<EntityAttendance[]> {
-  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId });
+  const [{ seats, entitiesById }, intents] = await Promise.all([
+    loadSeatHoldings(db, { conferenceId }),
+    loadUsageIntents(db, conferenceId),
+  ]);
+  // ⛔ "Using 1 of 4" means 3 tickets nobody will use. They are still SOLD
+  // (directSeats counts them) but they are not people, so they come out of
+  // `expected`. Rains declared exactly this and was still counted as 4.
+  const peopleSeats = dropDeclinedSeats(seats, intents);
 
   // ⛔ One closure PER SEAT-HOLDING SET, not per seat. Somebody holding a
   // registration and a separately-bought reception seat must be counted once at
   // that reception, not twice.
   const heldByPerson = new Map<string, string[]>();
   const unassigned: string[][] = [];
-  for (const seat of seats) {
+  for (const seat of peopleSeats) {
     if (seat.holderPersonId) {
       const list = heldByPerson.get(seat.holderPersonId) ?? [];
       if (!list.includes(seat.entityId)) list.push(seat.entityId);

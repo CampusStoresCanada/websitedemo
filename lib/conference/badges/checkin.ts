@@ -151,7 +151,8 @@ export function checkInFactsFromRun(
   const unnamedSeatKeys = new Set<string>();
   for (const type of run.types) {
     for (const seat of type.seats) {
-      if (!seat.person && seat.organizationId) unnamedSeatKeys.add(blankCardKey(seat.organizationId, type.entityId));
+      // Declined seats got no blank (unnamedSeats), so none to overprint.
+      if (!seat.person && !seat.declined && seat.organizationId) unnamedSeatKeys.add(blankCardKey(seat.organizationId, type.entityId));
     }
   }
 

@@ -177,6 +177,7 @@ function UsageIntentInput({
   initialValue: number;
 }) {
   const [value, setValue] = useState(String(initialValue));
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
   const lastSavedRef = useRef(initialValue);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -186,8 +187,11 @@ function UsageIntentInput({
     if (parsed === lastSavedRef.current) return;
     lastSavedRef.current = parsed;
     setSaving(true);
-    await setEntityUsageIntent(organizationId, entityId, conferenceId, parsed);
+    const result = await setEntityUsageIntent(organizationId, entityId, conferenceId, parsed);
     setSaving(false);
+    // The staffing banner reads this number server-side; without a refresh it
+    // keeps asking for names until the next page load.
+    if (result.success) router.refresh();
   }
 
   function handleChange(raw: string) {
@@ -1153,15 +1157,51 @@ export default function PartnerProfile({
                   this state. This is one line in the section that has the
                   problem.
                 */}
-                {canEditThisOrg && !editMode && assignableEntities.some(
-                  (e) => e.seats.some((s) => !s.holderPersonId)
-                ) ? (
-                  <p className="-mt-2 mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Seats here still need names. Open the toolkit (bottom right) and choose{" "}
-                    <strong>Edit</strong> to add someone, then tick the column for what they are
-                    getting.
-                  </p>
-                ) : null}
+                {/*
+                  "Still need names" means short of what the org said it will
+                  use (intendedQuantity, from declaredSeatsToFill), not short
+                  of what it bought. Rains bought 4, set "using 1 of 4", and
+                  this kept asking for three more people.
+
+                  The "Using" control sits here as well as in the Edit-mode
+                  header, because a person who is only sending one never needs
+                  Edit and never found it there.
+                */}
+                {(() => {
+                  const short = assignableEntities.filter(
+                    (e) =>
+                      e.seats.filter((s) => s.holderPersonId).length <
+                      (e.intendedQuantity ?? e.seats.length)
+                  );
+                  if (!canEditThisOrg || editMode || short.length === 0) return null;
+                  const declarable = currentConferenceId ? short.filter((e) => e.seats.length > 1) : [];
+                  return (
+                    <div className="-mt-2 mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <p>
+                        Seats here still need names. Open the toolkit (bottom right) and choose{" "}
+                        <strong>Edit</strong> to add someone, then tick the column for what they are
+                        getting.
+                      </p>
+                      {declarable.length > 0 ? (
+                        <div className="mt-2">
+                          <p>Not sending everyone? Tell us how many you will use and we will stop asking.</p>
+                          {declarable.map((entity) => (
+                            <div key={entity.entityId} className="mt-1 flex items-center gap-2">
+                              <span className="font-medium">{entity.name}:</span>
+                              <UsageIntentInput
+                                organizationId={organization.id}
+                                entityId={entity.entityId}
+                                conferenceId={currentConferenceId!}
+                                totalSeats={entity.seats.length}
+                                initialValue={entity.intendedQuantity ?? entity.seats.length}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
