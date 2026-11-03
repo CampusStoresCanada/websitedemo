@@ -20,7 +20,7 @@ import {
   type PolicyAcceptBy,
 } from "../constants/conference";
 import { requiredPolicyEntityIds, type Registrant } from "../conference/legal-policies";
-import { loadPolicyTargeting, computeMissingLegal } from "../conference/legal-acceptance";
+import { loadPolicyTargeting, computeMissingLegal, loadCurrentLegalVersions } from "../conference/legal-acceptance";
 import type { Database } from "@/lib/database.types";
 
 type LegalVersionRow = Database["public"]["Tables"]["conference_legal_versions"]["Row"];
@@ -73,24 +73,14 @@ export async function getRequiredLegalDocuments(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
-  const { data, error } = await db
-    .from("conference_legal_versions")
-    .select("*")
-    .eq("conference_id", conferenceId)
-    .lte("effective_at", new Date().toISOString())
-    .order("version", { ascending: false });
-  if (error) return { success: false, error: error.message };
-
-  const latestByType = new Map<string, LegalVersionRow>();
-  for (const doc of data ?? []) {
-    if (!latestByType.has(doc.document_type)) latestByType.set(doc.document_type, doc);
-  }
+  const { data: current, error } = await loadCurrentLegalVersions(db, conferenceId);
+  if (error) return { success: false, error };
 
   const policies = await loadPolicyTargeting(db, conferenceId);
   const required = requiredPolicyEntityIds(policies, registrant);
 
   // Docs with no policy entity (unmanaged) fail safe to "shown".
-  const docs = [...latestByType.values()].filter(
+  const docs = current.filter(
     (doc) => doc.policy_entity_id == null || required.has(doc.policy_entity_id)
   );
   return { success: true, data: docs };
@@ -108,23 +98,13 @@ export async function getRequiredLegalDocumentsPublic(
   audienceSourceRoles: string[]
 ): Promise<{ success: boolean; error?: string; data?: LegalVersionRow[] }> {
   const db = createAdminClient();
-  const { data, error } = await db
-    .from("conference_legal_versions")
-    .select("*")
-    .eq("conference_id", conferenceId)
-    .lte("effective_at", new Date().toISOString())
-    .order("version", { ascending: false });
-  if (error) return { success: false, error: error.message };
-
-  const latestByType = new Map<string, LegalVersionRow>();
-  for (const doc of data ?? []) {
-    if (!latestByType.has(doc.document_type)) latestByType.set(doc.document_type, doc);
-  }
+  const { data: current, error } = await loadCurrentLegalVersions(db, conferenceId);
+  if (error) return { success: false, error };
 
   const policies = await loadPolicyTargeting(db, conferenceId);
   const required = requiredPolicyEntityIds(policies, { audienceSourceRoles, heldEntityIds: [] });
 
-  const docs = [...latestByType.values()].filter(
+  const docs = current.filter(
     (doc) => doc.policy_entity_id == null || required.has(doc.policy_entity_id)
   );
   return { success: true, data: docs };
@@ -428,25 +408,10 @@ export async function getActiveLegalDocuments(
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  // Get the latest version of each document type for this conference
-  const { data, error } = await auth.ctx.supabase
-    .from("conference_legal_versions")
-    .select("*")
-    .eq("conference_id", conferenceId)
-    .lte("effective_at", new Date().toISOString())
-    .order("version", { ascending: false });
-
-  if (error) return { success: false, error: error.message };
-
-  // Keep only the latest version per document_type
-  const latestByType = new Map<string, LegalVersionRow>();
-  for (const doc of data ?? []) {
-    if (!latestByType.has(doc.document_type)) {
-      latestByType.set(doc.document_type, doc);
-    }
-  }
-
-  return { success: true, data: Array.from(latestByType.values()) };
+  // The documents are public (the conference terms page shows them to anyone).
+  const { data, error } = await loadCurrentLegalVersions(createAdminClient(), conferenceId);
+  if (error) return { success: false, error };
+  return { success: true, data };
 }
 
 // ─────────────────────────────────────────────────────────────────
