@@ -59,6 +59,9 @@ export default function BursaryRequestForm({
         setError(result.error);
       } else {
         setSaved(true);
+        // A different registration is a different delegate: the summary above
+        // names them from the server, so read it again.
+        if (field === "delegate_seat_id" && view.submittedAt) router.refresh();
       }
     });
   };

@@ -257,7 +257,7 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
       </div>
 
       <div className="mb-3 flex items-center gap-6">
-        {tabButton("review", `To review (${awaiting.length})`)}
+        {tabButton("review", `Received (${awaiting.length})`)}
         {tabButton("decided", `Decided (${decided.length})`)}
         {/* The proof CANCOLL asks for afterwards: each institution's meetings,
             and which the booth check-in cards confirmed. */}

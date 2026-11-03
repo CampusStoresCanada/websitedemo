@@ -727,6 +727,7 @@ export async function markBursaryPrepayBooked(params: { applicationId: string })
       actorType: "user",
       details: { conferenceId: data[0].conference_id, organizationId: data[0].organization_id },
     });
+    revalidatePath(`/admin/conference/${data[0].conference_id}/war-room`);
   }
   revalidatePath("/admin");
   return { success: true, data: null };
