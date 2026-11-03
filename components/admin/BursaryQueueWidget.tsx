@@ -12,7 +12,7 @@ import {
 // Type-only: bursary-widget.ts reaches the database, and an erased import is
 // what keeps it out of this bundle.
 import type { BursaryApplicationRow, BursaryQueueData } from "@/lib/conference/bursary-widget";
-import { setBursaryApplicationStatus } from "@/lib/actions/conference-bursary";
+import { setBursaryApplicationStatus, setBursaryHotelNights } from "@/lib/actions/conference-bursary";
 
 /**
  * Travel-bursary applications, on the admin console's front page.
@@ -51,11 +51,13 @@ function Row({
   row,
   busy,
   onSetStatus,
+  onSetNights,
   conferenceId,
 }: {
   row: BursaryApplicationRow;
   busy: boolean;
   onSetStatus: (id: string, status: BursaryStatus) => void;
+  onSetNights: (id: string, nights: number) => void;
   conferenceId: string;
 }) {
   const style = isBursaryStatus(row.status) ? STATUS_STYLE[row.status] : { bg: TRACK, fg: "#555" };
@@ -104,6 +106,27 @@ function Row({
             {row.request.payment && ` · ${row.request.payment === "reimburse" ? "reimburse after" : "pay in advance"}`}
             {row.request.delegateName &&
               ` · for ${row.request.delegateName}${row.request.delegateTitle ? `, ${row.request.delegateTitle}` : ""}`}
+            {!row.request.seatPicked && " · registration not picked yet"}
+            {row.request.hotel && (
+              <>
+                {" · "}
+                {/* Three nights, or four when they can't get home Thursday
+                    night. Staff can change it; the claim cap follows. */}
+                <select
+                  value={row.request.hotelNights ?? 3}
+                  disabled={busy}
+                  onChange={(e) => onSetNights(row.id, Number(e.target.value))}
+                  className="rounded border border-gray-300 bg-white px-1 text-[12px]"
+                  aria-label={`Hotel nights for ${row.organizationName}`}
+                >
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>
+                      {n} night{n === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </p>
         ) : (
           <p className="truncate text-[12px] italic" style={{ color: MUTED }}>
@@ -130,7 +153,9 @@ function Row({
       {/* A new application is decided in one place: the War Room's Waiting on
           us, beside everyone else waiting on CSC. A decided one keeps the
           select for what comes after (fulfilled) and for corrections. */}
-      {row.status === "submitted" ? (
+      {/* Only a request asking for more help waits for a decision now; every
+          other request is in, and the select stays for declining one. */}
+      {row.status === "submitted" && row.request && row.notes ? (
         <a
           href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
           className="justify-self-end text-[12px] font-medium hover:underline"
@@ -184,6 +209,18 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
     setBusyId(id);
     setError(null);
     const result = await setBursaryApplicationStatus({ applicationId: id, status });
+    setBusyId(null);
+    if (!result.success) {
+      setError(result.error);
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
+  async function onSetNights(id: string, nights: number) {
+    setBusyId(id);
+    setError(null);
+    const result = await setBursaryHotelNights({ applicationId: id, nights });
     setBusyId(null);
     if (!result.success) {
       setError(result.error);
@@ -246,7 +283,7 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
           </div>
         ) : (
           visible.map((row) => (
-            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} conferenceId={data.conferenceId} />
+            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} onSetNights={onSetNights} conferenceId={data.conferenceId} />
           ))
         )}
       </div>

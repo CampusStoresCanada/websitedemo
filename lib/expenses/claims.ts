@@ -4,6 +4,7 @@ import { formatDeadline } from "@/lib/benchmarking/deadline";
 import { resolveClaimSource } from "./sources";
 import {
   claimEditable,
+  applyClaimCaps,
   claimGaps,
   claimTotals,
   claimWindowOpen,
@@ -208,7 +209,8 @@ export async function buildClaimView(db: Db, row: ClaimRow, ctx: AuthContext): P
   if (!program) return null;
   const source = await resolveClaimSource(row.source_table, row.source_id);
   const allowedKeys = source?.allowedKeys() ?? null;
-  const categories = program.categories.filter((c) => !allowedKeys || allowedKeys.includes(c.key));
+  const capped = applyClaimCaps(program.categories, source?.caps);
+  const categories = capped.filter((c) => !allowedKeys || allowedKeys.includes(c.key));
 
   const [{ lines, receiptsByCategory }, { data: org }, { data: approvalRows }] = await Promise.all([
     loadLinesAndReceipts(db, row.id),
@@ -238,14 +240,14 @@ export async function buildClaimView(db: Db, row: ClaimRow, ctx: AuthContext): P
       closesAt: program.closesAt,
       approvalsRequired: program.approvalsRequired,
       payeeTypes: program.payeeTypes,
-      categories: program.categories,
+      categories: capped,
     },
     categories,
     lines,
     receiptsByCategory,
     payee,
     totals: claimTotals(lines),
-    gaps: claimGaps({ categories: program.categories, lines, payee, allowedKeys }),
+    gaps: claimGaps({ categories: capped, lines, payee, allowedKeys }),
     submittedAt: row.submitted_at,
     decisionNote: row.decision_note,
     qboBillId: row.qbo_bill_id,

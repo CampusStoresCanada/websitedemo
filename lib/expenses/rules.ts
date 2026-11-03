@@ -100,6 +100,23 @@ export function isPayeeField(field: string): field is PayeeField {
   return (PAYEE_FIELDS as readonly string[]).includes(field);
 }
 
+/**
+ * A program's categories with this claim's own caps applied: the lower of the
+ * program's cap and the claim's. The bursary's hotel cap is the school's
+ * nights times the nightly rate, so a three-night school can't claim four.
+ */
+export function applyClaimCaps(
+  categories: ExpenseCategory[],
+  caps: Readonly<Record<string, number>> | null | undefined
+): ExpenseCategory[] {
+  if (!caps) return categories;
+  return categories.map((c) => {
+    const own = caps[c.key];
+    if (own === undefined) return c;
+    return { ...c, capCents: c.capCents === null ? own : Math.min(c.capCents, own) };
+  });
+}
+
 /** km × rate, to the cent. */
 export function distanceAmountCents(km: number, rateCentsPerKm: number): number {
   return Math.round(km * rateCentsPerKm);

@@ -17,6 +17,15 @@
  * still a barrier says what more it needs, and the board decides case by case.
  * That answer is optional and lives on the row's existing `notes` column,
  * which the staff queue already shows.
+ *
+ * Steve, 2026-11-02:
+ *   * The request names one of the school's registration SEATS, not a person:
+ *     whoever holds that seat is the supported delegate, and swapping the seat
+ *     moves the support. Either order works, so a school can submit before it
+ *     registers and pick the registration later; the pick stays open until
+ *     January 17, 2027, after the request itself has closed.
+ *   * No board gate. Submitting opens the expense claim; two people at CSC
+ *     approve the claim, and that is the approval.
  */
 
 export const BURSARY_PAYMENT_PREFERENCES = ["reimburse", "prepay"] as const;
@@ -33,7 +42,7 @@ export const GM_BUYER_RULE =
 
 /** The fields a school can save on its request, and nothing else. */
 export const BURSARY_REQUEST_FIELDS = [
-  "delegate_contact_id",
+  "delegate_seat_id",
   "covers_hotel",
   "covers_travel",
   "payment_preference",
@@ -43,6 +52,12 @@ export const BURSARY_REQUEST_FIELDS = [
 export type BursaryRequestField = (typeof BURSARY_REQUEST_FIELDS)[number];
 
 export type BursaryRequestAnswers = {
+  /** The registration seat the support is for. Its holder is the delegate. */
+  delegate_seat_id: string | null;
+  /**
+   * Who it was for on requests made before seats were picked (two, both
+   * 2026-11-02). Read-only: shown until a seat is picked, never saved again.
+   */
   delegate_contact_id: string | null;
   covers_hotel: boolean | null;
   covers_travel: boolean | null;
@@ -51,6 +66,12 @@ export type BursaryRequestAnswers = {
   /** "I need additional help": what more the school needs. Optional. */
   notes: string | null;
 };
+
+/**
+ * The one answer that can still change after the request is submitted, up to
+ * the designation deadline: which registration it is for.
+ */
+export const BURSARY_DESIGNATION_FIELDS: readonly BursaryRequestField[] = ["delegate_seat_id"];
 
 /** Longest "I need additional help" answer kept. */
 export const BURSARY_NOTES_MAX = 2000;
@@ -68,10 +89,10 @@ export function validateBursaryAnswer(
 ): { valid: true; clean: string | boolean | null } | { valid: false; error: string } {
   if (value === null) return { valid: true, clean: null };
   switch (field) {
-    case "delegate_contact_id":
+    case "delegate_seat_id":
       return typeof value === "string" && UUID.test(value)
         ? { valid: true, clean: value }
-        : { valid: false, error: "Pick the delegate from your school's people." };
+        : { valid: false, error: "Pick one of your institution's registrations." };
     case "covers_hotel":
     case "covers_travel":
     case "gm_buyer_confirmed":
@@ -98,8 +119,9 @@ export function validateBursaryAnswer(
  * terms. Empty means it can be submitted.
  */
 export function bursaryRequestGaps(answers: BursaryRequestAnswers, termsAccepted: boolean): string[] {
+  // Who it is for is NOT a gap: the school may submit before it registers,
+  // and pick the registration later.
   const gaps: string[] = [];
-  if (!answers.delegate_contact_id) gaps.push("Choose who the support is for.");
   if (!answers.covers_hotel && !answers.covers_travel) gaps.push("Choose hotel, travel, or both.");
   if (!answers.payment_preference) gaps.push("Choose how you'd like to be paid.");
   if (answers.gm_buyer_confirmed !== true) gaps.push(`Confirm the delegate is ${GM_BUYER_RULE}.`);
@@ -116,4 +138,34 @@ export function bursaryRequestOpen(closesAt: string | null | undefined, now: Dat
   if (!closesAt) return true;
   const boundary = Date.parse(closesAt);
   return Number.isNaN(boundary) ? true : now.getTime() < boundary;
+}
+
+export type HotelRate = { nightCents: number | null; taxBps: number | null };
+
+/**
+ * The most a school's hotel claim can be: its nights at the rate, plus room
+ * tax, rounded once on the total as the hotel's own bill is. $185 x 4 + 19.78%
+ * is $886.37; four nights at the rounded $221.59 would be $886.36, and the cap
+ * would refuse the real bill. Null when no rate is set.
+ */
+export function hotelCapCents(nights: number, rate: HotelRate): number | null {
+  if (!rate.nightCents) return null;
+  return Math.round(nights * rate.nightCents * (1 + (rate.taxBps ?? 0) / 10_000));
+}
+
+/**
+ * The hotel support in words: "3 hotel nights, up to $664.78 including tax".
+ * Read by the request page and the "received" email, so both say the same.
+ */
+export function hotelNightsText(nights: number, rate: HotelRate): string {
+  const label = `${nights} hotel night${nights === 1 ? "" : "s"}`;
+  const cap = hotelCapCents(nights, rate);
+  if (cap === null) return label;
+  const max = (cap / 100).toLocaleString("en-CA", { style: "currency", currency: "CAD" });
+  return `${label}, up to ${max} including tax`;
+}
+
+/** How many nights a school gets before staff change it: four for the listed schools, else three. */
+export function defaultHotelNights(organizationId: string, fourNightOrgIds: readonly string[] | null | undefined): number {
+  return fourNightOrgIds?.includes(organizationId) ? 4 : 3;
 }

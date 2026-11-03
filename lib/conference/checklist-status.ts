@@ -16,6 +16,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DERIVED_FROM_FIELD, personIdsInTaskScope, type PersonalTaskState } from "./checklist-tasks";
+import { loadBursaryDesignatedSeatIds } from "./bursary-access";
 import { PERSON_CHECKS_BULK } from "./checklist-checks";
 import { loadSeatHoldings } from "./seats";
 import type { CheckType } from "./checklist-check-types";
@@ -79,6 +80,7 @@ export interface ChecklistShape {
     check_entity_id?: string | null;
     scope_entity_id?: string | null;
     scope_entity_kind?: string | null;
+    scope_designation?: string | null;
   }>;
 }
 
@@ -120,6 +122,7 @@ export function classifyPersonTasks(checklists: ChecklistShape[]): {
         checkEntityId: task.check_entity_id ?? null,
         scopeEntityId: task.scope_entity_id ?? null,
         scopeEntityKind: task.scope_entity_kind ?? null,
+        scopeDesignation: task.scope_designation ?? null,
       });
     }
   }
@@ -140,6 +143,7 @@ interface TaskInput {
   /** Who it is asked of, when not everyone — see personIdsInTaskScope. */
   scopeEntityId?: string | null;
   scopeEntityKind?: string | null;
+  scopeDesignation?: string | null;
 }
 
 /**
@@ -261,7 +265,7 @@ export async function loadPersonTaskStatus(
   const { data: checklists } = await db
     .from("conference_checklists")
     .select(
-      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind)"
+      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind, scope_designation)"
     )
     .eq("conference_id", conferenceId);
 
@@ -269,6 +273,7 @@ export async function loadPersonTaskStatus(
     id: string; name: string; description: string;
     sort_order: number; active: boolean; audience: string; check_type: string;
     check_entity_id: string | null; scope_entity_id: string | null; scope_entity_kind: string | null;
+    scope_designation: string | null;
   };
 
   const { tasks, inactive } = classifyPersonTasks(
@@ -359,13 +364,17 @@ export async function loadPersonTaskStatus(
   );
 
   const scopedPeople = new Map<string, Set<string>>();
-  if (tasks.some((t) => t.scopeEntityId || t.scopeEntityKind)) {
-    const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+  if (tasks.some((t) => t.scopeEntityId || t.scopeEntityKind || t.scopeDesignation)) {
+    const [{ seats, entitiesById }, designated] = await Promise.all([
+      loadSeatHoldings(db, { conferenceId, assigned: true }),
+      tasks.some((t) => t.scopeDesignation) ? loadBursaryDesignatedSeatIds(db, conferenceId) : undefined,
+    ]);
     for (const task of tasks) {
       const askedOf = personIdsInTaskScope(seats, entitiesById, {
         scope_entity_id: task.scopeEntityId,
         scope_entity_kind: task.scopeEntityKind,
-      });
+        scope_designation: task.scopeDesignation,
+      }, designated);
       if (askedOf) scopedPeople.set(task.id, askedOf);
     }
   }

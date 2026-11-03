@@ -177,19 +177,27 @@ describe("telling the school", () => {
     conference: { id: "conf-27", name: "Campus Stores Conference 2027", year: 2027, edition_code: "99" },
   };
 
-  it("emails the request's contact and the person who submitted it when approved", async () => {
+  // No approval step since 2026-11-02: "received" says what "approved" did.
+  it("sends no email on approval", async () => {
+    mockDb(row, forEmail);
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "approved" });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("emails the request's contact and the person who submitted it when declined", async () => {
     mockDb(row, forEmail);
 
-    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "approved" });
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "denied" });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0].templateKey).toBe("bursary_request_approved");
+    expect(sent[0].templateKey).toBe("bursary_request_denied");
     expect(sent[0].recipients.map((r) => r.to)).toEqual(["pat@school.test", "second@school.test"]);
     const vars = sent[0].recipients[0].variables;
     expect(vars.first_name).toBe("Pat");
     expect(vars.organization_name).toBe("St. Example College");
     expect(String(vars.request_url)).toMatch(/\/conference\/2027\/99\/bursary$/);
     expect(vars.claims_open_date).toBe("February 4, 2027");
+    expect(vars.hotel_nights_text).toBe("3 hotel nights");
     expect(sent[0].recipients[1].variables.first_name).toBe("Sam");
   });
 

@@ -60,15 +60,33 @@ export default async function ConferenceCheckoutSuccessPage({
 
   // Look up the org slug so we can deep-link to the org's conference page.
   let orgConferenceHref: string | null = null;
+  // A member institution's next steps (Steve, 2026-11-02): "you register, we
+  // provide you with the links to request, join CANCOLL, etc. We don't make it
+  // automatic, we provide you with the surface."
+  let memberNext: { bursaryHref: string; cancollHref: string | null } | null = null;
   if (query.org) {
     const db = createAdminClient();
-    const { data: org } = await db
-      .from("organizations")
-      .select("slug")
-      .eq("id", query.org)
-      .maybeSingle();
+    const [{ data: org }, { data: funded }] = await Promise.all([
+      db.from("organizations").select("slug, type, is_cancoll_member").eq("id", query.org).maybeSingle(),
+      db
+        .from("conference_entities")
+        .select("attributes")
+        .eq("conference_id", conference.id)
+        .eq("attributes->>funded_by", "cancoll")
+        .limit(1)
+        .maybeSingle(),
+    ]);
     if (org?.slug) {
       orgConferenceHref = `/org/${org.slug}`;
+    }
+    if (org?.type === "Member") {
+      // CANCOLL is named only once its funding is switched on, which is after
+      // the MOU is signed.
+      const fundingLive = (funded?.attributes as Record<string, unknown> | null)?.funding_live === true;
+      memberNext = {
+        bursaryHref: `/conference/${year}/${edition}/bursary`,
+        cancollHref: fundingLive && !org.is_cancoll_member ? "/org/cancoll" : null,
+      };
     }
   }
 
@@ -96,6 +114,29 @@ export default async function ConferenceCheckoutSuccessPage({
       <p className="mt-1 text-sm text-gray-500">
         Once confirmed, any seats you didn&apos;t already assign are ready to assign to your team.
       </p>
+
+      {memberNext && (
+        <div className="mx-auto mt-6 max-w-xl rounded-lg border border-gray-200 bg-gray-50 p-4 text-left text-sm text-gray-700">
+          <p className="font-semibold text-gray-900">Next for your institution</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              <Link href={memberNext.bursaryHref} className="font-medium text-[#163D6D] underline">
+                Request travel support
+              </Link>{" "}
+              for one delegate: hotel nights, travel, or both.
+            </li>
+            {memberNext.cancollHref && (
+              <li>
+                CANCOLL pays the registration for one delegate from each institution that belongs to CANCOLL.{" "}
+                <Link href={memberNext.cancollHref} className="font-medium text-[#163D6D] underline">
+                  Find out about joining CANCOLL
+                </Link>
+                .
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-6 flex flex-wrap justify-center gap-3">
         {orgConferenceHref ? (

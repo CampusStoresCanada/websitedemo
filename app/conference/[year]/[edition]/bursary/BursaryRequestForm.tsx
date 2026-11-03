@@ -23,10 +23,13 @@ export default function BursaryRequestForm({
   conferenceId,
   organizationId,
   view,
+  registerHref,
 }: {
   conferenceId: string;
   organizationId: string;
   view: BursaryRequestView;
+  /** Where the school registers, for when it has no registration to pick yet. */
+  registerHref: string;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<BursaryRequestAnswers>(view.answers);
@@ -70,18 +73,67 @@ export default function BursaryRequestForm({
     });
   };
 
-  if (view.submittedAt) {
-    const delegate = view.contacts.find((c) => c.id === answers.delegate_contact_id);
-    return (
-      <div className="mt-6 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-        <p className="font-semibold">Your request is in.</p>
-        <p className="mt-1">
-          For {delegate?.name ?? "your delegate"}:{" "}
-          {[answers.covers_hotel && "hotel", answers.covers_travel && "travel"].filter(Boolean).join(" and ")}.{" "}
-          {answers.payment_preference ? BURSARY_PAYMENT_LABELS[answers.payment_preference] : ""}.
+  /*
+    Who it is for: one of the school's registrations. The holder of that seat is
+    the delegate, so naming someone else to the registration on the
+    institution's page moves the support with it. Open after submitting too,
+    until the designation deadline.
+  */
+  const designation = (
+    <section>
+      <label className="block font-medium text-gray-900" htmlFor="bursary-delegate">
+        Who is the support for?
+      </label>
+      {view.seats.length === 0 ? (
+        <p className="mt-1 text-gray-600">
+          Pick one of your institution&apos;s conference registrations. You don&apos;t have one yet.{" "}
+          <a href={registerHref} className="font-medium text-[#163D6D] underline">
+            Register for the conference
+          </a>
+          , then come back here. You can send your request now and choose the registration later.
         </p>
-        {answers.notes && <p className="mt-1">You also told us: {answers.notes}</p>}
-        <p className="mt-1">Campus Stores Canada will be in touch about the amount.</p>
+      ) : (
+        <>
+          <select
+            id="bursary-delegate"
+            value={answers.delegate_seat_id ?? ""}
+            disabled={!view.canDesignate}
+            onChange={(e) => save("delegate_seat_id", e.target.value || null)}
+            className="mt-1 w-full max-w-md rounded-md border border-gray-300 px-2 py-1.5"
+          >
+            <option value="">Choose a registration</option>
+            {view.seats.map((seat) => (
+              <option key={seat.seatId} value={seat.seatId}>
+                {seat.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-gray-600">
+            The support goes with the registration. To send someone else, name them to it on your
+            institution&apos;s page
+            {view.designationClosesOnLabel && <>, or pick a different registration here, until the end of {view.designationClosesOnLabel}</>}.
+          </p>
+        </>
+      )}
+    </section>
+  );
+
+  if (view.submittedAt) {
+    return (
+      <div className="mt-6 space-y-4 text-sm">
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-green-900">
+          <p className="font-semibold">Your request is in.</p>
+          <p className="mt-1">
+            For {view.delegateName ?? "a registration you haven't picked yet"}:{" "}
+            {[answers.covers_hotel && "hotel", answers.covers_travel && "travel"].filter(Boolean).join(" and ")}.{" "}
+            {answers.payment_preference ? BURSARY_PAYMENT_LABELS[answers.payment_preference] : ""}.
+          </p>
+          {answers.covers_hotel && <p className="mt-1">Hotel: {view.hotelText}.</p>}
+          {answers.notes && <p className="mt-1">You also told us: {answers.notes}</p>}
+          <p className="mt-1">
+            There is no separate approval to wait for. After the conference, claim your expenses on this page, with
+            receipts.
+          </p>
         {/* The terms changed after this request went in (v2, 2026-11-02): the
             school agrees to the current version here, by the same control. */}
         {!view.termsAccepted && view.terms && (
@@ -90,6 +142,10 @@ export default function BursaryRequestForm({
             <AgreeToDocument versionId={view.terms.versionId} title={view.terms.title} content={view.terms.content} />
           </div>
         )}
+        </div>
+        <div className="text-gray-800">{designation}</div>
+        {error && <p className="text-red-700">{error}</p>}
+        {saved && !error && <p className="text-gray-500">Saved.</p>}
       </div>
     );
   }
@@ -103,31 +159,13 @@ export default function BursaryRequestForm({
       {!view.open && <p className="font-medium text-red-700">Requests have closed.</p>}
 
       <fieldset disabled={locked} className="space-y-6">
-        <section>
-          <label className="block font-medium text-gray-900" htmlFor="bursary-delegate">
-            Who is the support for?
-          </label>
-          <select
-            id="bursary-delegate"
-            value={answers.delegate_contact_id ?? ""}
-            onChange={(e) => save("delegate_contact_id", e.target.value || null)}
-            className="mt-1 w-full max-w-md rounded-md border border-gray-300 px-2 py-1.5"
-          >
-            <option value="">Choose a person</option>
-            {view.contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.roleTitle ? `, ${c.roleTitle}` : ""}
-              </option>
-            ))}
-          </select>
-        </section>
+        {designation}
 
         <section>
           <p className="font-medium text-gray-900">What do you need covered?</p>
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={answers.covers_hotel === true} onChange={(e) => save("covers_hotel", e.target.checked)} />
-            Hotel nights
+            Hotel nights ({view.hotelText})
           </label>
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={answers.covers_travel === true} onChange={(e) => save("covers_travel", e.target.checked)} />
