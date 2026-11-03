@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { ConferenceScheduleItem } from "@/lib/conference/schedule-service";
 import type { BuildEntity } from "@/lib/actions/conference-entities";
 import { colorForKind } from "@/lib/conference/schedule-colors";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import {
   deleteScheduleItem,
   saveScheduleItem,
@@ -114,15 +115,15 @@ export default function ScheduleTimeline({ conferenceId, items, entities, timeZo
 
   const totalItems = dayGroups.reduce((n, d) => n + d.count, 0);
 
-  async function handleDelete(id: string, title: string) {
-    if (!window.confirm(`Remove "${title}" from the schedule? This deletes the catalog item.`)) return;
+  // Asked twice by the row's ConfirmAction; a failure is said there.
+  async function handleDelete(id: string) {
     const res = await deleteScheduleItem(id);
     if (res.success) {
       setForm(null);
       router.refresh();
-    } else {
-      window.alert(res.error);
+      return { success: true };
     }
+    return { success: false, error: res.error };
   }
 
   const renderRowOrForm = (item: ConferenceScheduleItem, nested: boolean, parentTitle?: string) =>
@@ -145,7 +146,7 @@ export default function ScheduleTimeline({ conferenceId, items, entities, timeZo
         nested={nested}
         parentTitle={parentTitle}
         onEdit={() => setForm({ mode: "edit", id: item.id })}
-        onDelete={() => void handleDelete(item.id, item.title)}
+        onDelete={() => handleDelete(item.id)}
       />
     );
 
@@ -264,7 +265,7 @@ function ScheduleRow({
   nested?: boolean;
   parentTitle?: string;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete: () => Promise<{ success: boolean; error?: string }>;
 }) {
   const color = colorForKind(item.kind);
   return (
@@ -294,7 +295,8 @@ function ScheduleRow({
           {item.description && <span className="text-gray-500">{item.description}</span>}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      {/* focus-within: an open "are you sure?" stays up when the mouse leaves. */}
+      <div className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
         <button
           type="button"
           onClick={onEdit}
@@ -302,13 +304,12 @@ function ScheduleRow({
         >
           Edit
         </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="rounded border border-gray-300 bg-white/70 px-2 py-0.5 text-[11px] text-red-600 hover:bg-white"
-        >
-          Delete
-        </button>
+        <ConfirmAction
+          label="Delete"
+          tone="danger"
+          consequence={`Removes "${item.title}" from the schedule. This deletes the catalog item.`}
+          onConfirm={onDelete}
+        />
       </div>
     </div>
   );

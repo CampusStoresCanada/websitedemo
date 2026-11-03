@@ -82,3 +82,52 @@ export const URGENCY_CLASS: Record<UrgencyTone, string> = {
   imminent: "text-red-700 font-medium",
   passed: "text-red-700 font-medium",
 };
+
+/** A calendar date, `YYYY-MM-DD`, for an instant as seen in a zone. */
+export function calendarDayIn(instant: Date, timeZone: string): string {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    instant
+  );
+}
+
+export type StaffChecklistGroups<T> = { now: T[]; next: T[]; later: T[]; done: T[] };
+
+/**
+ * Where each of the War Room's checklists sits: Now, Next, Later or Done.
+ *
+ * Stephen, 2026-10-22: things surface as they are needed and move into the
+ * background once they are not — and "I don't know how to answer that as a
+ * single rule" when asked how far ahead. So there is no lead time to set. The
+ * checklists are already in order; order does the work:
+ *
+ *   now   — open, and its day has come (or gone): today's, and anything late.
+ *   next  — the first open checklist after that. Always one, so the next thing
+ *           is visible however far away it is.
+ *   later — every other open checklist, folded.
+ *   done  — every task answered, folded, latest first.
+ *
+ * "Answered" includes "doesn't apply": a list nobody needs is finished, not
+ * outstanding. Days are the conference's, not the server's.
+ */
+export function arrangeStaffChecklists<T extends { deadline: string; tasks: { state: string }[] }>(
+  checklists: T[],
+  now: Date,
+  timeZone: string
+): StaffChecklistGroups<T> {
+  const today = calendarDayIn(now, timeZone);
+  const ordered = [...checklists].sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
+  const groups: StaffChecklistGroups<T> = { now: [], next: [], later: [], done: [] };
+  for (const list of ordered) {
+    if (list.tasks.every((t) => t.state !== "pending")) {
+      groups.done.unshift(list);
+    } else if (calendarDayIn(new Date(list.deadline), timeZone) <= today) {
+      groups.now.push(list);
+    } else if (groups.next.length === 0) {
+      groups.next.push(list);
+    } else {
+      groups.later.push(list);
+    }
+  }
+  return groups;
+}

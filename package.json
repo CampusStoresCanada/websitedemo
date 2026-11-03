@@ -18,6 +18,7 @@
     "sync:about-people": "node scripts/sync-about-people.mjs",
     "backfill:invoice-pdf-urls": "node scripts/backfill-invoice-pdf-urls.mjs",
     "check:elections-live": "npx tsx scripts/elections-live-check.mts",
+    "check:board-group": "npx tsx scripts/board-group-probe.mts",
     "check:elections-e2e": "npx tsx scripts/elections-nomination-e2e.mts",
     "check:schema-drift": "node scripts/check-schema-drift.mjs"
   },
@@ -47,6 +48,7 @@
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
     "clsx": "^2.1.1",
+    "docx": "^9.15.0",
     "emoji-mart": "^5.6.0",
     "googleapis": "^171.4.0",
     "html-to-docx": "^1.8.0",

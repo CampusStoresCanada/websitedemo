@@ -41,6 +41,7 @@ const ALL_QUEUES = [
   "qbo_conference_receipt_queue",
   "qbo_conference_refund_queue",
   "qbo_misc_receipt_queue",
+  "qbo_expense_bill_queue",
 ];
 
 async function runRule() {

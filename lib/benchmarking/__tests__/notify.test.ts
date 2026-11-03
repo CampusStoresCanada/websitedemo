@@ -108,6 +108,7 @@ function recipient(over: Record<string, unknown> = {}) {
     organization_id: "org-1",
     contact_id: "c1",
     invited_at: null,
+    reminded_at: null,
     reminder_count: 0,
     organizations: { name: "Test University" },
     contacts: { name: "Pat Lee", first_name: "Pat", email: null, work_email: "pat@test.ca" },
@@ -278,6 +279,93 @@ describe("the plan the operator is shown", () => {
       "already_submitted",
       "never_invited",
     ]);
+  });
+});
+
+describe("pressing send twice", () => {
+  /*
+    ⛔ The incident this exists to stop. On 2026-10-30 the FY2026 chase was sent,
+    the admin page came back with the button exactly as it had been, so it was
+    pressed again — and all 52 stores received the same reminder twice, about
+    seventeen seconds apart. Every row came out with reminder_count = 2.
+
+    The invitation has always been safe to run twice; the chase was not. These
+    tests pin the difference, and they close the loop deliberately: the patch
+    markReminded writes is applied back onto the row before the second run, so
+    a guard that reads a column nobody stamps would fail here.
+  */
+  const DAY = 86_400_000;
+
+  /** Replay what the database would hold after a send. */
+  function applyWrites() {
+    for (const { id, patch } of state.updates) {
+      const row = state.recipients.find((r) => r.id === id);
+      if (row) Object.assign(row, patch);
+    }
+    state.updates = [];
+  }
+
+  beforeEach(() => {
+    state.recipients = [
+      recipient({ id: "a", organization_id: "org-a", invited_at: "2026-10-08T12:00:00Z" }),
+      recipient({ id: "b", organization_id: "org-b", invited_at: "2026-10-08T12:00:00Z",
+        contacts: { name: "Sam Roy", first_name: "Sam", email: null, work_email: "sam@b.ca" } }),
+    ];
+  });
+
+  it("mails nobody the second time, because the first time is on the record", async () => {
+    const first = await sendBenchmarkingReminders("survey-1");
+    expect(first.sent).toBe(2);
+    expect(state.sends).toHaveLength(2);
+
+    applyWrites();
+
+    const second = await sendBenchmarkingReminders("survey-1");
+    expect(second.sent).toBe(0);
+    // ⛔ The assertion that matters: not "the second run reported zero" but
+    // "no second email exists". A guard that only fixed the summary would pass
+    // the line above and still have mailed 52 stores twice.
+    expect(state.sends).toHaveLength(2);
+  });
+
+  it("says why, so the operator reads it as already done rather than broken", async () => {
+    await sendBenchmarkingReminders("survey-1");
+    applyWrites();
+
+    const plan = await planReminders("survey-1");
+    expect(plan!.willSend).toHaveLength(0);
+    expect(plan!.blocked.map((l) => l.blockedReason)).toEqual([
+      "reminded_recently",
+      "reminded_recently",
+    ]);
+  });
+
+  it("still chases on the next rung, because the series is meant to send five times", async () => {
+    const past = new Date(Date.now() - 8 * DAY).toISOString();
+    state.recipients.forEach((r) => {
+      r.reminded_at = past;
+      r.reminder_count = 1;
+    });
+
+    const plan = await planReminders("survey-1");
+    expect(plan!.willSend).toHaveLength(2);
+  });
+
+  it("stays retryable after a failure, which is the whole reason the guard is time-based", async () => {
+    state.sendResult = { success: false, error: "Resend 504" };
+    const failed = await sendBenchmarkingReminders("survey-1");
+    expect(failed.sent).toBe(0);
+
+    /*
+      markReminded stamps reminded_at only when the send succeeded, so replaying
+      its writes leaves the column null and the store is chased again. A guard
+      written as "has a reminder_count" would have stranded a 504 forever.
+    */
+    applyWrites();
+    state.sendResult = { success: true };
+
+    const retry = await sendBenchmarkingReminders("survey-1");
+    expect(retry.sent).toBe(2);
   });
 });
 

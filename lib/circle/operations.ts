@@ -211,15 +211,15 @@ async function handleAddToSpace(
   item: CircleSyncQueueItem
 ): Promise<void> {
   const spaceId = Number(item.payload.spaceId);
-  const circleId = await resolveCircleId(item.entity_id);
+  const email = String(item.payload.email ?? "");
 
-  if (!spaceId || !circleId) {
+  if (!spaceId || !email) {
     throw new Error(
-      `add_to_space requires spaceId in payload and linked Circle account (entity: ${item.entity_id})`
+      `add_to_space requires spaceId and email in payload (entity: ${item.entity_id})`
     );
   }
 
-  await client.addMemberToSpace(spaceId, circleId);
+  await client.addMemberToSpace(spaceId, email);
 }
 
 async function handleRemoveFromSpace(
@@ -227,14 +227,14 @@ async function handleRemoveFromSpace(
   item: CircleSyncQueueItem
 ): Promise<void> {
   const spaceId = Number(item.payload.spaceId);
-  const circleId = await resolveCircleId(item.entity_id);
+  const email = String(item.payload.email ?? "");
 
-  if (!spaceId || !circleId) {
-    // Can't remove if not linked — silently succeed
-    return;
-  }
+  if (!spaceId || !email) return;
 
-  await client.removeMemberFromSpace(spaceId, circleId);
+  await ignoreMissing(
+    () => client.removeMemberFromSpace(spaceId, email),
+    `remove_from_space ${spaceId} for ${email}`
+  );
 }
 
 async function handleAddToAccessGroup(

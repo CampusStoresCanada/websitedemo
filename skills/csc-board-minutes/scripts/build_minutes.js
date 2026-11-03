@@ -32,13 +32,6 @@ const {
 const BLUE = "1F5C99";
 const FONT = "Times New Roman";
 
-const [, , dataPath, outPath, logoPathArg] = process.argv;
-if (!dataPath || !outPath) {
-  console.error("Usage: node build_minutes.js <data.json> <output.docx> [logo.jpeg]");
-  process.exit(1);
-}
-const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
-const logoPath = logoPathArg || path.join(__dirname, "..", "assets", "csc_logo.jpeg");
 
 function P(opts) {
   return new Paragraph(opts);
@@ -136,111 +129,130 @@ function presentAbsentBlock(label, entries) {
   return paras;
 }
 
-const children = [];
+/**
+ * The .docx as a Buffer. Pure apart from the logo bytes, which the caller
+ * supplies — the website's cron imports this rather than shelling out, the same
+ * split build_html.js already has.
+ */
+function buildMinutesDocx(data, logo) {
+  const children = [];
 
-// ---- Letterhead ----
-const logo = fs.readFileSync(logoPath);
-children.push(
-  P({
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 200 },
-    children: [new ImageRun({ data: logo, transformation: { width: 130, height: 95 }, type: "jpg" })],
-  })
-);
-children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run(data.meetingTitle || "CSC Board Meeting", { size: 40 })] }));
-children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run(data.meetingDateLong, { size: 24 })] }));
-children.push(
-  P({
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 200 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "000000", space: 8 } },
-    children: [run(" ")],
-  })
-);
-children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [run("Minutes", { size: 32 })] }));
-
-// ---- Present / Absent ----
-children.push(...presentAbsentBlock("Present", data.present));
-children.push(...presentAbsentBlock("Absent", data.absent));
-
-// ---- Body blocks ----
-(data.blocks || []).forEach((b) => {
-  switch (b.type) {
-    case "sectionHeading":
-      children.push(sectionHeading(b.text));
-      break;
-    case "item":
-      children.push(itemHeading(b.num, b.title));
-      break;
-    case "subitem":
-      children.push(subHeading(b.num, b.title));
-      break;
-    case "body":
-      children.push(body(b.text, b.indent ?? 720));
-      break;
-    case "bullet":
-      children.push(bullet(b.text, b.indent ?? 1080));
-      break;
-    case "motion":
-      children.push(motionBox(b.lines));
-      break;
-    case "action":
-      children.push(actionItem(b.label || "ACTION", b.text, b.indent ?? 0));
-      break;
-    default:
-      throw new Error(`Unknown block type: ${b.type}`);
-  }
-});
-
-
-// ---- Footer ----
-const footer = new Footer({
-  children: [
+  // ---- Letterhead ----
+  children.push(
     P({
-      border: { top: { style: BorderStyle.SINGLE, size: 4, color: "000000", space: 4 } },
-      tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
-      children: [run("CSC Board of Directors Meeting – Minutes", { size: 18 }), run("\t" + data.footerDate, { size: 18 })],
-    }),
-  ],
-});
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+      children: [new ImageRun({ data: logo, transformation: { width: 130, height: 95 }, type: "jpg" })],
+    })
+  );
+  children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run(data.meetingTitle || "CSC Board Meeting", { size: 40 })] }));
+  children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run(data.meetingDateLong, { size: 24 })] }));
+  children.push(
+    P({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "000000", space: 8 } },
+      children: [run(" ")],
+    })
+  );
+  children.push(P({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [run("Minutes", { size: 32 })] }));
 
-const doc = new Document({
-  sections: [
-    {
-      properties: {
-        page: { size: { width: 12240, height: 15840 }, margin: { top: 1080, bottom: 1080, left: 1440, right: 1440 } },
+  // ---- Present / Absent ----
+  children.push(...presentAbsentBlock("Present", data.present));
+  children.push(...presentAbsentBlock("Absent", data.absent));
+
+  // ---- Body blocks ----
+  (data.blocks || []).forEach((b) => {
+    switch (b.type) {
+      case "sectionHeading":
+        children.push(sectionHeading(b.text));
+        break;
+      case "item":
+        children.push(itemHeading(b.num, b.title));
+        break;
+      case "subitem":
+        children.push(subHeading(b.num, b.title));
+        break;
+      case "body":
+        children.push(body(b.text, b.indent ?? 720));
+        break;
+      case "bullet":
+        children.push(bullet(b.text, b.indent ?? 1080));
+        break;
+      case "motion":
+        children.push(motionBox(b.lines));
+        break;
+      case "action":
+        children.push(actionItem(b.label || "ACTION", b.text, b.indent ?? 0));
+        break;
+      default:
+        throw new Error(`Unknown block type: ${b.type}`);
+    }
+  });
+
+
+  // ---- Footer ----
+  const footer = new Footer({
+    children: [
+      P({
+        border: { top: { style: BorderStyle.SINGLE, size: 4, color: "000000", space: 4 } },
+        tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
+        children: [run("CSC Board of Directors Meeting – Minutes", { size: 18 }), run("\t" + data.footerDate, { size: 18 })],
+      }),
+    ],
+  });
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {
+          page: { size: { width: 12240, height: 15840 }, margin: { top: 1080, bottom: 1080, left: 1440, right: 1440 } },
+        },
+        footers: { default: footer },
+        children,
       },
-      footers: { default: footer },
-      children,
-    },
-  ],
-});
+    ],
+  });
 
-const htmlPath = outPath.replace(/\.docx$/i, "") + ".html";
+  return Packer.toBuffer(doc);
+}
 
-Packer.toBuffer(doc).then((buf) => {
-  fs.writeFileSync(outPath, buf);
-  fs.writeFileSync(htmlPath, buildHtml(data));
+module.exports = { buildMinutesDocx };
 
-  const r = data.recap || {};
-  const counts = {
-    decided: (r.decided || []).length,
-    outstanding: (r.outstanding || []).length,
-    nextMeeting: (r.nextMeeting || []).length,
-  };
-  const total = counts.decided + counts.outstanding + counts.nextMeeting;
-
-  console.log("Wrote " + outPath + "   (formal minutes — no recap tags)");
-  console.log("Wrote " + htmlPath + "   (paste into the website)");
-  if (total > 0) {
-    console.log(
-      `Recap tags in the HTML only: ${total} ` +
-      `(${counts.decided} decided, ${counts.outstanding} outstanding, ${counts.nextMeeting} next meeting)`
-    );
-  } else {
-    console.log(
-      "No recap tags emitted — add a \"recap\" block to data.json or the website " +
-      "will draft no board recap for this meeting."
-    );
+if (require.main === module) {
+  const [, , dataPath, outPath, logoPathArg] = process.argv;
+  if (!dataPath || !outPath) {
+    console.error("Usage: node build_minutes.js <data.json> <output.docx> [logo.jpeg]");
+    process.exit(1);
   }
-});
+  const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+  const logoPath = logoPathArg || path.join(__dirname, "..", "assets", "csc_logo.jpeg");
+  const htmlPath = outPath.replace(/\.docx$/i, "") + ".html";
+
+  buildMinutesDocx(data, fs.readFileSync(logoPath)).then((buf) => {
+    fs.writeFileSync(outPath, buf);
+    fs.writeFileSync(htmlPath, buildHtml(data));
+
+    const r = data.recap || {};
+    const counts = {
+      decided: (r.decided || []).length,
+      outstanding: (r.outstanding || []).length,
+      nextMeeting: (r.nextMeeting || []).length,
+    };
+    const total = counts.decided + counts.outstanding + counts.nextMeeting;
+
+    console.log("Wrote " + outPath + "   (formal minutes — no recap tags)");
+    console.log("Wrote " + htmlPath + "   (paste into the website)");
+    if (total > 0) {
+      console.log(
+        `Recap tags in the HTML only: ${total} ` +
+        `(${counts.decided} decided, ${counts.outstanding} outstanding, ${counts.nextMeeting} next meeting)`
+      );
+    } else {
+      console.log(
+        "No recap tags emitted — add a \"recap\" block to data.json or the website " +
+        "will draft no board recap for this meeting."
+      );
+    }
+  });
+}

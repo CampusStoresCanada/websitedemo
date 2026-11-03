@@ -103,3 +103,45 @@ describe("loadPersonalTasks", () => {
     expect(t.deadline).toBe("2027-01-08T00:00:00Z");
   });
 });
+
+describe("personIdsInTaskScope", async () => {
+  const { personIdsInTaskScope } = await import("../checklist-tasks");
+  /**
+   * The CANCOLL consent is asked of whoever holds the funded registration, not
+   * of the school: a colleague on the ordinary Full Conference Registration is
+   * outside it, and handing the funded seat to someone else moves the ask.
+   */
+  const FUNDED = "funded-registration";
+  const FULL = "full-registration";
+  const entities = new Map([
+    [FUNDED, { kind: "registration" }],
+    [FULL, { kind: "registration" }],
+    ["booth-109", { kind: "booth" }],
+  ]);
+  const seats = [
+    { entityId: FUNDED, holderPersonId: "jackie" },
+    { entityId: FULL, holderPersonId: "colleague" },
+    { entityId: FULL, holderPersonId: null },
+    { entityId: "booth-109", holderPersonId: "vendor" },
+  ];
+
+  it("returns null for a task with no scope, which is asked of everyone", () => {
+    expect(personIdsInTaskScope(seats, entities, {})).toBeNull();
+  });
+
+  it("asks only the holder of the named registration", () => {
+    expect([...personIdsInTaskScope(seats, entities, { scope_entity_id: FUNDED })!]).toEqual(["jackie"]);
+  });
+
+  it("follows the seat when it is reassigned", () => {
+    const moved = [{ entityId: FUNDED, holderPersonId: "colleague" }];
+    expect([...personIdsInTaskScope(moved, entities, { scope_entity_id: FUNDED })!]).toEqual(["colleague"]);
+  });
+
+  it("scopes by kind, and ANDs a kind with a named thing", () => {
+    expect(personIdsInTaskScope(seats, entities, { scope_entity_kind: "booth" })).toEqual(new Set(["vendor"]));
+    expect(
+      personIdsInTaskScope(seats, entities, { scope_entity_kind: "booth", scope_entity_id: FUNDED })
+    ).toEqual(new Set());
+  });
+});

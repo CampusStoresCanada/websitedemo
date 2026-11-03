@@ -75,9 +75,30 @@ export const RELATIONSHIP_BY_ROLE: Record<string, Relationship> = Object.fromEnt
   RELATIONSHIPS.map((r) => [r.role, r])
 );
 
+/** A yes/no field typed as text ("yes", "y", "true", "on", "1"), as Check-in card is. */
+export function fieldSaysYes(raw: unknown): boolean {
+  if (raw === true) return true;
+  return typeof raw === "string" && ["yes", "y", "true", "on", "1"].includes(raw.trim().toLowerCase());
+}
+
+/**
+ * Kept off the public schedule (the conference page's "at a glance"). It still
+ * shows on the own page of each person it is for, and to staff (Stephen,
+ * 2026-10-27: the CANCOLL AGM, before CANCOLL announces it).
+ */
+export function isNotPublic(attributes: Record<string, unknown> | null | undefined): boolean {
+  return fieldSaysYes(attributes?.not_public);
+}
+
+// Everything with a time is on the schedule, so each can be kept off the public one.
 const TIME_FIELDS: SuggestedField[] = [
   { key: "start_time", label: "Starts", type: "time" },
   { key: "end_time", label: "Ends", type: "time" },
+  {
+    key: "not_public", label: "Not public", type: "text",
+    placeholder: "yes",
+    hint: "Type yes to keep this off the public schedule. The people it is for still see it on their own page.",
+  },
 ];
 
 const SUMMARY_FIELD: SuggestedField = {
@@ -163,7 +184,15 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
   {
     kind: "meal", label: "Meal",
     hint: "Catered service — breakfast, lunch, banquet.",
-    fields: [{ key: "notes", label: "Notes", type: "text", placeholder: "e.g. plated; vegetarian option" }, ...TIME_FIELDS],
+    fields: [
+      { key: "notes", label: "Notes", type: "text", placeholder: "e.g. plated; vegetarian option" },
+      {
+        key: "menu", label: "Menu", type: "textarea",
+        placeholder: "e.g. Roast chicken, wild rice, seasonal greens; vegan: mushroom risotto",
+        hint: "Shown beside this meal on each person's own schedule, and in the War Room.",
+      },
+      ...TIME_FIELDS,
+    ],
     suggestedRoles: ["when", "where", "who"], requiredRoles: ["when"], sellable: true,
   },
   {
@@ -213,6 +242,25 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
     hint: "An exhibit-hall layout. Holds the booth categories on it.",
     fields: [{ key: "notes", label: "Notes", type: "textarea", placeholder: "e.g. Hall A, 120 booths over two aisles" }],
     suggestedRoles: ["includes"],
+  },
+  {
+    /**
+     * Something people ask us at the conference, answered once (Stephen,
+     * 2026-10-22): Wi-Fi, coat check, the airport shuttle. Shown on each
+     * person's own conference page and in the War Room — one answer, both
+     * places. Never a timeline row, even with a When (see agenda.ts).
+     */
+    kind: "answer", label: "Answer",
+    hint: "Something people ask at the conference — Wi-Fi, coat check, the shuttle. Name it as the question; shown on everyone's own page and in the War Room.",
+    fields: [
+      {
+        key: "answer", label: "Answer", type: "textarea",
+        placeholder: "e.g. Network: CSC2027 · Password: campusstores",
+        hint: "What people are told. Add a Where if it is somewhere (the coat check is by the ballroom).",
+      },
+    ],
+    suggestedRoles: ["where"],
+    requiredFields: ["answer"],
   },
   {
     kind: "policy", label: "Policy",

@@ -80,10 +80,17 @@ export async function loadMeetingCandidates(
    * is its only writer, so the seat IS the fact. loadSeatHoldings is the one
    * reader (lib/conference/seats.ts).
    */
+  /**
+   * ⛔ EVERY seat, named or not. A delegate is a person: a schedule has to
+   * reach someone, so an unnamed delegate seat is skipped below. An exhibitor
+   * is a COMPANY: its profile is the company's (categories, refusals), and a
+   * company that holds a suite but has not named its staff yet still has a
+   * room to fill (Stephen, 2026-10-26). Requiring a name here left 2027 with
+   * one exhibitor out of sixteen suite-holders.
+   */
   const { seats, entitiesById } = await loadSeatHoldings(db, {
     conferenceId,
     entityKinds: ["registration"],
-    assigned: true,
   });
 
   /**
@@ -107,8 +114,18 @@ export async function loadMeetingCandidates(
 
   const { data: orgRows } = await db
     .from("organizations")
-    .select("id, primary_category, procurement_info")
+    .select("id, primary_category, procurement_info, is_test")
     .in("id", orgIds.length > 0 ? orgIds : ["00000000-0000-0000-0000-000000000000"]);
+
+  /**
+   * A test organization is in no meeting. Its seats are real rows (test buyers
+   * exercise checkout), but a schedule reaches real suites and real inboxes, so
+   * they never enter the list the scheduler, the grid and Publish all read.
+   */
+  const testOrgIds = new Set<string>();
+  for (const row of orgRows ?? []) {
+    if (row.is_test === true) testOrgIds.add(row.id as string);
+  }
 
   /**
    * Match signal comes from the ORG's standing procurement profile, not from a
@@ -266,7 +283,7 @@ export async function loadMeetingCandidates(
 
   const delegates: DelegateProfile[] = [];
   const exhibitors: ExhibitorProfile[] = [];
-  /** Named seats whose type is in no meeting at all — CSC staff, a $4,000 booth. */
+  /** Seats (named or not) whose type is in no meeting at all — CSC staff, a $4,000 booth. */
   const notMatchable: string[] = [];
 
   /**
@@ -354,7 +371,7 @@ export async function loadMeetingCandidates(
      * WHICH SIDE they sit on is the separate, already-solved question:
      * ownership-gate's "does this type require owning a booth".
      */
-    if (!participatesInMeetings(seat.entityId)) {
+    if (testOrgIds.has(seat.organizationId) || !participatesInMeetings(seat.entityId)) {
       notMatchable.push(seat.seatId);
       continue;
     }
@@ -388,6 +405,8 @@ export async function loadMeetingCandidates(
         blackoutList,
       });
     } else {
+      // A delegate is a person; nobody named, nobody to meet or to tell.
+      if (!seat.holderPersonId) continue;
       delegates.push({
         registrationId: seat.seatId,
         organizationId: seat.organizationId,

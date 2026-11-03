@@ -14,8 +14,8 @@ import { getCircleGhostClient } from "./client";
 import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isBenchmarkingSurveyFlag } from "@/lib/circle/flag-routing";
-import { buildFlagDm, oneLine } from "@/lib/circle/flag-message";
+import { isBenchmarkingSurveyFlag, isConferenceAskFlag } from "@/lib/circle/flag-routing";
+import { buildAskStaffNote, buildFlagDm, oneLine } from "@/lib/circle/flag-message";
 import { createClient } from "@/lib/supabase/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -72,6 +72,17 @@ export interface FlagNotificationParams {
  * reaches the wrong one. That state is real: the survey has sat with nobody
  * appointed before.
  */
+/**
+ * Who answers a conference ask: CSC staff (Stephen, 2026-10-22) — the host
+ * organization's contacts tagged Staff, through the site's one reader of that
+ * (getCSCStaff). Super admins remain the fallback below, as for every flag.
+ */
+async function conferenceAskRecipients(): Promise<string[]> {
+  const { getCSCStaff } = await import("@/lib/data");
+  const staff = (await getCSCStaff()) as unknown as Array<{ email?: string | null; work_email?: string | null }>;
+  return [...new Set(staff.map((s) => s.work_email || s.email).filter((e): e is string => !!e))];
+}
+
 async function benchmarkingRecipients(): Promise<string[]> {
   const adminClient = createAdminClient();
 
@@ -127,6 +138,8 @@ export async function sendFlagNotification(
   */
   if (isBenchmarkingSurveyFlag(pageUrl)) {
     recipientEmails = await benchmarkingRecipients();
+  } else if (isConferenceAskFlag(pageUrl)) {
+    recipientEmails = await conferenceAskRecipients();
   } else if (organizationId) {
     const { data: memberships } = await supabase
       .from("user_organizations")
@@ -175,13 +188,16 @@ export async function sendFlagNotification(
   const reviewLink = `${pageLink}${pageLink.includes("?") ? "&" : "?"}flag=${flagId}`;
   const survey = isBenchmarkingSurveyFlag(pageUrl);
   const who = params.reporterName?.trim() || "A CSC member";
+  const conferenceAsk = isConferenceAskFlag(pageUrl);
   const dmText = buildFlagDm({
-    priorityLabel, who, note, elementContent, survey,
+    priorityLabel, who, note, elementContent, survey, conferenceAsk,
     issuesUrl: `${APP_URL}/benchmarking/admin/issues`,
     reviewLink,
   });
 
-  const emailSubject = priority === "high"
+  const emailSubject = conferenceAsk
+    ? `${priority === "high" ? "🔴 " : ""}Ask CSC: ${who}`
+    : priority === "high"
     ? "🔴 HIGH PRIORITY: Content flagged on CSC site"
     : "Content flagged on CSC site";
 
@@ -237,15 +253,42 @@ export async function sendFlagNotification(
   */
   const ghostClient = isCircleConfigured() ? getCircleGhostClient() : null;
   const responders = recipientEmails.filter((e) => e !== params.reporterEmail);
-  const room = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
+  const intendedRoom = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
+
+  /*
+    ⛔ The same dev intercept email already honours (lib/email/send.ts). Butler's
+    DM ignored it, so a flag raised on a local server — every one shares the
+    live database and Circle — messaged real staff. With it set, the room is
+    the dev address alone, and the message says who it would have reached.
+  */
+  const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const room = intercept ? [intercept] : intendedRoom;
+  const sentText = intercept ? `[DEV — would have gone to: ${intendedRoom.join(", ")}]\n\n${dmText}` : dmText;
 
   let anyDm = false;
   let anyEmail = false;
 
   if (ghostClient && room.length > 0) {
-    const result = await ghostClient.sendGroupDirectMessage(room, dmText);
+    const result = await ghostClient.sendGroupDirectMessage(room, sentText);
     if (result.success) anyDm = true;
     else console.warn("[flag-notify] Circle group DM failed:", result.error);
+
+    /*
+      An Ask CSC room has the asker in it, so it carries only their question
+      (Stephen, 2026-10-22: "We need that information, they don't"). The rest —
+      priority, their details, the War Room link — goes to CSC staff alone.
+
+      Sent whether or not the room went: if the asker's address is not on
+      Circle and the room failed, this is how staff still hear in Circle.
+    */
+    if (conferenceAsk && responders.length > 0) {
+      const staffRoom = intercept ? [intercept] : responders;
+      const note = buildAskStaffNote({ priorityLabel, who, note: params.note, details: elementContent, reviewLink });
+      const staffText = intercept ? `[DEV — would have gone to: ${responders.join(", ")}]\n\n${note}` : note;
+      const staff = await ghostClient.sendGroupDirectMessage(staffRoom, staffText);
+      if (staff.success) anyDm = true;
+      else console.warn("[flag-notify] Circle staff note failed:", staff.error);
+    }
   }
 
   /*

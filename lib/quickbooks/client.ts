@@ -454,14 +454,15 @@ export async function createQBPayment(input: QBPaymentInput): Promise<QBPayment>
  * $4,520 for exactly this reason.
  *
  * ⚠️ Only sound where the DocNumber identifies ONE document. It does for
- * invoices and sales receipts (one per invoice / order / payment). It does NOT
+ * invoices, sales receipts and expense-claim bills (one per invoice / order /
+ * payment / claim). It does NOT
  * for refunds: both refund paths derive DocNumber from the *parent* invoice or
  * order, so two partial refunds of the same parent share one DocNumber, and
  * adopting the first would silently skip the second. Refund workers therefore
  * guard on their own stored receipt id only — see the callers.
  */
 export async function findQBDocumentByDocNumber(
-  entity: "Invoice" | "SalesReceipt",
+  entity: "Invoice" | "SalesReceipt" | "Bill",
   docNumber: string
 ): Promise<{ Id: string } | null> {
   const escaped = docNumber.replace(/'/g, "\\'");
@@ -493,6 +494,73 @@ export async function getQBSalesReceipt(id: string): Promise<QBSalesReceipt | nu
 export async function createQBRefundReceipt(input: QBRefundReceiptInput): Promise<QBRefundReceipt> {
   const res = await qbRequest<{ RefundReceipt: QBRefundReceipt }>("POST", "/refundreceipt", input);
   return res.RefundReceipt;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Payables: vendors and bills (expense claims)
+// ─────────────────────────────────────────────────────────────────
+
+export interface QBVendor {
+  Id: string;
+  DisplayName: string;
+}
+
+export interface QBVendorInput {
+  DisplayName: string;
+  PrintOnCheckName?: string;
+  CompanyName?: string;
+  PrimaryEmailAddr?: { Address: string };
+  PrimaryPhone?: { FreeFormNumber: string };
+  BillAddr?: {
+    Line1?: string;
+    Line2?: string;
+    City?: string;
+    CountrySubDivisionCode?: string;
+    PostalCode?: string;
+    Country?: string;
+  };
+}
+
+export interface QBBillLine {
+  DetailType: "AccountBasedExpenseLineDetail";
+  Amount: number;
+  Description?: string;
+  AccountBasedExpenseLineDetail: {
+    AccountRef: { value: string };
+    TaxCodeRef?: { value: string };
+  };
+}
+
+export interface QBBillInput {
+  VendorRef: { value: string };
+  Line: QBBillLine[];
+  TxnDate?: string;
+  DocNumber?: string;
+  PrivateNote?: string;
+  CurrencyRef?: { value: string };
+  GlobalTaxCalculation?: "TaxExcluded" | "TaxInclusive" | "NotApplicable";
+}
+
+/** A vendor by exact DisplayName. QuickBooks keeps one name list across
+ *  customers, vendors and employees, so callers pick a name no customer has. */
+export async function findQBVendor(displayName: string): Promise<QBVendor | null> {
+  const escaped = displayName.replace(/'/g, "\\'");
+  const query = `SELECT * FROM Vendor WHERE DisplayName = '${escaped}'`;
+  const res = await qbRequest<{ QueryResponse: { Vendor?: QBVendor[] } }>(
+    "GET",
+    `/query?query=${encodeURIComponent(query)}`
+  );
+  return res.QueryResponse.Vendor?.[0] ?? null;
+}
+
+export async function createQBVendor(input: QBVendorInput): Promise<QBVendor> {
+  const res = await qbRequest<{ Vendor: QBVendor }>("POST", "/vendor", input);
+  return res.Vendor;
+}
+
+export async function createQBBill(input: QBBillInput): Promise<{ Id: string }> {
+  const res = await qbRequest<{ Bill: { Id: string } }>("POST", "/bill", input);
+  return res.Bill;
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -45,6 +45,8 @@ vi.mock("@/lib/supabase/user-lookup", () => ({
   resolveOrgAdminEmails: vi.fn(),
   resolveOrgPrimaryContactEmail: vi.fn(),
 }));
+vi.mock("@/lib/comms/send", () => ({ sendTransactional: vi.fn() }));
+vi.mock("@/lib/renewal/jobs", () => ({ resolveRenewalRecipients: vi.fn() }));
 
 const { markInvoicePaidOutOfBand } = await import("../billing");
 

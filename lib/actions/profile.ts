@@ -3,6 +3,26 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { enqueueContactProfileSync } from "@/lib/circle/sync";
+import { writePreference } from "@/lib/profile/preferences";
+import {
+  PRINT_SORT_KEYS,
+  PRINT_SORT_PREFERENCE_KEY,
+  type PrintSortKey,
+} from "@/lib/conference/badges/arrangement";
+
+/**
+ * How this account likes printed name lists sorted (door list, attendee list).
+ * Set once, ahead of time, in the War Room — never at the print button.
+ */
+export async function setMyPrintSort(sort: PrintSortKey): Promise<UpdateProfileResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!(PRINT_SORT_KEYS as readonly string[]).includes(sort)) {
+    return { success: false, error: "Unknown sort." };
+  }
+  const saved = await writePreference(auth.ctx.userId, PRINT_SORT_PREFERENCE_KEY, sort);
+  return saved ? { success: true } : { success: false, error: "Couldn't save that." };
+}
 
 export interface UpdateProfileData {
   display_name: string;

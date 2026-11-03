@@ -12,7 +12,9 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { loadDirectoryCompleteness } from "@/lib/publication/completeness-loader";
 import { computeOrgLegalCompleteness } from "./legal-acceptance";
-import type { CheckType } from "./checklist-check-types";
+import { declaredSeatsToFill } from "./seats";
+import type { CheckType, StaffCheckType } from "./checklist-check-types";
+import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -95,19 +97,9 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
 
       // "All purchased seats assigned" is only the right definition of done
       // when the org intends to use every seat it bought — someone who buys 4
-      // and is sending 1 isn't behind, they're done. Their declared number is
-      // what complete means instead, capped at the real seat count so a stale
-      // over-declaration can never make this impossible to satisfy.
-      //
-      // A later purchase can raise the real count past what they saw when they
-      // declared — said "using 1 of 4", then bought 2 more, now holding 6. The
-      // old "1" no longer reflects a decision about the extra seats, so it is
-      // treated as stale and falls through to strict until they re-declare.
-      if (intent && total <= intent.declared_against_total) {
-        if (assignedCount < Math.min(intent.intended_quantity, total)) return false;
-        continue;
-      }
-      if (assignedCount < total) return false;
+      // and is sending 1 isn't behind, they're done. The rule, including when
+      // a declaration goes stale, lives in declaredSeatsToFill.
+      if (assignedCount < (declaredSeatsToFill(total, intent) ?? total)) return false;
     }
     return true;
   },
@@ -293,7 +285,15 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
  * against it — they cannot disagree.
  */
 export const PERSON_CHECKS_BULK: Partial<
-  Record<CheckType, (args: { db: AdminClient; conferenceId: string }) => Promise<Set<string>>>
+  Record<
+    CheckType,
+    (args: {
+      db: AdminClient;
+      conferenceId: string;
+      /** The task's `check_entity_id`, for a check about one particular thing. */
+      entityId?: string | null;
+    }) => Promise<Set<string>>
+  >
 > = {
   /**
    * Which contacts have told us who they want to meet.
@@ -325,6 +325,55 @@ export const PERSON_CHECKS_BULK: Partial<
         .filter((id): id is string => Boolean(id))
     );
   },
+
+  /**
+   * Which contacts have accepted ONE document: the task's `check_entity_id`
+   * names its policy entity, and only that document's newest version counts.
+   *
+   * The org-grain version asks "has everyone at this company accepted
+   * everything", which is a company question. This one exists for a document
+   * a single person must agree to themselves, today the CANCOLL information
+   * sharing consent, which is asked only on that delegate's own checklist and
+   * is deliberately not linked to their registration (so it is not raised at
+   * seat claim, on the welcome page or at the check-in desk).
+   *
+   * Keyed on acceptance by the person's own login, mapped to their contact
+   * through conference_people, the same row their checklist is loaded from.
+   * A task with no document named can be seen by nobody, so nobody passes it.
+   */
+  async legal_document_accepted({ db, conferenceId, entityId }) {
+    if (!entityId) return new Set();
+    const { data: version } = await db
+      .from("conference_legal_versions")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("policy_entity_id", entityId)
+      .lte("effective_at", new Date().toISOString())
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!version) return new Set();
+
+    const { data: accepted } = await db
+      .from("legal_acceptances")
+      .select("user_id")
+      .eq("legal_version_id", version.id);
+    const userIds = [...new Set((accepted ?? []).map((a) => a.user_id))];
+    if (userIds.length === 0) return new Set();
+
+    const { data: people } = await db
+      .from("conference_people")
+      .select("contact_id, canonical_person_id")
+      .eq("conference_id", conferenceId)
+      .in("user_id", userIds);
+    // contact_id first, canonical_person_id has no FK. Same precedence as
+    // loadPersonalTasks, which is what the result is matched against.
+    return new Set(
+      (people ?? [])
+        .map((p) => (p.contact_id as string | null) || (p.canonical_person_id as string | null))
+        .filter((id): id is string => Boolean(id))
+    );
+  },
 };
 
 /**
@@ -338,11 +387,12 @@ export async function evaluatePersonChecklistTaskCheck(
   db: AdminClient,
   checkType: CheckType,
   conferenceId: string,
-  contactId: string
+  contactId: string,
+  entityId: string | null = null
 ): Promise<boolean | null> {
   const check = PERSON_CHECKS_BULK[checkType];
   if (!check) return null;
-  return (await check({ db, conferenceId })).has(contactId);
+  return (await check({ db, conferenceId, entityId })).has(contactId);
 }
 
 export async function evaluateChecklistTaskCheck(
@@ -353,5 +403,337 @@ export async function evaluateChecklistTaskCheck(
   entityId: string | null,
   taskId: string
 ): Promise<boolean> {
-  return CHECKS[checkType]({ db, organizationId, conferenceId, entityId, taskId });
+  const check = CHECKS[checkType] as (typeof CHECKS)[CheckType] | undefined;
+  // A staff task's check reads the conference, not a company: asked about an
+  // org it has no answer, and it must not throw inside a comms condition.
+  if (!check) return false;
+  return check({ db, organizationId, conferenceId, entityId, taskId });
 }
+
+/**
+ * Checks CSC staff answer for the conference itself — the War Room.
+ *
+ * ⛔ A third registry, like PERSON_CHECKS_BULK, not entries in CHECKS: every
+ * org check takes an organization, and "is the print station online" has none.
+ *
+ * Each returns a VERDICT, not a boolean, because most print jobs are things
+ * the site can describe but not see happen. Nothing records that a sheet came
+ * off a printer, so "tick" means: here is what there is to print and where;
+ * a staff member's tick says it was. `done` / `not_done` are read from data and
+ * a tick cannot override them — a badge package with 21 people added since is
+ * not done whatever anyone ticked in September.
+ */
+export type StaffCheckResult = {
+  verdict: "done" | "not_done" | "tick";
+  /** The live line under the task: what there is, from real data. */
+  detail: string | null;
+  /** Where to do it. `print` opens in a new tab, as every print page does. */
+  actions: { label: string; href: string; print?: boolean }[];
+};
+
+/** When something happened, said in the operator's zone (Mountain). */
+const OPERATOR_TIME_ZONE = "America/Edmonton";
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+type StaffCheck = (args: { db: AdminClient; conferenceId: string }) => Promise<StaffCheckResult>;
+
+/**
+ * The published schedule's meetings that have started, and how many a booth
+ * card scan confirmed. One count for the "meetings confirmed" task and the War
+ * Room's status line, so the two never disagree.
+ */
+export async function meetingsSoFar(
+  db: AdminClient,
+  conferenceId: string
+): Promise<{
+  total: number;
+  started: number;
+  confirmed: number;
+  firstStartsLocal: string | null;
+  /** Meetings that have started and nobody has confirmed: the War Room's list to chase. */
+  unconfirmed: Array<{ scheduleId: string; startsAtLocal: string; suiteNumber: number | null; exhibitorName: string }>;
+}> {
+  const { getConferenceScheduleTimeline } = await import("./schedule-service");
+  const { loadMeetingConfirmations } = await import("./schedule-ops");
+  const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "admin" });
+  const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
+  const now = Date.now();
+  const started = meetings.filter((m) => m.startsAt && Date.parse(m.startsAt) <= now);
+  const confirmations = started.length
+    ? await loadMeetingConfirmations(db, started.map((m) => m.meetingAssignment!.scheduleId))
+    : new Map();
+  return {
+    total: meetings.length,
+    started: started.length,
+    confirmed: started.filter((m) => confirmations.has(m.meetingAssignment!.scheduleId)).length,
+    firstStartsLocal: meetings[0]?.startsAtLocal ?? null,
+    unconfirmed: started
+      .filter((m) => !confirmations.has(m.meetingAssignment!.scheduleId))
+      .map((m) => ({
+        scheduleId: m.meetingAssignment!.scheduleId,
+        startsAtLocal: m.startsAtLocal,
+        suiteNumber: m.meetingAssignment!.suiteNumber,
+        exhibitorName: m.meetingAssignment!.exhibitorName,
+      })),
+  };
+}
+
+export const STAFF_CHECKS: Record<StaffCheckType, StaffCheck> = {
+  /**
+   * The pre-printed badge run, against everyone registered since.
+   *
+   * Current = a package exists and nobody was added after it was made. Even
+   * then it is a tick: the site knows a PDF was made, not that it was printed.
+   */
+  async badge_package_current({ db, conferenceId }) {
+    const actions = [{ label: "Open Badge Ops", href: `/admin/conference/${conferenceId}/badges` }];
+    const { data: job } = await db
+      .from("badge_print_jobs")
+      .select("created_at")
+      .eq("conference_id", conferenceId)
+      .eq("pipeline_type", "preprinted")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!job) return { verdict: "not_done", detail: "No badge package has been made yet.", actions };
+    const made = formatDayMonth(job.created_at, OPERATOR_TIME_ZONE) ?? "earlier";
+    const { count } = await db
+      .from("conference_people")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId)
+      .neq("assignment_status", "canceled")
+      .gt("created_at", job.created_at);
+    const since = count ?? 0;
+    if (since > 0) {
+      return {
+        verdict: "not_done",
+        detail: `Made ${made}; ${plural(since, "person", "people")} added since. Make a new one.`,
+        actions,
+      };
+    }
+    return { verdict: "tick", detail: `Made ${made}, covers everyone registered. Tick once printed.`, actions };
+  },
+
+  /** Promoting a run is what publishes it: /me reads only the active run. */
+  async schedule_promoted({ db, conferenceId }) {
+    const actions = [{ label: "Open Meetings", href: `/admin/conference/${conferenceId}/war-room?tab=meetings` }];
+    const { data: run } = await db
+      .from("scheduler_runs")
+      .select("started_at, activated_at, total_meetings_created")
+      .eq("conference_id", conferenceId)
+      .eq("run_mode", "active")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!run) return { verdict: "not_done", detail: "No meeting schedule has been promoted yet.", actions };
+    const promoted = formatDayMonth(run.activated_at ?? run.started_at, OPERATOR_TIME_ZONE) ?? "earlier";
+    return {
+      verdict: "done",
+      detail: `Promoted ${promoted}: ${plural(run.total_meetings_created ?? 0, "meeting")}.`,
+      actions,
+    };
+  },
+
+  /** Seen within the last half-minute, with what is waiting for it. */
+  async print_station_online({ db, conferenceId }) {
+    const { stationOnline } = await import("./badges/print-station");
+    const actions = [
+      { label: "Open the print station", href: `/admin/conference/${conferenceId}/check-in/print-station`, print: true },
+    ];
+    const [{ data: stations }, { count: waiting }] = await Promise.all([
+      db.from("print_stations").select("last_seen_at").eq("conference_id", conferenceId),
+      db
+        .from("badge_print_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("conference_id", conferenceId)
+        .in("status", ["sent_to_printer", "rendering"]),
+    ]);
+    const queue = waiting ? ` ${plural(waiting, "job")} waiting.` : "";
+    if (!stations || stations.length === 0) {
+      return { verdict: "not_done", detail: `No print station has been set up.${queue}`, actions };
+    }
+    const online = stations.some((s) => stationOnline(s.last_seen_at as string | null));
+    return {
+      verdict: online ? "done" : "not_done",
+      detail: `${online ? "Online." : "Offline: start CSC Print Station on the laptop."}${queue}`,
+      actions,
+    };
+  },
+
+  /** A rehearsal's check-ins must not be counted at the real doors. */
+  async test_check_ins_cleared({ db, conferenceId }) {
+    const actions = [
+      { label: "Open the rehearsal desk", href: `/admin/conference/${conferenceId}/check-in?test=1`, print: true },
+    ];
+    const [people, events] = await Promise.all([
+      db
+        .from("conference_people")
+        .select("id", { count: "exact", head: true })
+        .eq("conference_id", conferenceId)
+        .eq("check_in_is_test", true),
+      db
+        .from("conference_check_in_events")
+        .select("id", { count: "exact", head: true })
+        .eq("conference_id", conferenceId)
+        .eq("is_test", true),
+    ]);
+    const n = (people.count ?? 0) + (events.count ?? 0);
+    return n === 0
+      ? { verdict: "done", detail: "No rehearsal check-ins are counted.", actions: [] }
+      : { verdict: "not_done", detail: `${plural(n, "rehearsal check-in")} still counted. Reset the rehearsal.`, actions };
+  },
+
+  async check_in_cards_printed({ conferenceId }) {
+    const actions = [
+      { label: "Print check-in cards", href: `/admin/conference/${conferenceId}/check-in/cards`, print: true },
+    ];
+    // The count is a nicety; the button is the point. A count that fails must
+    // not take the way to print with it.
+    try {
+      const { loadCheckInCards } = await import("./check-in-cards");
+      const cards = await loadCheckInCards(conferenceId);
+      const booths = cards.filter((c) => c.kind === "booth").length;
+      return {
+        verdict: "tick",
+        detail: `${plural(booths, "booth card")} and ${plural(cards.length - booths, "event card")}.`,
+        actions,
+      };
+    } catch (error) {
+      // A warning, not an error: on a local server this is the deliberate
+      // refusal to build localhost QR addresses, every load.
+      console.warn("[war-room] check-in card count failed:", error instanceof Error ? error.message : error);
+      return { verdict: "tick", detail: "Couldn't count the cards; the sheet will show them.", actions };
+    }
+  },
+
+  /** One list per capped event — the doors the desk offers on its own. */
+  async door_lists_printed({ db, conferenceId }) {
+    const { loadDoorEvents } = await import("./badges/checkin");
+    const { doorEvents } = await loadDoorEvents(db, conferenceId);
+    const capped = doorEvents.filter((e) => e.capped);
+    return {
+      verdict: "tick",
+      detail: capped.length
+        ? `${plural(capped.length, "door")}, each printed in your own name order.`
+        : "No capped events have a door.",
+      actions: capped.map((e) => ({
+        label: e.name,
+        href: `/admin/conference/${conferenceId}/check-in/door-list?entity=${e.id}`,
+        print: true,
+      })),
+    };
+  },
+
+  async directory_printed({ conferenceId }) {
+    return {
+      verdict: "tick",
+      detail: null,
+      actions: [{ label: "Open the directory", href: `/admin/conference/${conferenceId}/directory`, print: true }],
+    };
+  },
+
+  /** The directory's own map, booth index and A–Z list, as a sheet (lib/publication mapSheet). */
+  async map_printed({ conferenceId }) {
+    return {
+      verdict: "tick",
+      detail: "The floor plan, then every booth by number and every exhibitor A to Z.",
+      actions: [
+        { label: "Print the map", href: `/admin/conference/${conferenceId}/directory?sheet=map`, print: true },
+      ],
+    };
+  },
+
+  /**
+   * Has anyone been told? The send is idempotent per (person, run) and each one
+   * leaves a message_automation_runs row keyed on the run — so a re-promoted
+   * schedule reads as not sent, which is true.
+   */
+  async schedule_emailed({ db, conferenceId }) {
+    const actions = [{ label: "Open Meetings", href: `/admin/conference/${conferenceId}/war-room?tab=meetings` }];
+    const { data: run } = await db
+      .from("scheduler_runs")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("run_mode", "active")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!run) return { verdict: "not_done", detail: "Promote a schedule first.", actions };
+    const { count } = await db
+      .from("message_automation_runs")
+      .select("id", { count: "exact", head: true })
+      .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`)
+      .eq("status", "sent");
+    const sent = count ?? 0;
+    return sent > 0
+      ? { verdict: "done", detail: `${plural(sent, "person", "people")} emailed this schedule.`, actions }
+      : { verdict: "not_done", detail: "Nobody has been emailed this schedule yet.", actions };
+  },
+
+  async schedules_printed({ conferenceId }) {
+    const base = `/admin/conference/${conferenceId}/check-in/schedules`;
+    return {
+      verdict: "tick",
+      // The two buttons say what there is; the task's own text says why.
+      detail: null,
+      actions: [
+        { label: "Individual schedules", href: `${base}?view=people`, print: true },
+        { label: "Suite door sheets", href: `${base}?view=suites`, print: true },
+      ],
+    };
+  },
+
+  /**
+   * The meetings that have started, against the ones confirmed by a booth card
+   * scan. Unconfirmed is the no-show (Stephen, 2026-10-22): no separate state.
+   */
+  async meetings_confirmed({ db, conferenceId }) {
+    const actions = [{ label: "Open the meeting grid", href: `/admin/conference/${conferenceId}/schedule` }];
+    const so = await meetingsSoFar(db, conferenceId);
+    if (so.total === 0) return { verdict: "not_done", detail: "No meetings are scheduled.", actions };
+    if (so.started === 0) {
+      return {
+        verdict: "not_done",
+        detail: `${plural(so.total, "meeting")} scheduled; the first starts ${so.firstStartsLocal}.`,
+        actions,
+      };
+    }
+    const unconfirmed = so.started - so.confirmed;
+    return {
+      verdict: unconfirmed === 0 ? "done" : "not_done",
+      detail:
+        `${so.confirmed} of ${plural(so.started, "meeting")} so far confirmed` +
+        (unconfirmed ? `; ${unconfirmed} not yet. Unconfirmed shows as no ✓ on the grid.` : "."),
+      actions,
+    };
+  },
+
+  async bursary_proof_sent({ db, conferenceId }) {
+    const { count } = await db
+      .from("conference_bursary_applications")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId);
+    return {
+      verdict: "tick",
+      detail: `${plural(count ?? 0, "bursary institution")}: their meetings, and which were confirmed.`,
+      actions: [
+        { label: "Open the bursary proof", href: `/admin/conference/${conferenceId}/bursary-proof`, print: true },
+      ],
+    };
+  },
+
+  async attendee_list_printed({ db, conferenceId }) {
+    const { loadDoorRoster } = await import("./attendance");
+    const people = await loadDoorRoster(db, conferenceId, null);
+    return {
+      verdict: "tick",
+      detail: `${plural(people.length, "person", "people")} registered.`,
+      actions: [
+        { label: "Print the attendee list", href: `/admin/conference/${conferenceId}/check-in/door-list`, print: true },
+      ],
+    };
+  },
+};

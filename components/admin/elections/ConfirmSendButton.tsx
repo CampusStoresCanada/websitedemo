@@ -14,6 +14,17 @@
  * yes, because the person pressing already believes they know what it does.
  * "This emails 39 institutions" is the sentence that stops someone who thinks
  * they are on the dev server, because the number is the thing that surprises.
+ *
+ * ⛔ A count of ZERO is not a send. On 2026-10-30 the benchmarking chase went to
+ * all 52 stores, the page came back with this button looking exactly as it had
+ * before, and it was pressed again — 52 stores received the same email twice.
+ * The planner now blocks a store chased within the gap, so the second press
+ * counts nobody; this is the half that makes that visible. A button that is
+ * still there, still armable, and would mail no one is the control telling the
+ * operator nothing happened.
+ *
+ * `null` is different and stays pressable: it means the count is unavailable,
+ * not that the audience is empty.
  */
 
 import { useState } from "react";
@@ -33,6 +44,14 @@ export default function ConfirmSendButton({
   audience: string;
 }) {
   const [armed, setArmed] = useState(false);
+
+  if (recipients === 0) {
+    return (
+      <p className="mt-2 text-xs text-gray-600">
+        Nothing to send — no {audience} are waiting on this right now.
+      </p>
+    );
+  }
 
   if (!armed) {
     return (

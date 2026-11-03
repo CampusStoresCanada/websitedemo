@@ -27,6 +27,7 @@ import { accessibleThings, offerGrants } from "@/lib/conference/entity-commerce"
 import { availability, priceTable } from "@/lib/conference/entity-pricing";
 import { colorForKind } from "@/lib/conference/schedule-colors";
 import QBItemPicker from "@/components/admin/qbo/QBItemPicker";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 type Picked = { id: string; name: string; kind: string };
 type PropRow = { key: string; label: string; value: string; type: SuggestedField["type"]; placeholder?: string; hint?: string };
@@ -164,6 +165,8 @@ export default function BuildWorkspace({
   async function removeEntity(id: string) {
     const res = await deleteEntity(id);
     if (res.success) setEntities((prev) => prev.filter((e) => e.id !== id));
+    // Said where the button is (ConfirmAction), not swallowed.
+    return res.success ? { success: true } : { success: false, error: res.error };
   }
 
   // Edit happens in place: the row being edited swaps for this form (the "add"
@@ -364,7 +367,7 @@ function ThingRow({
   renderForm: (entity: BuildEntity) => ReactNode;
   onEdit: (entity: BuildEntity) => void;
   onStamp: (typeId: string, names: string[]) => Promise<string | null>;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const instanceOf = entity.refs.find((r) => r.role === "instance_of");
   const sug = SUGGESTION_BY_KIND[entity.kind];
@@ -530,7 +533,13 @@ function ThingRow({
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-2">
             <button onClick={() => onEdit(entity)} className="text-[11px] font-medium text-accent hover:underline">Edit</button>
             {!instanceOf && <StampControl typeName={entity.name} onStamp={(names) => onStamp(entity.id, names)} />}
-            <button onClick={() => onDelete(entity.id)} className="text-[11px] text-red-500 hover:text-red-700">Delete</button>
+            {/* ⛔ A delete is asked twice and says what goes (WAR_ROOM_OPERATE_PLAN §8.8). */}
+            <ConfirmAction
+              label="Delete"
+              tone="danger"
+              consequence={`Deletes "${entity.name}" from the catalogue for good.`}
+              onConfirm={() => onDelete(entity.id)}
+            />
           </div>
         </div>
       )}

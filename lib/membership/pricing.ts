@@ -204,8 +204,14 @@ function parseBillingPricingConfig(policies: Record<string, unknown>) {
  * `memberships` row, which is the entity that actually holds these facts.
  * Any OTHER `organizations.` field a policy might name (square_footage, …)
  * still reads straight off `organizations`.
+ *
+ * FTE is NOT one of them. There is one FTE: `organizations.fte`, the number
+ * the org page shows and a benchmarking submission refreshes. Reading a copy
+ * of it from `memberships` meant every writer had to remember to update the
+ * copy, and the survey's didn't — Fanshawe (2026-10) submitted 15,035 and
+ * would have been billed at 37,291. `memberships.fte` is no longer read.
  */
-const MEMBERSHIP_OWNED_ORG_FIELDS = new Set(["fte", "is_cancoll_member", "cancoll_tier"]);
+const MEMBERSHIP_OWNED_ORG_FIELDS = new Set(["is_cancoll_member", "cancoll_tier"]);
 
 function extractMetric(
   metricKey: string,

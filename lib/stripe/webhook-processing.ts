@@ -494,7 +494,7 @@ async function mintProspectiveRegistration(
  * If they ever need to differ, that is a decision to make here rather than a
  * difference to discover in QuickBooks.
  */
-async function fulfilConferenceOrder(
+export async function fulfilConferenceOrder(
   db: AdminClient,
   params: {
     orderId: string;
@@ -503,7 +503,8 @@ async function fulfilConferenceOrder(
     userId?: string | null;
     checkoutSessionId?: string | null;
     paymentIntentId?: string | null;
-    source: "checkout" | "invoice";
+    /** "no_charge": nothing to pay (the CANCOLL-funded registration on its own), so no Stripe object exists. */
+    source: "checkout" | "invoice" | "no_charge";
   }
 ): Promise<void> {
   const orderId = params.orderId;
@@ -517,7 +518,7 @@ async function fulfilConferenceOrder(
   // to someone else during the gap.
   const { data: priorOrder } = await db
     .from("conference_orders")
-    .select("status, expires_at")
+    .select("status, expires_at, total_cents")
     .eq("id", orderId)
     .maybeSingle();
 
@@ -554,7 +555,11 @@ async function fulfilConferenceOrder(
     });
   }
 
-  await enqueueQBConferenceReceipt(orderId);
+  // A $0 order took no money, so there is no sales receipt for QuickBooks to
+  // record. The registration it carries is billed to its funder separately.
+  if (priorOrder?.total_cents !== 0) {
+    await enqueueQBConferenceReceipt(orderId);
+  }
 
 
 

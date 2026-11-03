@@ -7,7 +7,10 @@ import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { settlePaidInvoiceMembership } from "@/lib/membership/renewal-activation";
 import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
-import type { MembershipProgramDef } from "@/lib/policy/types";
+import { sendTransactional } from "@/lib/comms/send";
+import { formatMemberFacingDate } from "@/lib/comms/format";
+import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
+import { formatCents } from "@/lib/utils";
 import type {
   Invoice,
   PaymentMethod,
@@ -320,25 +323,24 @@ export async function createProgramInvoice(
 }
 
 /**
- * Finalize and send a draft Stripe invoice.
+ * Finalize a draft Stripe invoice and tell the org's admins it is ready.
  * This transitions the local invoice status to 'invoiced'.
  *
- * `notify: false` finalizes without asking Stripe to email the invoice. The
- * invoice is otherwise completely normal — it exists, it is finalized, it
- * carries its balance, and its PDF and hosted payment URL are captured the
- * same way — so the member can still be billed, still owes the money, and can
- * still pay from /org/billing. The only thing that does not happen is Stripe
- * putting a fresh "here is your invoice" email in their inbox.
+ * ⛔ The email is OURS, to every active org admin — never Stripe's
+ * `sendInvoice`. Stripe can only mail the customer's one address (the oldest
+ * admin), and an org is one Stripe customer however many admins it has. Our
+ * email links to /org/billing, whose Pay button puts the clicking admin on the
+ * customer first (openInvoicePayment), so the receipt reaches whoever paid.
  *
- * This exists for the renewal notification pause. Stripe is a second sending
- * channel that our own suppression cannot reach: gating sendTransactional
- * silences CSC's mail and would have left `stripe.invoices.sendInvoice` below
- * mailing a paused org anyway, which is the exact outcome the pause is for.
+ * `notify: false` finalizes without emailing anyone. The invoice is otherwise
+ * completely normal — it is finalized, it carries its balance, its PDF and
+ * hosted payment URL are captured — so the member still owes the money and can
+ * still pay from /org/billing. This exists for the renewal notification pause.
  */
 export async function finalizeAndSendInvoice(
   invoiceId: string,
   options: { notify?: boolean } = {}
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; hostedInvoiceUrl?: string | null }> {
   const notify = options.notify ?? true;
   const db = createAdminClient();
 
@@ -356,14 +358,9 @@ export async function finalizeAndSendInvoice(
     return { success: false, error: "No Stripe invoice linked" };
   }
 
-  // Finalize in Stripe (this sends the invoice email) — the finalized
-  // invoice already has invoice_pdf/hosted_invoice_url populated, so we
-  // capture them here rather than fetching live later just to render a
-  // download link.
+  // The finalized invoice already has invoice_pdf/hosted_invoice_url
+  // populated, so we capture them here rather than fetching live later.
   const finalized = await stripe.invoices.finalizeInvoice(invoice.stripe_invoice_id);
-  if (notify) {
-    await stripe.invoices.sendInvoice(invoice.stripe_invoice_id);
-  }
 
   // Update local status
   await db
@@ -376,7 +373,82 @@ export async function finalizeAndSendInvoice(
     })
     .eq("id", invoiceId);
 
-  return { success: true };
+  if (notify) await notifyInvoiceIssued(invoiceId, finalized.hosted_invoice_url ?? null);
+
+  // The pay link, exactly as Stripe issued it. Never build one from the
+  // invoice id: `invoice.stripe.com/i/<in_…>` is not a real URL and opens
+  // Stripe's "Invoice not found" page.
+  return { success: true, hostedInvoiceUrl: finalized.hosted_invoice_url ?? null };
+}
+
+/**
+ * The "your invoice is ready" email, to every active org admin.
+ *
+ * Admins are sent to /org/billing for this invoice, where the Pay button
+ * records who is paying. An org with no admin yet falls back to the same
+ * addresses renewal mail uses; those people cannot open /org/billing, so they
+ * get Stripe's pay link directly. A failed send is logged, never thrown: the
+ * invoice is already finalized and stays payable from /org/billing.
+ */
+async function notifyInvoiceIssued(invoiceId: string, hostedInvoiceUrl: string | null): Promise<void> {
+  try {
+    const db = createAdminClient();
+    const { data: invoice } = await db
+      .from("invoices")
+      .select("organization_id, description, total_cents, due_date, organizations(name, email)")
+      .eq("id", invoiceId)
+      .single();
+    if (!invoice?.organization_id || !invoice.organizations) return;
+    const org = invoice.organizations;
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const billingUrl = `${appUrl}/org/billing?org=${invoice.organization_id}&invoice=${invoiceId}`;
+    const admins = await resolveOrgAdminEmails(db, invoice.organization_id);
+    const recipients = admins.length
+      ? admins.map((to) => ({ to, url: billingUrl }))
+      : (await resolveRenewalRecipients(db, invoice.organization_id, org.email)).map((to) => ({
+          to,
+          url: hostedInvoiceUrl ?? billingUrl,
+        }));
+
+    for (const { to, url } of recipients) {
+      const sent = await sendTransactional({
+        templateKey: "invoice_issued",
+        to,
+        variables: {
+          contact_name: `${org.name} team`,
+          org_name: org.name,
+          invoice_description: invoice.description ?? "",
+          invoice_amount: formatCents(invoice.total_cents),
+          due_date: formatMemberFacingDate(invoice.due_date),
+          invoice_url: url,
+        },
+      });
+      if (!sent.success) {
+        console.error(`[billing] invoice_issued to ${to} for invoice ${invoiceId} failed: ${sent.error}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[billing] invoice_issued for invoice ${invoiceId} failed:`, err);
+  }
+}
+
+/**
+ * Put the person about to pay on the org's Stripe customer, so Stripe's
+ * payment receipt goes to them. Still one customer per org: only its email
+ * moves. Called by the /org/billing Pay button and when an application's
+ * approval email hands the applicant a pay link.
+ */
+export async function setInvoicePayer(invoiceId: string, email: string): Promise<void> {
+  const db = createAdminClient();
+  const { data: invoice } = await db
+    .from("invoices")
+    .select("stripe_customer_id, organizations(stripe_customer_id)")
+    .eq("id", invoiceId)
+    .single();
+  const customerId = invoice?.stripe_customer_id ?? invoice?.organizations?.stripe_customer_id;
+  if (!customerId) return;
+  await stripe.customers.update(customerId, { email });
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -900,6 +900,7 @@ export async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> 
     { table: "qbo_conference_receipt_queue", label: "conference receipt" },
     { table: "qbo_conference_refund_queue", label: "conference refund" },
     { table: "qbo_misc_receipt_queue", label: "misc receipt" },
+    { table: "qbo_expense_bill_queue", label: "expense bill" },
   ];
 
   const byQueue: Record<string, number> = {};

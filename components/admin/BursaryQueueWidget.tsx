@@ -51,10 +51,12 @@ function Row({
   row,
   busy,
   onSetStatus,
+  conferenceId,
 }: {
   row: BursaryApplicationRow;
   busy: boolean;
   onSetStatus: (id: string, status: BursaryStatus) => void;
+  conferenceId: string;
 }) {
   const style = isBursaryStatus(row.status) ? STATUS_STYLE[row.status] : { bg: TRACK, fg: "#555" };
 
@@ -96,6 +98,18 @@ function Row({
           </a>
           {row.submittedOn && ` · ${row.submittedOn}`}
         </p>
+        {row.request ? (
+          <p className="truncate text-[12px] text-gray-700">
+            {[row.request.hotel && "Hotel", row.request.travel && "Travel"].filter(Boolean).join(" + ")}
+            {row.request.payment && ` · ${row.request.payment === "reimburse" ? "reimburse after" : "pay in advance"}`}
+            {row.request.delegateName &&
+              ` · for ${row.request.delegateName}${row.request.delegateTitle ? `, ${row.request.delegateTitle}` : ""}`}
+          </p>
+        ) : (
+          <p className="truncate text-[12px] italic" style={{ color: MUTED }}>
+            Interest only: request not submitted yet
+          </p>
+        )}
         {row.notes && (
           <p className="truncate text-[12px] italic text-gray-600" title={row.notes}>
             {row.notes}
@@ -113,7 +127,18 @@ function Row({
         {waited}
       </span>
 
-      {/* The decision — a select dressed as the pill it sets */}
+      {/* A new application is decided in one place: the War Room's Waiting on
+          us, beside everyone else waiting on CSC. A decided one keeps the
+          select for what comes after (fulfilled) and for corrections. */}
+      {row.status === "submitted" ? (
+        <a
+          href={`/admin/conference/${conferenceId}/war-room?tab=waiting`}
+          className="justify-self-end text-[12px] font-medium hover:underline"
+          style={{ color: NAVY }}
+        >
+          Decide →
+        </a>
+      ) : (
       <label className="relative cursor-pointer justify-self-end">
         <span
           className="flex h-[22px] w-[118px] items-center justify-center rounded-full text-[11px] font-medium"
@@ -139,6 +164,7 @@ function Row({
           ))}
         </select>
       </label>
+      )}
     </div>
   );
 }
@@ -166,7 +192,9 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
     startTransition(() => router.refresh());
   }
 
-  const TabButton = ({ id, label }: { id: Tab; label: string }) => (
+  // A render helper, not a component: a component declared inside render is a
+  // new type every render (react-hooks/static-components).
+  const tabButton = (id: Tab, label: string) => (
     <button
       type="button"
       onClick={() => setTab(id)}
@@ -192,8 +220,17 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
       </div>
 
       <div className="mb-3 flex items-center gap-6">
-        <TabButton id="review" label={`To review (${awaiting.length})`} />
-        <TabButton id="decided" label={`Decided (${decided.length})`} />
+        {tabButton("review", `To review (${awaiting.length})`)}
+        {tabButton("decided", `Decided (${decided.length})`)}
+        {/* The proof CANCOLL asks for afterwards: each institution's meetings,
+            and which the booth check-in cards confirmed. */}
+        <a
+          href={`/admin/conference/${data.conferenceId}/bursary-proof`}
+          className="ml-auto text-[12px] hover:underline"
+          style={{ color: MUTED }}
+        >
+          Meeting proof →
+        </a>
       </div>
 
       {error && (
@@ -209,7 +246,7 @@ export function BursaryQueueWidget({ data }: { data: BursaryQueueData }) {
           </div>
         ) : (
           visible.map((row) => (
-            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} />
+            <Row key={row.id} row={row} busy={busyId === row.id} onSetStatus={onSetStatus} conferenceId={data.conferenceId} />
           ))
         )}
       </div>

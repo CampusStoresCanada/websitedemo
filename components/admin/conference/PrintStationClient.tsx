@@ -9,6 +9,7 @@ import {
   type PrintStationRow,
   type QueuedLabel,
 } from "@/lib/actions/conference-badges";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 /**
  * The desk's print stations: the laptops that print the sticker queue.
@@ -69,11 +70,11 @@ export default function PrintStationClient({
     void refresh();
   };
 
+  // Asked twice by ConfirmAction; a failure is said at the button.
   const revoke = async (station: PrintStationRow) => {
-    if (!window.confirm(`Stop "${station.label}" printing? Its key stops working at once.`)) return;
     const res = await revokePrintStation({ conferenceId, stationId: station.id });
-    if (!res.success) setError(res.error);
     void refresh();
+    return res.success ? { success: true } : { success: false, error: res.error };
   };
 
   return (
@@ -108,9 +109,12 @@ export default function PrintStationClient({
                     </p>
                   ) : null}
                 </div>
-                <button type="button" onClick={() => void revoke(station)} className="shrink-0 text-xs font-medium text-red-600">
-                  Remove
-                </button>
+                <ConfirmAction
+                  label="Remove"
+                  tone="danger"
+                  consequence={`Stops "${station.label}" printing. Its key stops working at once.`}
+                  onConfirm={() => revoke(station)}
+                />
               </li>
             ))}
           </ul>
@@ -183,7 +187,15 @@ export default function PrintStationClient({
           <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
             {queue.map((job) => (
               <li key={job.jobId} className="px-4 py-2 text-sm">
-                {job.personName || "Unnamed"} <span className="text-gray-500">· {job.stickers.length} stickers</span>
+                {job.documentTitle ? (
+                  <>
+                    {job.documentTitle} <span className="text-gray-500">· document, on the paper printer</span>
+                  </>
+                ) : (
+                  <>
+                    {job.personName || "Unnamed"} <span className="text-gray-500">· {job.stickers.length} stickers</span>
+                  </>
+                )}
               </li>
             ))}
           </ul>

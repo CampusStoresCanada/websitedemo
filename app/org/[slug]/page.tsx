@@ -26,6 +26,7 @@ import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
 import type { SupplierData } from "@/lib/actions/member-suppliers";
 import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/conference-entity-commerce";
 import { getExhibitorStatusForOrg, type ExhibitorStatus } from "@/lib/conference/exhibitor-status";
+import { declaredSeatsToFill } from "@/lib/conference/seats";
 import { getNewPartnerJoinedOn } from "@/lib/membership/new-partner-spotlight";
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
@@ -465,17 +466,15 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
         }
       }
 
-      // A declared intent only still applies if the org hasn't since bought
-      // more of this entity — same staleness rule as CHECKS.seat_assigned,
-      // so the UI's default never contradicts what the checklist actually
-      // requires. Done as a pass after the loop above because a seat's
-      // final count isn't known until every seat for that entity has been
-      // collected.
+      // The same rule the checklist reads (declaredSeatsToFill), so the
+      // staffing banner never asks for names the checklist calls done. A
+      // pass after the loop above because a seat's final count isn't known
+      // until every seat for that entity has been collected.
       for (const column of byEntity.values()) {
-        const intent = usageIntentByEntity.get(column.entityId);
-        if (intent && column.seats.length <= intent.declared_against_total) {
-          column.intendedQuantity = intent.intended_quantity;
-        }
+        column.intendedQuantity = declaredSeatsToFill(
+          column.seats.length,
+          usageIntentByEntity.get(column.entityId)
+        );
       }
 
       assignableEntities = [...byEntity.values()].sort((a, b) => a.name.localeCompare(b.name));

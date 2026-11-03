@@ -1,6 +1,9 @@
 "use server";
 
-import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
+import { isSuperAdmin, requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
+import type { ScheduleMatrixData } from "@/lib/conference/schedule-coverage";
+import type { ScheduleDiffRow, ScheduleOpsRun } from "@/lib/conference/schedule-ops";
+import type { meetingsSoFar } from "@/lib/conference/checklist-checks";
 import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
@@ -380,8 +383,10 @@ export async function createSchedulerDraftRun(
     const schedulingPolicy = await getSchedulingConfig();
     const scaffolding = await ensureMeetingScaffolding(conferenceId);
     const candidates = await loadEligibleCandidates(conferenceId);
-    const orderedExhibitors = [...candidates.exhibitors].sort((a, b) =>
-      a.registrationId.localeCompare(b.registrationId)
+    // A seat with someone named runs a suite first; an unnamed seat stands in
+    // for its company until a name arrives (meeting-candidates.ts).
+    const orderedExhibitors = [...candidates.exhibitors].sort(
+      (a, b) => Number(!a.userId) - Number(!b.userId) || a.registrationId.localeCompare(b.registrationId)
     );
     const exhibitorByOrg = new Map<string, ExhibitorProfile[]>();
     for (const exhibitor of orderedExhibitors) {
@@ -462,12 +467,19 @@ export async function createSchedulerDraftRun(
       };
     }
 
+    /**
+     * ⛔ The seats that RUN a suite, one per suite — not every seat at a
+     * suite-holding company. A company's other staff seats have no room of
+     * their own; counting them made each a phantom exhibitor "below target"
+     * and divided the per-exhibitor target by people instead of rooms. Now that
+     * unnamed seats stand in for their company this would be most of them.
+     */
+    const pinnedSeatIds = new Set(Object.values(suitePinnedExhibitorBySuiteId));
+    const schedulableExhibitors = candidates.exhibitors.filter((e) => pinnedSeatIds.has(e.registrationId));
     const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
-    const schedulableExhibitors = candidates.exhibitors.filter((e) =>
-      orgIdsHoldingSuites.has(e.organizationId)
-    );
-    const exhibitorsWithoutSuiteEntitlement =
-      candidates.exhibitors.length - schedulableExhibitors.length;
+    const exhibitorsWithoutSuiteEntitlement = candidates.exhibitors.filter(
+      (e) => !orgIdsHoldingSuites.has(e.organizationId)
+    ).length;
 
     /**
      * No exhibitor holds a suite → there is nothing to schedule, and saying
@@ -478,7 +490,7 @@ export async function createSchedulerDraftRun(
      */
     if (schedulableExhibitors.length === 0) {
       throw new Error(
-        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor(s) are named to seats, ` +
+        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor seat(s) are in meetings, ` +
           `but none is on a booth that includes a suite, so there is no room for a meeting to happen in. ` +
           `Meetings come with a suite; a booth without one does not get them.`
       );
@@ -787,7 +799,24 @@ export async function createSchedulerDraftRun(
 
       const optimized = search.best.result.improved;
       generateResult.assignments = optimized.assignments;
-      generateResult.diagnostics = search.best.result.draw.diagnostics;
+      /**
+       * ⛔ Judged on what is SAVED, not on the greedy draw it started from. The
+       * draw's diagnostics described a schedule that was never persisted, so a
+       * draw-only fault (or a clean draw the optimizer then changed) decided
+       * whether the run was usable. Same recompute as the late-add path above.
+       */
+      generateResult.diagnostics = validateScheduleConstraints({
+        meetingSlots: generateInput.meetingSlots,
+        assignments: optimized.assignments,
+        delegates: generateInput.delegates,
+        exhibitors: generateInput.exhibitors,
+        delegateTargetMeetings: search.best.result.draw.diagnostics.delegateTargetMeetings,
+        exhibitorTargetMeetings: Math.max(
+          1,
+          Math.floor(generateInput.meetingSlots.length / Math.max(1, generateInput.exhibitors.length))
+        ),
+        policy: generateInput.policy,
+      });
       restartSpread = {
         restarts: search.spread.restarts,
         best: search.spread.best,
@@ -803,49 +832,23 @@ export async function createSchedulerDraftRun(
       };
     }
 
-    // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
-    // → infeasible: discard assignments, nothing usable.
-    // Soft violations (targets/coverage) → completed_with_warnings: persist
-    // assignments so admins can review and promote if acceptable.
-    if (generateResult.status === "infeasible") {
-      await adminClient
-        .from("scheduler_runs")
-        .update({
-          status: "infeasible",
-          completed_at: new Date().toISOString(),
-          total_delegates: candidates.delegates.length,
-          total_exhibitors: candidates.exhibitors.length,
-          total_meetings_created: 0,
-          constraint_violations: generateResult.diagnostics as unknown as Json,
-        })
-        .eq("id", runRow.id);
+    /**
+     * ⛔ The status is the SAVED schedule's. It was set once, by the very first
+     * greedy draw before any restart or optimization, and never updated — so
+     * the run's verdict described a schedule nobody kept (2026-10-26).
+     */
+    generateResult.status = generateResult.diagnostics.status;
 
-      const { data: finalRun } = await adminClient
-        .from("scheduler_runs")
-        .select("*")
-        .eq("id", runRow.id)
-        .single();
-
-      await logAuditEventSafe({
-        action: "scheduler_run_create",
-        entityType: "scheduler_run",
-        entityId: runRow.id,
-        actorId: auth.ctx.userId,
-        actorType: "user",
-        details: {
-          success: true,
-          conferenceId,
-          runSeed,
-          status: "infeasible",
-          diagnostics: generateResult.diagnostics,
-        },
-      });
-
-      return {
-        success: true,
-        data: mapRunSummary((finalRun ?? runRow) as SchedulerRunRow),
-      };
-    }
+    /**
+     * Hard violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS) mark the
+     * draft `infeasible`, but it STILL SAVES what it placed: a draft is for
+     * looking at, and "it failed" with nothing to open answers nothing (Stephen,
+     * 2026-10-26). An infeasible draft can never be published: the
+     * promote_scheduler_run RPC raises SCHEDULER_RUN_NOT_COMPLETED for it.
+     * Soft violations (targets, coverage) save as `completed`, with the
+     * warnings in constraint_violations.
+     */
+    const draftInfeasible = generateResult.status === "infeasible";
 
     const schedulesInput: Database["public"]["Tables"]["schedules"]["Insert"][] =
       generateResult.assignments.map((assignment) => ({
@@ -875,13 +878,12 @@ export async function createSchedulerDraftRun(
 
     if (scheduleInsertError) throw new Error(scheduleInsertError.message);
 
-    // Both "completed" and "completed_with_warnings" persist assignments.
-    // DB run status is always "completed" — soft warnings live in the
-    // constraint_violations JSONB for admin review.
+    // "completed" and "completed_with_warnings" save as "completed" (warnings
+    // live in constraint_violations); a hard violation saves as "infeasible".
     const { data: completedRun, error: completeError } = await adminClient
       .from("scheduler_runs")
       .update({
-        status: "completed",
+        status: draftInfeasible ? "infeasible" : "completed",
         completed_at: new Date().toISOString(),
         total_delegates: candidates.delegates.length,
         // The exhibitors that could actually be scheduled — a booth with no
@@ -1118,5 +1120,224 @@ export async function promoteSchedulerRun(
   return {
     success: true,
     data: mapRunSummary(data as SchedulerRunRow),
+  };
+}
+
+/** The published (active) run and every seat with a meeting in it. */
+async function activeRunSeats(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<{ run: { id: string }; seatIds: string[] } | { error: string }> {
+  const { data: run } = await db
+    .from("scheduler_runs")
+    .select("id")
+    .eq("conference_id", conferenceId)
+    .eq("run_mode", "active")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!run) return { error: "There is no published (active) schedule to send." };
+
+  const { data: rows, error } = await db
+    .from("schedules")
+    .select("exhibitor_seat_id, delegate_seat_ids")
+    .eq("conference_id", conferenceId)
+    .eq("scheduler_run_id", run.id)
+    .neq("status", "canceled");
+  if (error) return { error: error.message };
+  const seatIds = [
+    ...new Set((rows ?? []).flatMap((r) => [r.exhibitor_seat_id, ...(r.delegate_seat_ids ?? [])]).filter(Boolean)),
+  ] as string[];
+  if (seatIds.length === 0) return { error: "The published schedule has no meetings in it." };
+  return { run, seatIds };
+}
+
+export type MeetingsOverview = {
+  matrix: ScheduleMatrixData;
+  /** The live schedule, if there is one. */
+  live: { runId: string; meetings: number; people: number; handEdits: number } | null;
+  /** The newest draft, and what publishing it would change. */
+  draft: {
+    runId: string;
+    status: ScheduleOpsRun["status"];
+    startedAt: string;
+    meetings: number;
+    diagnostics: Json | null;
+    changes: ScheduleDiffRow[];
+  } | null;
+  /** Who "Email everyone their schedule" reaches, without sending. Null with no live schedule. */
+  email: {
+    toSend: Array<{ name: string; email: string; orgName: string; meetingCount: number }>;
+    alreadyTold: number;
+    noEmail: number;
+    /** The email as the first of them gets it (the template, with their values). */
+    sample: { to: string; subject: string; bodyHtml: string } | null;
+    templateId: string | null;
+  } | null;
+  meetings: Awaited<ReturnType<typeof meetingsSoFar>> | null;
+  /** Publishing and emailing are super-admin acts (promoteSchedulerRun, emailActiveSchedule). */
+  canPublish: boolean;
+};
+
+/**
+ * The War Room's Meetings tab, in one read (WAR_ROOM_OPERATE_PLAN §5): the
+ * matrix, the newest draft against the live schedule, who the email would
+ * reach, and the meetings so far. Loaded when the tab opens.
+ */
+export async function loadMeetingsOverview(
+  conferenceId: string
+): Promise<{ success: true; data: MeetingsOverview } | { success: false; error: string }> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const [{ loadScheduleMatrixData }, { diffAgainstActive }, { meetingsSoFar }] = await Promise.all([
+    import("@/lib/conference/schedule-matrix"),
+    import("@/lib/conference/schedule-ops"),
+    import("@/lib/conference/checklist-checks"),
+  ]);
+  const [matrix, meetings] = await Promise.all([
+    loadScheduleMatrixData(conferenceId),
+    meetingsSoFar(db, conferenceId).catch(() => null),
+  ]);
+  const { summary } = matrix;
+
+  const liveRun = summary.activeRunId;
+  const draftRun = summary.runs.find((run) => run.runMode === "draft") ?? null;
+  const peopleIn = (rows: typeof summary.activeAssignments) =>
+    new Set(rows.flatMap((a) => [a.exhibitorSeatId, ...a.delegateSeatIds])).size;
+
+  let email: MeetingsOverview["email"] = null;
+  if (liveRun) {
+    const found = await activeRunSeats(db, conferenceId);
+    if (!("error" in found)) {
+      const { planScheduleDelivery } = await import("@/lib/conference/schedule-delivery");
+      const [{ targets, result }, { data: told }] = await Promise.all([
+        planScheduleDelivery({ db, conferenceId, runId: found.run.id, delegateSeatIds: found.seatIds }),
+        db
+          .from("message_automation_runs")
+          .select("trigger_event_key")
+          .like("trigger_event_key", `conference_schedule_ready:%:${found.run.id}`),
+      ]);
+      // The send is keyed per (person, run): whoever already has this run's key is skipped.
+      const toldKeys = new Set((told ?? []).map((row) => row.trigger_event_key as string));
+      const fresh = targets.filter((t) => !toldKeys.has(`conference_schedule_ready:${t.personKey}:${found.run.id}`));
+
+      // The real mail for one of them: the send's own values (scheduleReadyVariables)
+      // through the send's own renderer. Conditional blocks render as off; the
+      // send resolves them per recipient.
+      const first = fresh[0] ?? targets[0] ?? null;
+      let sample: NonNullable<MeetingsOverview["email"]>["sample"] = null;
+      const [{ getTemplate, renderTemplateContent }, { scheduleReadyVariables }] = await Promise.all([
+        import("@/lib/comms/templates"),
+        import("@/lib/comms/conference-triggers"),
+      ]);
+      const template = await getTemplate("conference_schedule_ready");
+      if (first && template) {
+        const variables = await scheduleReadyVariables({
+          db,
+          conferenceId,
+          attendeeName: first.name,
+          orgName: first.orgName,
+          meetingCount: first.meetingCount,
+          dayCount: first.dayCount,
+        });
+        if (variables) {
+          const { subject, bodyHtml } = renderTemplateContent(template, {
+            app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
+            ...variables,
+          });
+          sample = { to: `${first.name} <${first.email}>`, subject, bodyHtml };
+        }
+      }
+
+      email = {
+        sample,
+        templateId: template?.id ?? null,
+        toSend: fresh.map((t) => ({ name: t.name, email: t.email, orgName: t.orgName, meetingCount: t.meetingCount })),
+        alreadyTold: targets.length - fresh.length,
+        noEmail: result.noEmail.length,
+      };
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      matrix,
+      live: liveRun
+        ? {
+            runId: liveRun,
+            meetings: summary.activeAssignments.length,
+            people: peopleIn(summary.activeAssignments),
+            handEdits: summary.activeRunManualCount,
+          }
+        : null,
+      draft: draftRun
+        ? {
+            runId: draftRun.id,
+            status: draftRun.status,
+            startedAt: draftRun.startedAt,
+            meetings: summary.selectedRunId === draftRun.id ? summary.selectedAssignments.length : draftRun.totalMeetingsCreated ?? 0,
+            diagnostics: draftRun.diagnostics,
+            changes: summary.selectedRunId === draftRun.id ? diffAgainstActive(summary) : [],
+          }
+        : null,
+      email,
+      meetings,
+      canPublish: isSuperAdmin(auth.ctx.globalRole),
+    },
+  };
+}
+
+/**
+ * Tell everyone in the published schedule that it's ready — the last stage of
+ * the pipeline, which existed (sendSchedulesForRun) and had no caller.
+ *
+ * Everyone with a meeting in the ACTIVE run, delegates and exhibitors both.
+ * Idempotent per (person, run): pressing it twice sends nothing the second
+ * time; promoting a new run and pressing it again tells people their day
+ * changed. Same permission as promoting, because it is the same act: publishing.
+ */
+export async function emailActiveSchedule(
+  conferenceId: string
+): Promise<
+  | { success: true; data: { sent: number; noEmail: number; alreadySent: boolean } }
+  | { success: false; error: string }
+> {
+  const auth = await requireSuperAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const found = await activeRunSeats(db, conferenceId);
+  if ("error" in found) return { success: false, error: found.error };
+  const { run, seatIds } = found;
+
+  const { count: before } = await db
+    .from("message_automation_runs")
+    .select("id", { count: "exact", head: true })
+    .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`);
+
+  const { sendSchedulesForRun } = await import("@/lib/conference/schedule-delivery");
+  const result = await sendSchedulesForRun({ db, conferenceId, runId: run.id, delegateSeatIds: seatIds });
+
+  const { count: after } = await db
+    .from("message_automation_runs")
+    .select("id", { count: "exact", head: true })
+    .like("trigger_event_key", `conference_schedule_ready:%:${run.id}`);
+
+  await logAuditEventSafe({
+    action: "scheduler_run_emailed",
+    entityType: "scheduler_run",
+    entityId: run.id,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId, seats: seatIds.length, newSends: (after ?? 0) - (before ?? 0), noEmail: result.noEmail.length },
+  });
+
+  const newSends = Math.max(0, (after ?? 0) - (before ?? 0));
+  return {
+    success: true,
+    data: { sent: newSends, noEmail: result.noEmail.length, alreadySent: newSends === 0 && (before ?? 0) > 0 },
   };
 }

@@ -3,6 +3,9 @@ import { runChecklistReminders } from "@/lib/conference/checklist-engine";
 import { isBusinessDay } from "@/lib/board/vote-schedule";
 
 export const dynamic = "force-dynamic";
+// The run walks every due org before it creates the campaign, so a timeout
+// leaves nothing behind. Without this it hit the platform default.
+export const maxDuration = 300;
 
 const CRON_SECRET = process.env.CRON_SECRET;
 

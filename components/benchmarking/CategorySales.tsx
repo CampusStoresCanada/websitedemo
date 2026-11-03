@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import {
   addCategory,
   removeCategory,
@@ -90,19 +90,27 @@ const UNIT_MEASURES = [
 export default function CategorySales({
   benchmarkingId,
   scope,
-  initialCategories,
+  /*
+    ⛔ The list is the form's, not ours, and arrives whole on every render.
+
+    This section is mounted only while the store is looking at it, so a copy
+    kept here would be re-seeded from a stale page-load snapshot each time they
+    came back — see the note on the state in BenchmarkingSurveyForm.
+  */
+  categories: cats,
+  onCategoriesChange: setCats,
   locations,
   contacts,
   isReadOnly,
 }: {
   benchmarkingId: string;
   scope: CategoryScope;
-  initialCategories: SurveyCategory[];
+  categories: SurveyCategory[];
+  onCategoriesChange: Dispatch<SetStateAction<SurveyCategory[]>>;
   locations: SurveyLocation[];
   contacts: StoreContact[];
   isReadOnly: boolean;
 }) {
-  const [cats, setCats] = useState<SurveyCategory[]>(initialCategories);
   const [error, setError] = useState<string | null>(null);
 
   const notes = scope === "course_materials" ? COURSE_MATERIAL_FORMAT_NOTES : DEPARTMENT_NOTES;

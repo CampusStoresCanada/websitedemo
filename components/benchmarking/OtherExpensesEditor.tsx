@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import BusyButton from "./BusyButton";
 import {
   addOtherExpense,
@@ -23,16 +23,21 @@ import {
  */
 export default function OtherExpensesEditor({
   benchmarkingId,
-  initialRows,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+  */
+  rows,
+  onRowsChange: setRows,
   namedExpenseTotal,
   isReadOnly,
 }: {
   benchmarkingId: string;
-  initialRows: OtherExpenseRow[];
+  rows: OtherExpenseRow[];
+  onRowsChange: Dispatch<SetStateAction<OtherExpenseRow[]>>;
   namedExpenseTotal: number;
   isReadOnly: boolean;
 }) {
-  const [rows, setRows] = useState<OtherExpenseRow[]>(initialRows);
   const [newLabel, setNewLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
 

@@ -15,8 +15,9 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DERIVED_FROM_FIELD, type PersonalTaskState } from "./checklist-tasks";
+import { DERIVED_FROM_FIELD, personIdsInTaskScope, type PersonalTaskState } from "./checklist-tasks";
 import { PERSON_CHECKS_BULK } from "./checklist-checks";
+import { loadSeatHoldings } from "./seats";
 import type { CheckType } from "./checklist-check-types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -75,6 +76,9 @@ export interface ChecklistShape {
   tasks: Array<{
     id: string; name: string; description: string;
     sort_order: number; active: boolean; audience: string; check_type: string;
+    check_entity_id?: string | null;
+    scope_entity_id?: string | null;
+    scope_entity_kind?: string | null;
   }>;
 }
 
@@ -113,6 +117,9 @@ export function classifyPersonTasks(checklists: ChecklistShape[]): {
         deadline: checklist.deadline_at,
         checklistName: checklist.name,
         checkType: task.check_type,
+        checkEntityId: task.check_entity_id ?? null,
+        scopeEntityId: task.scope_entity_id ?? null,
+        scopeEntityKind: task.scope_entity_kind ?? null,
       });
     }
   }
@@ -128,6 +135,11 @@ interface TaskInput {
   checklistName: string;
   /** Which check answers it — how a person-grain check is matched to the task. */
   checkType: string;
+  /** The one thing the check is about, when it is about one (a document). */
+  checkEntityId?: string | null;
+  /** Who it is asked of, when not everyone — see personIdsInTaskScope. */
+  scopeEntityId?: string | null;
+  scopeEntityKind?: string | null;
 }
 
 /**
@@ -162,7 +174,9 @@ export function summarizePersonTasks(
   tasks: TaskInput[],
   people: PersonInput[],
   acks: AckInput[],
-  detected: DetectedKeys = new Set()
+  detected: DetectedKeys = new Set(),
+  /** Per task id, the only people it is asked of. A task absent here is asked of everyone. */
+  scopedPeople: Map<string, Set<string>> = new Map()
 ): PersonTaskSummary[] {
   const ackByTaskPerson = new Map<string, string>();
   for (const ack of acks) {
@@ -184,7 +198,11 @@ export function summarizePersonTasks(
       let derived = 0;
       const outstanding: PersonTaskPerson[] = [];
 
+      const askedOf = scopedPeople.get(task.id);
       for (const person of people) {
+        // Not asked of them, so neither done nor outstanding: the CANCOLL
+        // consent must not list every other delegate as a laggard.
+        if (askedOf && !askedOf.has(person.personId)) continue;
         const derivedValue = derivedField ? person.fields[derivedField] : null;
         if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
           done++;
@@ -243,13 +261,14 @@ export async function loadPersonTaskStatus(
   const { data: checklists } = await db
     .from("conference_checklists")
     .select(
-      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type)"
+      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind)"
     )
     .eq("conference_id", conferenceId);
 
   type TaskRow = {
     id: string; name: string; description: string;
     sort_order: number; active: boolean; audience: string; check_type: string;
+    check_entity_id: string | null; scope_entity_id: string | null; scope_entity_kind: string | null;
   };
 
   const { tasks, inactive } = classifyPersonTasks(
@@ -316,14 +335,20 @@ export async function loadPersonTaskStatus(
    * reads. One query per distinct check type on the board, not one per person.
    */
   const detected = new Set<string>();
-  const checkTypesPresent = [...new Set(tasks.map((t) => t.checkType))];
+  // One bulk check per distinct (check type, thing checked) — a document check
+  // about the CANCOLL consent is a different question from one about any other.
+  const checksPresent = [
+    ...new Map(
+      tasks.map((t) => [`${t.checkType}|${t.checkEntityId ?? ""}`, { checkType: t.checkType, entityId: t.checkEntityId ?? null }])
+    ).values(),
+  ];
   await Promise.all(
-    checkTypesPresent.map(async (checkType) => {
+    checksPresent.map(async ({ checkType, entityId }) => {
       const check = PERSON_CHECKS_BULK[checkType as CheckType];
       if (!check) return;
-      const passing = await check({ db, conferenceId });
+      const passing = await check({ db, conferenceId, entityId });
       for (const task of tasks) {
-        if (task.checkType !== checkType) continue;
+        if (task.checkType !== checkType || (task.checkEntityId ?? null) !== entityId) continue;
         for (const person of people) {
           if (person.contactId && passing.has(person.contactId)) {
             detected.add(`${task.id}:${person.personId}`);
@@ -333,6 +358,18 @@ export async function loadPersonTaskStatus(
     })
   );
 
+  const scopedPeople = new Map<string, Set<string>>();
+  if (tasks.some((t) => t.scopeEntityId || t.scopeEntityKind)) {
+    const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, assigned: true });
+    for (const task of tasks) {
+      const askedOf = personIdsInTaskScope(seats, entitiesById, {
+        scope_entity_id: task.scopeEntityId,
+        scope_entity_kind: task.scopeEntityKind,
+      });
+      if (askedOf) scopedPeople.set(task.id, askedOf);
+    }
+  }
+
   return {
     population: people.length,
     inactiveTasks: inactive,
@@ -340,7 +377,8 @@ export async function loadPersonTaskStatus(
       tasks,
       people,
       (acks ?? []) as unknown as AckInput[],
-      detected
+      detected,
+      scopedPeople
     ),
   };
 }

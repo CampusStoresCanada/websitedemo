@@ -22,7 +22,6 @@ import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
 import BursaryImpactStat from "@/components/conference/BursaryImpactStat";
-import RegisterBursaryInterestCTA from "@/components/conference/RegisterBursaryInterestCTA";
 import TuesdayAudienceNote from "@/components/conference/TuesdayAudienceNote";
 import HotelInfo from "@/components/conference/HotelInfo";
 import { parseHotelRates } from "@/lib/conference/hotel";
@@ -107,14 +106,6 @@ export default async function ConferenceEditionHubPage({
     !!partnerOrg && membershipCoversConference(partnerOrg.membership_expires_at, conference.end_date ?? "");
 
   const knownOrg = memberOrg ?? partnerOrg;
-
-  // Prefills the "Register your interest" bursary CTA so a member can submit
-  // in one click without retyping their own name.
-  let viewerDisplayName = "";
-  if (memberOrg && viewer.userId) {
-    const { data: profile } = await db.from("profiles").select("display_name").eq("id", viewer.userId).maybeSingle();
-    viewerDisplayName = profile?.display_name ?? "";
-  }
 
   // Booths are an org-level holding (entity_balances) — they never mint a
   // person-level seat row in entity_balance_seats, so booth ownership has to
@@ -233,7 +224,7 @@ export default async function ConferenceEditionHubPage({
     ) : undefined;
 
   // Members get the bursary ask itself in the side slot — the "is your
-  // institution represented" pitch + Register your interest button — instead
+  // institution represented" pitch + the travel support request — instead
   // of the funding thermometer, which is the Partner-facing framing.
   const memberSideContent = memberOrg ? (
     <div className="max-w-sm">
@@ -241,12 +232,12 @@ export default async function ConferenceEditionHubPage({
         Campus Stores Canada is committed to making sure your institution has a buyer represented at this
         year&apos;s conference.
       </p>
-      <RegisterBursaryInterestCTA
-        conferenceId={conference.id}
-        organizationId={memberOrg.id}
-        defaultName={viewerDisplayName}
-        defaultEmail={viewer.userEmail ?? ""}
-      />
+      <Link
+        href={`/conference/${year}/${edition}/bursary`}
+        className="mt-6 inline-flex h-12 items-center rounded-full bg-white px-6 text-sm font-semibold text-[#163D6D] transition-all hover:shadow-lg hover:shadow-black/10"
+      >
+        Request travel support &rarr;
+      </Link>
     </div>
   ) : undefined;
 

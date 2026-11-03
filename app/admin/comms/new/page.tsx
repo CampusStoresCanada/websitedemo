@@ -4,6 +4,7 @@ import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import { getCampaignInitiative } from "@/lib/comms/campaigns";
 import { listConditions } from "@/lib/comms/conditions/store";
 import { redirect } from "next/navigation";
+import { requireAdmin } from "@/lib/auth/guards";
 import Link from "next/link";
 import type { AudienceDefinition, AudienceType } from "@/lib/comms/types";
 import NewCampaignForm from "@/components/comms/NewCampaignForm";
@@ -51,6 +52,9 @@ function parseMailMergeCsv(
 
 async function handleCreateCampaign(formData: FormData) {
   "use server";
+  // ⛔ Its own check: the admin layout does not run for a server action call.
+  const auth = await requireAdmin();
+  if (!auth.ok) redirect("/admin");
 
   const name = formData.get("name") as string;
   const templateId = (formData.get("template_id") as string) || undefined;

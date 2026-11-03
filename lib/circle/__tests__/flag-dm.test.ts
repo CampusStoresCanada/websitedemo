@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildFlagDm } from "../flag-message";
+import { buildAskStaffNote, buildFlagDm } from "../flag-message";
 
 /*
   What a flag notification has to carry.
@@ -72,5 +72,25 @@ describe("the message a flag sends", () => {
   it("sends a survey flag to the queue, and anything else to the page it is about", () => {
     expect(buildFlagDm({ ...base, survey: true })).toContain(base.issuesUrl);
     expect(buildFlagDm(base)).toContain(base.reviewLink);
+  });
+
+  it("puts only their question in the Ask CSC room the asker is in", () => {
+    const details = "Karin Stonehouse · McMaster University\nBooth 412\nNow: Meeting with Roots, Suite 12, until 10:45";
+    const dm = buildFlagDm({ ...base, note: "My 10:30 didn't show", elementContent: details, conferenceAsk: true });
+    expect(dm).toBe('"My 10:30 didn\'t show"');
+  });
+
+  it("gives staff alone the priority, who and where, and the War Room link", () => {
+    const note = buildAskStaffNote({
+      priorityLabel: base.priorityLabel,
+      who: "Karin Stonehouse",
+      note: "My 10:30 didn't show",
+      details: "Booth 412\nNext: Lunch at 12:00",
+      reviewLink: base.reviewLink,
+    });
+    expect(note).toContain(base.priorityLabel);
+    expect(note).toContain("My 10:30 didn't show");
+    expect(note).toContain("Next: Lunch at 12:00");
+    expect(note).toContain(base.reviewLink);
   });
 });

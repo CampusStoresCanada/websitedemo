@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadSeatHoldings } from "@/lib/conference/seats";
+import { declinedSeatIds, loadSeatHoldings, loadUsageIntents } from "@/lib/conference/seats";
 import { getBadgeScanRules } from "@/lib/conference/badges/rules";
 import {
   admittedDates,
@@ -53,6 +53,12 @@ export type BadgeRunSeat = {
   seatedAt: string | null;
   /** null when nobody has been named to this seat yet — print a blank. */
   person: BadgeRunPerson | null;
+  /**
+   * An empty seat the org said it will not use ("using 1 of 4"). No blank, not
+   * on the chase list, but still open at the desk — it is paid for, and a
+   * walk-up from that company can still be named to it. See declinedSeatIds.
+   */
+  declined: boolean;
 };
 
 export type BadgeRunType = {
@@ -123,7 +129,7 @@ export async function resolveBadgeRun(
   // Seats come from the canonical reader — see lib/conference/seats.ts. This
   // file is not exempt from the lint rule, which is the point: there is one
   // shape for "who holds which seat of what type", and this asks for it.
-  const [holdings, peopleRes] = await Promise.all([
+  const [holdings, peopleRes, intents] = await Promise.all([
     loadSeatHoldings(db, { conferenceId }),
     db
       .from("conference_people")
@@ -132,6 +138,7 @@ export async function resolveBadgeRun(
       )
       .eq("conference_id", conferenceId)
       .neq("assignment_status", "canceled"),
+    loadUsageIntents(db, conferenceId),
   ]);
 
   if (peopleRes.error) throw new Error(`Could not load the conference roster: ${peopleRes.error.message}`);
@@ -140,6 +147,7 @@ export async function resolveBadgeRun(
   const registrationTypes = [...byId.values()].filter((e) => e.kind === "registration");
   const peopleRows = (peopleRes.data ?? []) as Array<Record<string, unknown>>;
   const seats = holdings.seats;
+  const declined = declinedSeatIds(seats, intents);
 
   // Identity and place come from the records that own them.
   // ⛔ `contact_id` FIRST. Both columns point at `contacts`, but only
@@ -222,6 +230,7 @@ export async function resolveBadgeRun(
       organizationProvince: compact(orgById.get(organizationId)?.province),
       seatedAt: seat.seatedAt,
       person,
+      declined: declined.has(seatId),
     });
     seatsByEntity.set(entityId, list);
   }
@@ -344,9 +353,13 @@ export function namedSeats(run: BadgeRun): Array<{ type: BadgeRunType; seat: Bad
   );
 }
 
-/** Every seat nobody has been named to — a blank, if the desk wants blanks. */
+/**
+ * Every seat nobody has been named to and the org still means to fill — a
+ * blank, if the desk wants blanks. Declined seats are left out: Rains said
+ * "using 1 of 4" and was still down for three blanks and three chase lines.
+ */
 export function unnamedSeats(run: BadgeRun): Array<{ type: BadgeRunType; seat: BadgeRunSeat }> {
   return run.types.flatMap((type) =>
-    type.seats.filter((s) => !s.person).map((seat) => ({ type, seat }))
+    type.seats.filter((s) => !s.person && !s.declined).map((seat) => ({ type, seat }))
   );
 }

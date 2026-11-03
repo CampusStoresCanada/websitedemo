@@ -18,6 +18,9 @@ import { getPlatformIdentity } from "@/lib/data";
 import { canPauseCircleBadge, isCircleBadgePaused } from "@/lib/circle/badge-preference";
 import PresentationIndicator from "@/components/presentation/PresentationIndicator";
 import { getPresentationModeForViewer } from "@/lib/visibility/viewer";
+import { headers } from "next/headers";
+import { isEmbedded } from "@/lib/admin/nav";
+import { REQUEST_SEARCH_HEADER } from "@/lib/auth/request-path";
 
 export async function generateMetadata(): Promise<Metadata> {
   const identity = await getPlatformIdentity();
@@ -79,6 +82,24 @@ export default async function RootLayout({
   // True for any user who has a qualifying persona (all 4 journeys)
 
   const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
+
+  // A print sheet inside a War Room Preview (`?embed=1`): the sheet alone, no
+  // header, footer or toolkit. The search is only stamped on gated areas
+  // (proxy.ts), so this cannot strip chrome from a public page.
+  if (isEmbedded((await headers()).get(REQUEST_SEARCH_HEADER) ?? "")) {
+    return (
+      <html lang="en">
+        <head>
+          <link rel="stylesheet" href="https://use.typekit.net/uxh8ckq.css" />
+        </head>
+        <body className="antialiased bg-white">
+          <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
+            <main>{children}</main>
+          </AuthProvider>
+        </body>
+      </html>
+    );
+  }
 
 
   return (

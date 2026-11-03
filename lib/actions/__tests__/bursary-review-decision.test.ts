@@ -30,6 +30,19 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMoc
 vi.mock("@/lib/ops/audit", () => ({ logAuditEventSafe: auditMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidateMock }));
 
+const { sent } = vi.hoisted(() => ({
+  sent: [] as Array<{ templateKey: string; recipients: Array<{ to: string; variables: Record<string, unknown> }> }>,
+}));
+vi.mock("@/lib/comms/send", () => ({
+  sendTransactionalBatch: async (opts: (typeof sent)[number]) => {
+    sent.push(opts);
+    return opts.recipients.map(() => ({ success: true }));
+  },
+}));
+vi.mock("@/lib/supabase/user-lookup", () => ({
+  lookupUserEmailsByIds: async () => ({ "user-2": "Second@School.test" }),
+}));
+
 import { setBursaryApplicationStatus } from "../conference-bursary";
 
 const APP_ID = "app-1";
@@ -39,13 +52,29 @@ interface Captured {
   updateCalls: number;
 }
 
-function mockDb(existing: { status: string; conference_id: string; organization_id: string } | null) {
+/**
+ * Each table answers maybeSingle() from its own queue, in order. The
+ * application is read twice: once for the decision, once for who to tell.
+ */
+function mockDb(
+  existing: { status: string; conference_id: string; organization_id: string } | null,
+  forEmail: Record<string, unknown> | null = null
+) {
   const captured: Captured = { updateCalls: 0 };
+  const answers: Record<string, unknown[]> = {
+    conference_bursary_applications: [existing, forEmail],
+    profiles: [{ display_name: "Sam Second" }],
+    expense_programs: [{ opens_at: "2027-02-04T12:00:00+00:00", closes_at: "2027-03-07T08:00:00+00:00" }],
+  };
+  const chain = (table: string): Record<string, unknown> => {
+    const self: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "like", "in", "is"]) self[m] = () => self;
+    self.maybeSingle = () => Promise.resolve({ data: answers[table]?.shift() ?? null, error: null });
+    return self;
+  };
   const client = {
-    from: () => ({
-      select: () => ({
-        eq: () => ({ maybeSingle: () => Promise.resolve({ data: existing, error: null }) }),
-      }),
+    from: (table: string) => ({
+      ...chain(table),
       update: (payload: Record<string, unknown>) => {
         captured.update = payload;
         captured.updateCalls += 1;
@@ -61,6 +90,7 @@ const row = { status: "submitted", conference_id: "conf-27", organization_id: "o
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sent.length = 0;
   requireAdminMock.mockResolvedValue({ ok: true, ctx: { userId: "staff-1", globalRole: "admin" } });
 });
 
@@ -135,5 +165,53 @@ describe("recording a bursary decision", () => {
 
     expect(result.success).toBe(false);
     expect(db.updateCalls).toBe(0);
+  });
+});
+
+describe("telling the school", () => {
+  const forEmail = {
+    contact_name: "Pat Starter",
+    contact_email: "pat@school.test",
+    requested_by_user_id: "user-2",
+    organization: { name: "St. Example College" },
+    conference: { id: "conf-27", name: "Campus Stores Conference 2027", year: 2027, edition_code: "99" },
+  };
+
+  it("emails the request's contact and the person who submitted it when approved", async () => {
+    mockDb(row, forEmail);
+
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "approved" });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].templateKey).toBe("bursary_request_approved");
+    expect(sent[0].recipients.map((r) => r.to)).toEqual(["pat@school.test", "second@school.test"]);
+    const vars = sent[0].recipients[0].variables;
+    expect(vars.first_name).toBe("Pat");
+    expect(vars.organization_name).toBe("St. Example College");
+    expect(String(vars.request_url)).toMatch(/\/conference\/2027\/99\/bursary$/);
+    expect(vars.claims_open_date).toBe("February 4, 2027");
+    expect(sent[0].recipients[1].variables.first_name).toBe("Sam");
+  });
+
+  it("sends the denial template when denied", async () => {
+    mockDb(row, forEmail);
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "denied" });
+    expect(sent.map((s) => s.templateKey)).toEqual(["bursary_request_denied"]);
+  });
+
+  it("tells nobody when a decision is taken back to waiting, or marked fulfilled", async () => {
+    mockDb({ ...row, status: "approved" }, forEmail);
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "submitted" });
+    mockDb({ ...row, status: "approved" }, forEmail);
+    await setBursaryApplicationStatus({ applicationId: APP_ID, status: "fulfilled" });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("still records the decision when the email can't be sent", async () => {
+    const db = mockDb(row, null);
+    const result = await setBursaryApplicationStatus({ applicationId: APP_ID, status: "approved" });
+    expect(result.success).toBe(true);
+    expect(db.update?.status).toBe("approved");
+    expect(sent).toHaveLength(0);
   });
 });

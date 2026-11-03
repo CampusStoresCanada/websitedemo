@@ -83,3 +83,26 @@ export function isVisibleTo(c: VisibilitySource, viewer: Viewer): boolean {
 export function canPrint(c: VisibilitySource): boolean {
   return c.directory_visibility === "members" || c.directory_visibility === "public";
 }
+
+/**
+ * How many distinct people stand behind the contact rows on one address.
+ *
+ * Rows that share a Circle ID are one person: Circle holds one member per
+ * human, so the same `circle_id` on two rows is the same human recorded twice
+ * (an old prospect row left beside their partner row, say). Rows with no Circle
+ * ID can't be told apart, so each counts as its own person.
+ *
+ * Counting only. It never merges the rows.
+ */
+export function countPeopleBehindAddress(
+  rows: ReadonlyArray<{ circle_id?: string | null }>
+): number {
+  const circleIds = new Set<string>();
+  let unlinked = 0;
+  for (const r of rows) {
+    const id = r.circle_id?.trim();
+    if (id) circleIds.add(id);
+    else unlinked++;
+  }
+  return circleIds.size + unlinked;
+}

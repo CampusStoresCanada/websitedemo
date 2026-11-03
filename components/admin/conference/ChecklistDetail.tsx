@@ -2,16 +2,21 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import {
   saveChecklist,
   saveChecklistTask,
   deleteChecklistTask,
   saveChecklistCheckpoint,
   deleteChecklistCheckpoint,
-  runChecklistRemindersNow,
 } from "@/lib/actions/conference-checklists";
-import { CHECK_TYPES, type CheckType } from "@/lib/conference/checklist-check-types";
-import type { ChecklistRunResult } from "@/lib/conference/checklist-engine";
+import {
+  CHECK_TYPES,
+  STAFF_TASK_CHECK_TYPES,
+  type CheckType,
+  type StaffCheckType,
+  type TaskAudience,
+} from "@/lib/conference/checklist-check-types";
 import type { Tables } from "@/lib/database.types";
 import { parseUTC } from "@/lib/utils";
 import { sendChecklistTestEmail } from "@/lib/actions/checklist-test-send";
@@ -24,6 +29,11 @@ interface EntityOption {
   id: string;
   name: string;
   kind: string;
+}
+
+interface DocumentOption {
+  id: string;
+  label: string;
 }
 
 interface LogRow {
@@ -41,7 +51,7 @@ function one<T>(rel: T[] | T | null): T | null {
 const inputClass =
   "block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent";
 
-const CHECK_TYPE_LABELS: Record<CheckType, string> = {
+const CHECK_TYPE_LABELS: Record<CheckType | StaffCheckType, string> = {
   seat_assigned: "Seat assigned (for a catalog item)",
   entity_purchased: "Item purchased (for a catalog item)",
   travel_info_submitted: "Travel info submitted (per org, all attendees)",
@@ -51,6 +61,27 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   directory_profile_enriched: "Directory listing enriched (featured product, catalogue)",
   self_reported: "Self-reported — the org ticks it off (Stronco, Encore, anything off-site)",
   top_choices_declared: "Top choices declared (who they most want to meet)",
+  // CSC staff, in the War Room
+  badge_package_current: "Badge package made, with nobody added since",
+  schedule_promoted: "Meeting schedule promoted",
+  print_station_online: "Print station online",
+  test_check_ins_cleared: "Rehearsal check-ins cleared",
+  check_in_cards_printed: "Check-in cards printed",
+  door_lists_printed: "Door lists printed",
+  directory_printed: "Directory printed",
+  map_printed: "Map printed",
+  attendee_list_printed: "Attendee list printed",
+  schedule_emailed: "Everyone emailed their meeting schedule",
+  schedules_printed: "Individual schedules and suite door sheets printed",
+  meetings_confirmed: "Meetings so far confirmed (booth check-in cards)",
+  bursary_proof_sent: "CANCOLL bursary proof sent",
+};
+
+/** Who answers a task, in the editor's words. */
+const AUDIENCE_LABELS: Record<TaskAudience, string> = {
+  org: "An org admin, for the company",
+  person: "Each person, for themselves",
+  staff: "CSC staff, in the War Room",
 };
 
 // `self_reported` binds check_entity_id to the TASK's own id rather than a
@@ -66,6 +97,7 @@ export default function ChecklistDetail({
   tasks,
   checkpoints,
   entities,
+  documents,
   log,
 }: {
   conferenceId: string;
@@ -73,12 +105,12 @@ export default function ChecklistDetail({
   tasks: Task[];
   checkpoints: Checkpoint[];
   entities: EntityOption[];
+  /** The conference's Documents page — what a task can carry. */
+  documents: DocumentOption[];
   log: LogRow[];
 }) {
   const router = useRouter();
   const [taskForm, setTaskForm] = useState<TaskFormState>(null);
-  const [runResult, setRunResult] = useState<ChecklistRunResult | null>(null);
-  const [running, setRunning] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
@@ -105,6 +137,7 @@ export default function ChecklistDetail({
                 checklistId={checklist.id}
                 task={null}
                 entities={entities}
+                documents={documents}
                 nextSortOrder={tasks.length}
                 onClose={() => setTaskForm(null)}
                 onSaved={() => {
@@ -126,6 +159,7 @@ export default function ChecklistDetail({
                   checklistId={checklist.id}
                   task={task}
                   entities={entities}
+                  documents={documents}
                   nextSortOrder={task.sort_order}
                   onClose={() => setTaskForm(null)}
                   onSaved={() => {
@@ -147,7 +181,8 @@ export default function ChecklistDetail({
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">{task.description}</p>
                   <p className="mt-1 text-xs text-gray-400">
-                    {CHECK_TYPE_LABELS[task.check_type as CheckType]}
+                    {task.audience === "staff" ? "CSC staff · " : ""}
+                    {CHECK_TYPE_LABELS[task.check_type as CheckType | StaffCheckType]}
                     {task.check_entity_id && (
                       <> — {entities.find((e) => e.id === task.check_entity_id)?.name ?? "unknown item"}</>
                     )}
@@ -161,18 +196,16 @@ export default function ChecklistDetail({
                   >
                     Edit
                   </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!window.confirm(`Delete task "${task.name}"?`)) return;
+                  <ConfirmAction
+                    label="Delete"
+                    tone="danger"
+                    consequence={`Deletes the task "${task.name}" and every organization's answer to it.`}
+                    onConfirm={async () => {
                       const res = await deleteChecklistTask(task.id);
                       if (res.success) router.refresh();
-                      else window.alert(res.error);
+                      return res.success ? { success: true } : { success: false, error: res.error };
                     }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
+                  />
                 </div>
               </div>
             )
@@ -226,47 +259,13 @@ export default function ChecklistDetail({
         )}
       </section>
 
-      {/* Run now */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-900 mb-2">Send Reminders Now</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Runs the exact same evaluation the daily cron uses — for every active checklist across every conference, not
-          just this one. Anyone already logged for their due checkpoint, or already fully caught up, is skipped.
-        </p>
-        <button
-          type="button"
-          disabled={running}
-          onClick={async () => {
-            setRunning(true);
-            setRunResult(null);
-            const res = await runChecklistRemindersNow();
-            setRunning(false);
-            if (res.success) {
-              setRunResult(res.data);
-              router.refresh();
-            } else {
-              window.alert(res.error);
-            }
-          }}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-        >
-          {running ? "Running…" : "Send Reminders Now"}
-        </button>
-        {runResult && (
-          <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-            <p>
-              Checklists processed: {runResult.checklistsProcessed} · Orgs reminded: {runResult.orgsReminded}
-            </p>
-            {runResult.errors.length > 0 && (
-              <ul className="mt-1 text-red-600 list-disc list-inside">
-                {runResult.errors.map((e, i) => (
-                  <li key={i}>{e}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </section>
+      {/* Sending for real is Operate: the War Room's Messages tab, for this
+          conference only, with who-gets-what first (WAR_ROOM_OPERATE_PLAN §8.1).
+          The daily cron still sends on schedule. */}
+      <p className="text-xs text-gray-500">
+        Reminders go out on schedule every business day. To send this conference&apos;s now, use the War Room&apos;s
+        Messages tab.
+      </p>
 
       {/* Log */}
       {log.length > 0 && (
@@ -411,6 +410,7 @@ function TaskForm({
   checklistId,
   task,
   entities,
+  documents,
   nextSortOrder,
   onClose,
   onSaved,
@@ -418,13 +418,22 @@ function TaskForm({
   checklistId: string;
   task: Task | null;
   entities: EntityOption[];
+  documents: DocumentOption[];
   nextSortOrder: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(task?.name ?? "");
+  const [documentIds, setDocumentIds] = useState<string[]>(task?.document_ids ?? []);
   const [description, setDescription] = useState(task?.description ?? "");
-  const [checkType, setCheckType] = useState<CheckType>((task?.check_type as CheckType) ?? "seat_assigned");
+  const [audience, setAudience] = useState<TaskAudience>((task?.audience as TaskAudience | undefined) ?? "org");
+  const [checkType, setCheckType] = useState<CheckType | StaffCheckType>(
+    (task?.check_type as CheckType | StaffCheckType | undefined) ?? "seat_assigned"
+  );
+  // A staff task answers for the conference: it has its own checks, and no
+  // org to scope by.
+  const checkOptions: readonly (CheckType | StaffCheckType)[] =
+    audience === "staff" ? STAFF_TASK_CHECK_TYPES : CHECK_TYPES;
   const [checkEntityId, setCheckEntityId] = useState(task?.check_entity_id ?? "");
   /**
    * Who this task is for, when the check cannot work it out itself.
@@ -457,6 +466,8 @@ function TaskForm({
       id: task?.id,
       name,
       description,
+      audience,
+      documentIds,
       checkType,
       checkEntityId: checkEntityId || null,
       scopeEntityKind: scopeKind || null,
@@ -492,16 +503,39 @@ function TaskForm({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Who answers</label>
+          <select
+            value={audience}
+            onChange={(e) => {
+              const next = e.target.value as TaskAudience;
+              setAudience(next);
+              const options: readonly string[] = next === "staff" ? STAFF_TASK_CHECK_TYPES : CHECK_TYPES;
+              if (!options.includes(checkType)) setCheckType(next === "staff" ? "self_reported" : "seat_assigned");
+            }}
+            className={inputClass}
+          >
+            {(Object.keys(AUDIENCE_LABELS) as TaskAudience[]).map((a) => (
+              <option key={a} value={a}>
+                {AUDIENCE_LABELS[a]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Check</label>
-          <select value={checkType} onChange={(e) => setCheckType(e.target.value as CheckType)} className={inputClass}>
-            {CHECK_TYPES.map((ct) => (
+          <select
+            value={checkType}
+            onChange={(e) => setCheckType(e.target.value as CheckType | StaffCheckType)}
+            className={inputClass}
+          >
+            {checkOptions.map((ct) => (
               <option key={ct} value={ct}>
                 {CHECK_TYPE_LABELS[ct]}
               </option>
             ))}
           </select>
         </div>
-        {ENTITY_SCOPED.has(checkType) && (
+        {ENTITY_SCOPED.has(checkType as CheckType) && (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Catalog item</label>
             <select value={checkEntityId} onChange={(e) => setCheckEntityId(e.target.value)} className={inputClass}>
@@ -518,6 +552,7 @@ function TaskForm({
             </select>
           </div>
         )}
+        {audience !== "staff" ? (<>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Only ask orgs holding</label>
           <select value={scopeKind} onChange={(e) => setScopeKind(e.target.value)} className={inputClass}>
@@ -541,6 +576,34 @@ function TaskForm({
             ))}
           </select>
         </div>
+        </>) : null}
+      </div>
+      {/* What belongs to this task: a speech, a run-sheet. Picked from the
+          conference's Documents page — one place to keep a file. */}
+      <div>
+        <p className="mb-1 block text-xs font-medium text-gray-700">Documents</p>
+        {documents.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            None yet. Add them on the conference&apos;s Documents page, then attach them here.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {documents.map((doc) => (
+              <label key={doc.id} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={documentIds.includes(doc.id)}
+                  onChange={(e) =>
+                    setDocumentIds((ids) =>
+                      e.target.checked ? [...ids, doc.id] : ids.filter((id) => id !== doc.id)
+                    )
+                  }
+                />
+                {doc.label}
+              </label>
+            ))}
+          </div>
+        )}
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
@@ -625,17 +688,16 @@ function CheckpointList({
                 <td className="px-4 py-2 text-gray-900">{cp.days_before_deadline}</td>
                 <td className="px-4 py-2 text-gray-500">{targetDate(cp.days_before_deadline)}</td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={async () => {
+                  <ConfirmAction
+                    label="Remove"
+                    tone="danger"
+                    consequence={`Stops the reminder ${cp.days_before_deadline} days before the deadline.`}
+                    onConfirm={async () => {
                       const res = await deleteChecklistCheckpoint(cp.id);
                       if (res.success) onChanged();
-                      else window.alert(res.error);
+                      return res.success ? { success: true } : { success: false, error: res.error };
                     }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Remove
-                  </button>
+                  />
                 </td>
               </tr>
             ))}

@@ -13,6 +13,7 @@ import {
   isConferenceDeskStaff,
   requireConferenceDeskAccess,
   requireAuthenticated,
+  requireSuperAdmin,
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@/lib/actions/conference-commerce";
 import {
   requestBadgeReprint,
+  sendReprintToQueue,
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
 import { createKnownPerson, ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
@@ -511,7 +513,7 @@ export async function updateConferencePersonOps(
     return {
       success: false,
       error:
-        "Identity fields must be edited through applyCanonicalConferencePersonIdentityEdit (canonical-first), not conference projection ops update.",
+        "Identity fields are edited on their contact record (updateField, as the desk and War Room reprints do), not conference projection ops update.",
     };
   }
 
@@ -540,145 +542,6 @@ export async function updateConferencePersonOps(
     actorId: auth.ctx.userId,
     actorType: "user",
     details: { fields: Object.keys(sanitized) },
-  });
-
-  return { success: true };
-}
-
-export async function applyCanonicalConferencePersonIdentityEdit(
-  personId: string,
-  patch: {
-    displayName?: string | null;
-    contactEmail?: string | null;
-    roleTitle?: string | null;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireConferenceOpsAccess();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const db = createAdminClient();
-  const { data: person, error: personError } = await db
-    .from("conference_people")
-    .select(
-      "id, conference_id, organization_id, user_id, canonical_person_id, display_name, contact_email, role_title"
-    )
-    .eq("id", personId)
-    .maybeSingle();
-
-  if (personError || !person) {
-    return { success: false, error: personError?.message ?? "Conference person not found." };
-  }
-
-  const nextDisplayName = patch.displayName?.trim() || null;
-  const nextContactEmail = patch.contactEmail?.trim().toLowerCase() || null;
-  const nextRoleTitle = patch.roleTitle?.trim() || null;
-  const nowIso = new Date().toISOString();
-
-  const canonicalPersonId =
-    (person.canonical_person_id as string | null) ??
-    (person.user_id
-      ? (
-          await ensurePersonForUser({
-            userId: person.user_id,
-            organizationId: person.organization_id,
-            fallbackEmail: nextContactEmail ?? person.contact_email ?? null,
-          })
-        ).personId
-      : null);
-
-  if (person.user_id && nextDisplayName) {
-    await db
-      .from("profiles")
-      .update({ display_name: nextDisplayName, updated_at: nowIso })
-      .eq("id", person.user_id);
-
-    const { data: userRow } = await db
-      .from("users")
-      .select("person_id")
-      .eq("id", person.user_id)
-      .maybeSingle();
-    if (userRow?.person_id) {
-      const parts = splitName(nextDisplayName);
-      await db
-        .from("contacts")
-        .update({
-          first_name: parts.firstName || undefined,
-          last_name: parts.lastName || undefined,
-          updated_at: nowIso,
-        })
-        .eq("id", userRow.person_id);
-    }
-  }
-
-  if (canonicalPersonId && (nextContactEmail || nextRoleTitle || nextDisplayName)) {
-    const peoplePatch: Record<string, unknown> = { updated_at: nowIso };
-    if (nextDisplayName) {
-      const parts = splitName(nextDisplayName);
-      peoplePatch.first_name = parts.firstName || null;
-      peoplePatch.last_name = parts.lastName || null;
-    }
-    if (nextContactEmail) peoplePatch.work_email = nextContactEmail;
-    if (nextRoleTitle !== null) peoplePatch.role_title = nextRoleTitle;
-    await db.from("contacts").update(peoplePatch).eq("id", canonicalPersonId);
-  }
-
-  if (nextContactEmail || nextRoleTitle || nextDisplayName) {
-    const oldEmail = person.contact_email?.trim().toLowerCase() ?? null;
-    const contactPatch: Record<string, unknown> = { updated_at: nowIso };
-    if (nextDisplayName) contactPatch.name = nextDisplayName;
-    if (nextContactEmail) {
-      contactPatch.work_email = nextContactEmail;
-      contactPatch.email = nextContactEmail;
-    }
-    if (nextRoleTitle !== null) contactPatch.role_title = nextRoleTitle;
-
-    if (oldEmail) {
-      await db
-        .from("contacts")
-        .update(contactPatch)
-        .eq("organization_id", person.organization_id)
-        .or(`work_email.eq.${oldEmail},email.eq.${oldEmail}`);
-    } else if (person.display_name) {
-      await db
-        .from("contacts")
-        .update(contactPatch)
-        .eq("organization_id", person.organization_id)
-        .eq("name", person.display_name);
-    }
-  }
-
-  /**
-   * The write-back into conference_registrations (delegate_name, legal_name,
-   * delegate_email, delegate_title) is GONE with the column that reached it.
-   *
-   * It was mirroring identity into the v2 person-monolith — a table with 0 rows
-   * and no writer. `contacts` is the canonical identity store; conference_people
-   * carries the per-conference projection. Mirroring into a third place was the
-   * habit that made every one of these questions have three answers.
-   */
-
-  const projectionPatch: Record<string, unknown> = { updated_at: nowIso };
-  if (nextDisplayName) projectionPatch.display_name = nextDisplayName;
-  if (nextContactEmail) projectionPatch.contact_email = nextContactEmail;
-  if (nextRoleTitle !== null) projectionPatch.role_title = nextRoleTitle;
-  if (canonicalPersonId) projectionPatch.canonical_person_id = canonicalPersonId;
-  await db.from("conference_people").update(projectionPatch).eq("id", personId);
-
-  await logAuditEventSafe({
-    action: "conference_person_identity_edit_canonical",
-    entityType: "conference_people",
-    entityId: personId,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      conferenceId: person.conference_id,
-      organizationId: person.organization_id,
-      updated: {
-        displayName: Boolean(nextDisplayName),
-        contactEmail: Boolean(nextContactEmail),
-        roleTitle: patch.roleTitle !== undefined,
-      },
-    },
   });
 
   return { success: true };
@@ -1235,6 +1098,94 @@ export async function reprintConferenceBadge(
       qrPayload: reprintJob.data.qrPayload,
       labelPrintable: plan.transport === "ql_label",
     },
+  };
+}
+
+/**
+ * Print one person's badge: the one engine (WAR_ROOM_OPERATE_PLAN §7). The desk,
+ * the War Room and anything after them call this, never the two steps apart.
+ *
+ * It is the desk's own sequence, which was the only one that worked: plan the
+ * job for the card in hand, and when that makes a QL sticker, send it straight
+ * to the print station (one tap prints, Stephen 2026-10-21). Badge Ops' Quick
+ * Reprint and the War Room drawer did the first step only — every reprint was
+ * planned as a full colour badge and none reached the station.
+ *
+ * ⛔ `stockInHand` is required: "none" is a real answer (no card, full badge),
+ * and a caller that did not ask has not earned the guess.
+ */
+export async function printBadge(params: {
+  conferenceId: string;
+  personId: string;
+  reason: BadgeReprintReason;
+  note?: string | null;
+  stockInHand: BadgeStock;
+  /** The print station this desk prints to (sendReprintToQueue); omit for "any". */
+  stationId?: string | null;
+}): Promise<
+  | { success: false; error: string }
+  | {
+      success: true;
+      data: {
+        jobId: string;
+        /** A QL sticker. False: the full colour badge, which the QL cannot print. */
+        labelPrintable: boolean;
+        /** On the print station's queue. */
+        queued: boolean;
+        stationOnline: boolean;
+        /** The station it was routed to, when the desk picked one. */
+        stationLabel: string | null;
+        /** Planned, but the queue refused it: the desk can retry the send. */
+        queueError: string | null;
+        /** The full colour badge's file, for a colour printer. Null for a sticker. */
+        artifactUrl: string | null;
+      };
+    }
+> {
+  const printed = await reprintConferenceBadge(
+    params.personId,
+    params.reason,
+    params.note ?? null,
+    params.stockInHand === "none" ? undefined : params.stockInHand
+  );
+  if (!printed.success || !printed.data) {
+    return { success: false, error: printed.error ?? "The badge could not be printed." };
+  }
+  const jobId = printed.data.badgePrintJobId;
+  if (!printed.data.labelPrintable) {
+    // requestBadgeReprint's own artifact for a "pdf" job.
+    const { data: job } = await createAdminClient()
+      .from("badge_print_jobs")
+      .select("output_artifact_url")
+      .eq("id", jobId)
+      .maybeSingle();
+    return {
+      success: true,
+      data: {
+        jobId,
+        labelPrintable: false,
+        queued: false,
+        stationOnline: false,
+        stationLabel: null,
+        queueError: null,
+        artifactUrl: (job?.output_artifact_url as string | null) ?? null,
+      },
+    };
+  }
+  const sent = await sendReprintToQueue({ conferenceId: params.conferenceId, jobId, stationId: params.stationId });
+  return {
+    success: true,
+    data: sent.success
+      ? {
+          jobId,
+          labelPrintable: true,
+          queued: true,
+          stationOnline: sent.data.stationOnline,
+          stationLabel: sent.data.stationLabel,
+          queueError: null,
+          artifactUrl: null,
+        }
+      : { jobId, labelPrintable: true, queued: false, stationOnline: false, stationLabel: null, queueError: sent.error, artifactUrl: null },
   };
 }
 
@@ -2043,4 +1994,112 @@ export async function recordNameOnlyWalkUp(params: {
   }
 
   return { success: true, data: { canonicalPersonId: created.personId, adminsTold } };
+}
+
+export type RosterExport = "summary" | "dietary" | "accessibility" | "emergency";
+
+type RosterPersonFields = {
+  contact_email: string | null;
+  mobile_phone: string | null;
+  dietary_restrictions: string | null;
+  accessibility_needs: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  checked_in_at: string | null;
+  check_in_is_test: boolean | null;
+};
+
+/**
+ * The War Room's Data exports (WAR_ROOM_OPERATE_PLAN §5): a CSV of the live
+ * roster. The Registrations page's exports read `conference_registrations`,
+ * which nothing has written since registrations moved to seats, so every file
+ * they made was empty (2026-10-26).
+ *
+ * ⛔ Who is attending comes from loadDoorRoster, the attendee list's own
+ * reader, in the viewer's name order; the fields come from each person's
+ * conference record. Dietary, accessibility and emergency files hold only the
+ * people with something to say. Every export is audited, as before.
+ */
+export async function exportConferenceRoster(
+  conferenceId: string,
+  kind: RosterExport
+): Promise<{ success: true; data: { filename: string; csv: string; rows: number } } | { success: false; error: string }> {
+  const auth = await requireSuperAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+
+  const [{ loadDoorRoster }, { readPreferences }, { parsePrintSort, PRINT_SORT_PREFERENCE_KEY }] = await Promise.all([
+    import("@/lib/conference/attendance"),
+    import("@/lib/profile/preferences"),
+    import("@/lib/conference/badges/arrangement"),
+  ]);
+  const sort = parsePrintSort((await readPreferences(auth.ctx.userId))[PRINT_SORT_PREFERENCE_KEY]);
+  const roster = await loadDoorRoster(db, conferenceId, null, sort);
+
+  const { data: people, error } = await db
+    .from("conference_people")
+    .select(
+      "id, contact_email, mobile_phone, dietary_restrictions, accessibility_needs, emergency_contact_name, emergency_contact_phone, checked_in_at, check_in_is_test"
+    )
+    .eq("conference_id", conferenceId)
+    .neq("assignment_status", "canceled");
+  if (error) return { success: false, error: error.message };
+  // A seat's holder IS the conference_people row (loadSeatHoldings: holder_person_id = its id).
+  const byPerson = new Map((people ?? []).map((p) => [p.id as string, p as RosterPersonFields]));
+
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+  type Row = { name: string; organizationName: string };
+  const columns: Record<RosterExport, { header: string[]; row: (r: Row, p: RosterPersonFields | undefined) => string[] | null }> = {
+    summary: {
+      header: ["Name", "Organization", "Email", "Mobile", "Checked in"],
+      row: (r, p) => [
+        r.name,
+        r.organizationName,
+        text(p?.contact_email),
+        text(p?.mobile_phone),
+        p?.checked_in_at && !p.check_in_is_test ? "Yes" : "No",
+      ],
+    },
+    dietary: {
+      header: ["Name", "Organization", "Dietary needs"],
+      row: (r, p) => (text(p?.dietary_restrictions) ? [r.name, r.organizationName, text(p?.dietary_restrictions)] : null),
+    },
+    accessibility: {
+      header: ["Name", "Organization", "Accessibility needs"],
+      row: (r, p) => (text(p?.accessibility_needs) ? [r.name, r.organizationName, text(p?.accessibility_needs)] : null),
+    },
+    emergency: {
+      header: ["Name", "Organization", "Mobile", "Emergency contact", "Emergency phone"],
+      row: (r, p) =>
+        text(p?.emergency_contact_name) || text(p?.emergency_contact_phone)
+          ? [r.name, r.organizationName, text(p?.mobile_phone), text(p?.emergency_contact_name), text(p?.emergency_contact_phone)]
+          : null,
+    },
+  };
+
+  // Quoted, and a leading = + - @ is defused so a spreadsheet never runs a cell.
+  const cell = (value: string) => `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replaceAll('"', '""')}"`;
+  const spec = columns[kind];
+  const lines = roster
+    .map((r) => spec.row(r, byPerson.get(r.personId)))
+    .filter((row): row is string[] => row !== null)
+    .map((row) => row.map(cell).join(","));
+
+  await logAuditEventSafe({
+    action: "conference_registration_exported",
+    entityType: "conference_instance",
+    entityId: conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { preset: kind, row_count: lines.length, source: "war_room_roster" },
+  });
+
+  return {
+    success: true,
+    data: {
+      filename: `conference-${kind}-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv: [spec.header.map(cell).join(","), ...lines].join("\n"),
+      rows: lines.length,
+    },
+  };
 }

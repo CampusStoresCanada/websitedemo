@@ -3,6 +3,8 @@ import {
   arrangeBadges,
   defaultArrangement,
   normalizeArrangement,
+  parsePrintSort,
+  sortNames,
   type ArrangeableBadge,
 } from "../arrangement";
 
@@ -148,5 +150,26 @@ describe("normalizeArrangement", () => {
     expect(a.sections[0].label).toBe("Mine");
     expect(a.sections[0].sortBy).toBe("person_last_name");
     expect(a.sections[0].direction).toBe("desc");
+  });
+});
+
+describe("a printed name list in the viewer's own order", () => {
+  const people = [
+    { firstName: "Zoe", lastName: "Adams", displayName: "Zoe Adams", organizationName: "Beta U" },
+    { firstName: "Al", lastName: "Young", displayName: "Al Young", organizationName: "Beta U" },
+    { firstName: "Mo", lastName: "Baker", displayName: "Mo Baker", organizationName: "Alpha College" },
+  ];
+  const names = (rows: typeof people) => rows.map((r) => r.displayName);
+
+  it("sorts by first name, last name, or company with last name inside", () => {
+    expect(names(sortNames(people, "person_first_name"))).toEqual(["Al Young", "Mo Baker", "Zoe Adams"]);
+    expect(names(sortNames(people, "person_last_name"))).toEqual(["Zoe Adams", "Mo Baker", "Al Young"]);
+    expect(names(sortNames(people, "organization_name"))).toEqual(["Mo Baker", "Zoe Adams", "Al Young"]);
+  });
+
+  it("falls back to last name for anything unrecognised", () => {
+    expect(parsePrintSort("person_first_name")).toBe("person_first_name");
+    expect(parsePrintSort("hotel_room_number")).toBe("person_last_name");
+    expect(parsePrintSort(undefined)).toBe("person_last_name");
   });
 });

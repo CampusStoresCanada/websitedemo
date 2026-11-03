@@ -8,6 +8,7 @@ import { personReachesEntity } from "@/lib/conference/badges/checkin";
 import { doorWindow, type DoorEvent } from "@/lib/conference/door";
 import { publicScanBase } from "@/lib/conference/badges/tokens";
 import { loadMemberMap } from "@/lib/conference/member-map";
+import { fieldSaysYes } from "@/lib/conference/entity-kinds";
 
 /**
  * Check-in cards (Stephen, 2026-10-21): a printed QR at a place. Scan it while
@@ -36,9 +37,7 @@ const MEETING_MARGIN_MS = 15 * 60 * 1000;
 
 /** An organiser turns an event's card on in the Build tab: Check-in card = yes. */
 export function takesCheckInCards(attributes: Record<string, unknown> | null | undefined): boolean {
-  const raw = attributes?.check_in_card;
-  if (raw === true) return true;
-  return typeof raw === "string" && ["yes", "y", "true", "on", "1"].includes(raw.trim().toLowerCase());
+  return fieldSaysYes(attributes?.check_in_card);
 }
 
 /** What a card's QR opens. Signed-in only, like a badge's. */
@@ -157,7 +156,9 @@ export async function resolveBoothScan(suiteId: string, userId: string, now: Dat
       .from("conference_check_in_events")
       .select("person_id, confirmed_by")
       .eq("schedule_id", assignment.scheduleId)
-      .eq("is_test", false);
+      .eq("is_test", false)
+      // Scans only: a staff ruling belongs to staff views (schedule-ops).
+      .in("confirmed_by", ["attendee", "exhibitor"]);
     const confirmations = rows ?? [];
 
     if (agenda.data.meetingSeatId && agenda.data.meetingSeatId === assignment.exhibitorSeatId) {

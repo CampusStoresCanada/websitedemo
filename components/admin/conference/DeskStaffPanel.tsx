@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { addDeskStaff, type DeskStaffRow } from "@/lib/actions/conference-desk-staff";
 import { endAppointment, searchPeopleForAppointment } from "@/lib/actions/capability-appointments";
 import { clearDeskPin } from "@/lib/actions/desk-pin";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 /**
  * Who can run this conference's check-in desk.
@@ -86,23 +87,23 @@ export default function DeskStaffPanel({
     setMessage(null);
     const result = await endAppointment(assignmentId);
     setBusy(null);
-    if (!result.success) setMessage({ text: result.error ?? "Could not remove them.", ok: false });
-    else router.refresh();
+    if (!result.success) return { success: false, error: result.error ?? "Could not remove them." };
+    router.refresh();
+    return { success: true };
   };
 
   // Forgotten PIN, or someone else learned it: clear it, and they choose a new
   // one (after a password sign-in) the next time they open the desk.
   const resetPin = async (r: DeskStaffRow) => {
-    if (!r.profileId) return;
+    if (!r.profileId) return { success: false, error: "They have no account to clear a PIN on." };
     setBusy(`pin:${r.assignmentId}`);
     setMessage(null);
     const result = await clearDeskPin({ conferenceId, profileId: r.profileId });
     setBusy(null);
-    if (!result.success) setMessage({ text: result.error, ok: false });
-    else {
-      setMessage({ text: `${r.name}'s PIN is cleared. They choose a new one next time they open the desk.`, ok: true });
-      router.refresh();
-    }
+    if (!result.success) return { success: false, error: result.error };
+    setMessage({ text: `${r.name}'s PIN is cleared. They choose a new one next time they open the desk.`, ok: true });
+    router.refresh();
+    return { success: true };
   };
 
   const when = (r: DeskStaffRow) =>
@@ -285,25 +286,22 @@ export default function DeskStaffPanel({
                 </div>
                 <div className="flex shrink-0 items-center gap-4">
                 {r.hasPin ? (
-                  <button
-                    type="button"
-                    onClick={() => void resetPin(r)}
-                    disabled={busy === `pin:${r.assignmentId}`}
-                    className="text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50"
-                  >
-                    {busy === `pin:${r.assignmentId}` ? "…" : "Reset PIN"}
-                  </button>
+                  <ConfirmAction
+                    label="Reset PIN"
+                    consequence={`Clears ${r.name}'s PIN. They sign in with their password and choose a new one next time they open the desk.`}
+                    disabled={busy !== null}
+                    onConfirm={() => resetPin(r)}
+                  />
                 ) : (
                   <span className="text-xs text-gray-400">No PIN yet</span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void remove(r.assignmentId)}
-                  disabled={busy === r.assignmentId}
-                  className="shrink-0 text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
-                >
-                  {busy === r.assignmentId ? "…" : "Remove"}
-                </button>
+                <ConfirmAction
+                  label="Remove"
+                  tone="danger"
+                  consequence={`Ends ${r.name}'s check-in desk access now. A desk they are signed in to stops working for them.`}
+                  disabled={busy !== null}
+                  onConfirm={() => remove(r.assignmentId)}
+                />
                 </div>
               </li>
             ))}

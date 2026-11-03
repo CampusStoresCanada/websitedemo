@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import BusyButton from "./BusyButton";
 import {
-  seedStaffFromContacts,
   addStaff,
   updateStaff,
   removeStaff,
@@ -24,30 +23,31 @@ import { EMPLOYMENT_TYPES } from "@/lib/benchmarking/systems";
  */
 export default function StaffingEditor({
   benchmarkingId,
-  initialStaff,
+  /*
+    ⛔ Held by the form, not here — this section unmounts when the store leaves
+    it. See the note on the state in BenchmarkingSurveyForm.
+  */
+  staff,
+  onStaffChange: setStaff,
   isReadOnly,
 }: {
   benchmarkingId: string;
-  initialStaff: StaffRow[];
+  staff: StaffRow[];
+  onStaffChange: Dispatch<SetStateAction<StaffRow[]>>;
   isReadOnly: boolean;
 }) {
-  const [staff, setStaff] = useState<StaffRow[]>(initialStaff);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isReadOnly || initialStaff.length > 0) return;
-    let cancelled = false;
-    void seedStaffFromContacts(benchmarkingId).then((r) => {
-      // ⛔ Never a page reload. Saves in this form are debounced by 800ms, so
-      // reloading to reveal seeded rows can discard the figure somebody just
-      // typed in another section.
-      if (!cancelled && r.rows.length > 0) setStaff(r.rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [benchmarkingId, isReadOnly, initialStaff.length]);
+  /*
+    ⛔ Seeding the team from the store's contacts moved up to the form, which
+    mounts once.
+
+    Run from here it re-ran every time the store opened §6, gated on a
+    page-load snapshot that said "no staff yet" all afternoon. The seeder skips
+    contacts that already have a row, so what came back each time was precisely
+    the people the store had deleted on purpose.
+  */
 
   const patch = (id: string, fn: (s: StaffRow) => StaffRow) =>
     setStaff((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));

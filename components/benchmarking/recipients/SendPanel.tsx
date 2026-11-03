@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { previewSend } from "@/lib/actions/benchmarking-recipients";
 import { useSearchParams } from "next/navigation";
+import { BENCHMARKING_REMINDERS } from "@/lib/benchmarking/lifecycle";
 
 /**
  * The control that puts mail into 52 real inboxes.
@@ -40,6 +41,9 @@ const BLOCKED_COPY: Record<string, string> = {
   already_submitted: "already filed",
   never_invited: "never received the invitation",
   no_address: "no address on file",
+  // The gap comes from the config, not a literal, so changing the cadence
+  // cannot leave this sentence claiming a number the guard no longer uses.
+  reminded_recently: `already chased in the last ${BENCHMARKING_REMINDERS.minimumGapDays} days`,
 };
 
 export default function SendPanel({

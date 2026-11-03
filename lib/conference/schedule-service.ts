@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadSeatHoldings } from "./seats";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { deriveAgenda } from "@/lib/conference/agenda";
+import { effectiveAttributes } from "@/lib/conference/entity-graph";
+import { isNotPublic } from "@/lib/conference/entity-kinds";
 import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 
 export type ConferenceScheduleViewerRole =
@@ -178,7 +180,19 @@ export async function getConferenceScheduleTimeline(
 
   // The agenda is visible to everyone (admin sees all regardless). `who`
   // audiences ride along as metadata for admin lenses, not as a row-level gate.
-  const agenda = deriveAgenda(entities, timeZone);
+  // The one exception is "Not public": the public view (observer) leaves it out,
+  // and so anything nested inside it. Each person's own page still filters the
+  // full list by what they hold (person-agenda.ts).
+  const byId = new Map(entities.map((e) => [e.id, e] as const));
+  const hidden = new Set<string>();
+  const agenda = deriveAgenda(entities, timeZone).filter((a) => {
+    const entity = byId.get(a.id);
+    const notPublic =
+      options.viewerRole === "observer" &&
+      ((entity && isNotPublic(effectiveAttributes(entity, byId))) || (a.parentId != null && hidden.has(a.parentId)));
+    if (notPublic) hidden.add(a.id);
+    return !notPublic;
+  });
   const programItems: ConferenceScheduleItem[] = agenda.map((a, idx) => {
     const timed = a.startTime != null;
     return {

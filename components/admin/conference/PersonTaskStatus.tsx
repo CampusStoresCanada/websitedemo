@@ -35,7 +35,11 @@ export default function PersonTaskStatus({ status }: { status: PersonTaskStatus 
         <ul className="space-y-2">
           {tasks.map((task) => {
             const answered = task.done + task.notApplicable;
-            const pct = population > 0 ? Math.round((answered / population) * 100) : 0;
+            // Everyone the task is ASKED of: the whole conference for most, but
+            // only the funded delegates for the CANCOLL consent. Dividing by the
+            // conference read "0 of 37" for a task one person owes.
+            const askedOf = answered + task.pending;
+            const pct = askedOf > 0 ? Math.round((answered / askedOf) * 100) : 0;
             return (
               <li
                 key={task.taskId}
@@ -47,7 +51,7 @@ export default function PersonTaskStatus({ status }: { status: PersonTaskStatus 
                     <span className="ml-2 text-xs text-gray-400">{task.checklistName}</span>
                   </div>
                   <span className="text-sm text-gray-600">
-                    {answered} of {population} answered
+                    {answered} of {askedOf} answered
                     {task.pending > 0 && (
                       <span className="ml-2 font-semibold text-amber-700">
                         {task.pending} outstanding

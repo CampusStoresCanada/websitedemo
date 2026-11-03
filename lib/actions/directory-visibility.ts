@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { DirectoryVisibility } from "@/lib/contacts/visibility";
+import { countPeopleBehindAddress, type DirectoryVisibility } from "@/lib/contacts/visibility";
 
 /**
  * A person sets their own listing visibility.
@@ -14,8 +14,9 @@ import type { DirectoryVisibility } from "@/lib/contacts/visibility";
  * which is precisely the decision that belongs to nobody but its owner.
  *
  * So: a linked profile is proof. A bare email match is proof only when that
- * address belongs to exactly one contact row. Anything ambiguous is refused
- * and routed to a human, because guessing here guesses at someone's privacy.
+ * address belongs to exactly one person (rows sharing a Circle ID are one
+ * person; see `countPeopleBehindAddress`). Anything ambiguous is refused and
+ * routed to a human, because guessing here guesses at someone's privacy.
  */
 async function assertOwnership(
   db: ReturnType<typeof createAdminClient>,
@@ -41,12 +42,16 @@ async function assertOwnership(
   }
 
   // Shared address: more than one human behind it. Refuse rather than guess.
-  const { count } = await db
+  const { data: sharers, error: sharersError } = await db
     .from("contacts")
-    .select("id", { count: "exact", head: true })
+    .select("id, circle_id")
     .or(`email.eq.${mine},work_email.eq.${mine}`)
     .is("archived_at", null);
-  if ((count ?? 0) > 1) {
+  if (sharersError) {
+    console.error("[directory-visibility] address lookup failed:", sharersError);
+    return { ok: false, error: "Could not check that listing. Please try again." };
+  }
+  if (countPeopleBehindAddress(sharers ?? []) > 1) {
     return {
       ok: false,
       error:

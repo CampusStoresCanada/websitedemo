@@ -41,9 +41,86 @@ export type ScheduleOpsAssignment = {
   exhibitorOrganizationName: string;
   delegateSeatIds: string[];
   delegateNames: string[];
+  /** Each delegate seat's holder (conference_people id), aligned with delegateSeatIds. */
+  delegatePersonIds: Array<string | null>;
   status: string;
   isManual: boolean;
+  /** Who has confirmed it happened (booth check-in card). Active run only; null for a draft. */
+  confirmation: MeetingConfirmation | null;
 };
+
+/**
+ * Whether a meeting happened, from its booth check-in card scans.
+ *
+ * ⛔ One reader for the grid, the War Room and the CANCOLL bursary report, so
+ * the three cannot count differently. Each side's scan is its own row
+ * (check-in-cards.ts); a delegate is confirmed by either side. Rehearsal (test)
+ * scans never count.
+ *
+ * A STAFF RULING (confirmed_by = "staff") is the last word on one delegate:
+ * attended, absent, or excused when the partner or CSC did not show (CANCOLL
+ * MOU 8.6). The newest ruling wins over every scan, so `confirmedPersonIds` is
+ * the answer to "did they attend", and byAttendee/byExhibitor stay what the
+ * scans said.
+ */
+export type MeetingRuling = "attended" | "absent" | "excused";
+
+export type MeetingConfirmation = {
+  byAttendee: boolean;
+  byExhibitor: boolean;
+  /** The delegates (conference_people ids) who attended: scans, then rulings. */
+  confirmedPersonIds: string[];
+  /** The newest staff ruling per delegate (conference_people id). */
+  rulings: Record<string, { ruling: MeetingRuling; note: string | null }>;
+};
+
+export async function loadMeetingConfirmations(
+  db: ReturnType<typeof createAdminClient>,
+  scheduleIds: readonly string[]
+): Promise<Map<string, MeetingConfirmation>> {
+  const out = new Map<string, MeetingConfirmation>();
+  const ids = [...new Set(scheduleIds)];
+  // Chunked: a full day's run is hundreds of ids, too long for one URL.
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await db
+      .from("conference_check_in_events")
+      .select("schedule_id, confirmed_by, person_id, ruling, ruling_note")
+      .eq("is_test", false)
+      .in("schedule_id", ids.slice(i, i + 200))
+      // Oldest first, so a later ruling overwrites an earlier one.
+      .order("checked_in_at", { ascending: true });
+    if (error) throw new Error(`Could not read meeting confirmations: ${error.message}`);
+    for (const row of data ?? []) {
+      if (!row.schedule_id) continue;
+      const entry = out.get(row.schedule_id) ?? {
+        byAttendee: false,
+        byExhibitor: false,
+        confirmedPersonIds: [],
+        rulings: {},
+      };
+      if (row.confirmed_by === "staff") {
+        if (row.person_id && row.ruling) {
+          entry.rulings[row.person_id] = { ruling: row.ruling as MeetingRuling, note: row.ruling_note ?? null };
+        }
+      } else {
+        if (row.confirmed_by === "attendee") entry.byAttendee = true;
+        if (row.confirmed_by === "exhibitor") entry.byExhibitor = true;
+        if (row.person_id && !entry.confirmedPersonIds.includes(row.person_id)) entry.confirmedPersonIds.push(row.person_id);
+      }
+      out.set(row.schedule_id, entry);
+    }
+  }
+  for (const entry of out.values()) {
+    for (const [personId, { ruling }] of Object.entries(entry.rulings)) {
+      const scanned = entry.confirmedPersonIds.includes(personId);
+      if (ruling === "attended" && !scanned) entry.confirmedPersonIds.push(personId);
+      if (ruling !== "attended" && scanned) {
+        entry.confirmedPersonIds = entry.confirmedPersonIds.filter((id) => id !== personId);
+      }
+    }
+  }
+  return out;
+}
 
 export type ScheduleOpsSummary = {
   generatedAt: string;
@@ -232,14 +309,25 @@ export async function loadScheduleOpsSummary(
       exhibitorOrganizationName: exhibitorOrgName,
       delegateSeatIds: delegateIds,
       delegateNames,
+      delegatePersonIds: delegateIds.map((id) => seatById.get(id)?.holderPersonId ?? null),
       status: row.status,
       isManual: row.is_manual === true,
+      confirmation: null,
     };
   };
 
   const enrichedAssignments = schedules
     .map(mapAssignment)
     .filter((value): value is ScheduleOpsAssignment => Boolean(value));
+
+  // Only the published run can have happened.
+  if (activeRun) {
+    const confirmations = await loadMeetingConfirmations(
+      adminClient,
+      enrichedAssignments.filter((row) => row.schedulerRunId === activeRun.id).map((row) => row.id)
+    );
+    for (const row of enrichedAssignments) row.confirmation = confirmations.get(row.id) ?? null;
+  }
 
   const activeAssignments = activeRun
     ? enrichedAssignments.filter((row) => row.schedulerRunId === activeRun.id)
@@ -271,5 +359,57 @@ export async function loadScheduleOpsSummary(
     selectedAssignments,
     activeRunManualCount: activeAssignments.filter((a) => a.isManual).length,
   };
+}
+
+export type ScheduleDiffRow = {
+  slotId: string;
+  dayNumber: number;
+  slotNumber: number;
+  startTime: string;
+  suiteNumber: number | null;
+  change: "added" | "removed" | "replaced";
+  live: string;
+  draft: string;
+};
+
+function assignmentLabel(assignment: ScheduleOpsAssignment | undefined): string {
+  if (!assignment) return "—";
+  return `${assignment.exhibitorOrganizationName} (${assignment.delegateNames.join(", ") || "no delegates"})`;
+}
+
+function assignmentSignature(assignment: ScheduleOpsAssignment | undefined): string {
+  if (!assignment) return "";
+  return `${assignment.exhibitorSeatId}|${[...assignment.delegateSeatIds].sort().join(",")}`;
+}
+
+/**
+ * What publishing the selected run would change, meeting by meeting: added,
+ * removed or replaced against the live (active) run. Moved from Schedule Ops,
+ * which worked it out in the browser, so the War Room's Publish preview reads
+ * the same answer.
+ */
+export function diffAgainstActive(summary: ScheduleOpsSummary): ScheduleDiffRow[] {
+  const live = new Map(summary.activeAssignments.map((a) => [a.meetingSlotId, a] as const));
+  const draft = new Map(summary.selectedAssignments.map((a) => [a.meetingSlotId, a] as const));
+  const suiteNumber = new Map(summary.suites.map((s) => [s.id, s.suiteNumber] as const));
+  const rows: ScheduleDiffRow[] = [];
+  for (const slot of summary.slots) {
+    const before = live.get(slot.id);
+    const after = draft.get(slot.id);
+    if (assignmentSignature(before) === assignmentSignature(after)) continue;
+    rows.push({
+      slotId: slot.id,
+      dayNumber: slot.dayNumber,
+      slotNumber: slot.slotNumber,
+      startTime: slot.startTime,
+      suiteNumber: suiteNumber.get(slot.suiteId) ?? null,
+      change: !before ? "added" : !after ? "removed" : "replaced",
+      live: assignmentLabel(before),
+      draft: assignmentLabel(after),
+    });
+  }
+  return rows.sort(
+    (a, b) => a.dayNumber - b.dayNumber || a.slotNumber - b.slotNumber || (a.suiteNumber ?? 0) - (b.suiteNumber ?? 0)
+  );
 }
 

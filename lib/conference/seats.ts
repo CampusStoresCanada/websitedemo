@@ -28,9 +28,11 @@ export type SeatHolding = {
   organizationId: string;
   seatIndex: number | null;
   /**
-   * The balance (one purchase line) the seat came from. Widened in for a
-   * registration's included events, which are the seats minted by the SAME
-   * purchase (included-seats.ts).
+   * The balance (one purchase line) the seat came from, which leads to the
+   * purchase and the order that paid for it. Widened in for a registration's
+   * included events, which are the seats minted by the SAME purchase
+   * (included-seats.ts), and to refund the right order when a paid seat is
+   * switched to the CANCOLL-funded registration.
    */
   balanceId: string | null;
   /** The catalogue thing this seat is for. */
@@ -89,6 +91,34 @@ export type SeatQuery = {
   /** Only these seats. */
   seatIds?: string[];
 };
+
+export type UsageIntentRow = {
+  intended_quantity: number;
+  declared_against_total: number;
+};
+
+/**
+ * How many of one entity's seats the org has told us it will fill, or null
+ * when it has not said (or what it said no longer applies).
+ *
+ * THE rule for "bought 4, sending 1" — the checklist, the org page's staffing
+ * banner, the headcount and the badge run all read it here. Before this it was
+ * written out twice and ignored in three places, so Rains declared "using 1 of
+ * 4" and the org page kept asking them to name three more people.
+ *
+ * A later purchase can raise the real count past what they saw when they
+ * declared — said "using 1 of 4", then bought 2 more, now holding 6. The old
+ * "1" was not a decision about the extra seats, so it is stale: null, and the
+ * caller falls back to every seat until they re-declare. Capped at the real
+ * count so a refund can never make the number impossible to meet.
+ */
+export function declaredSeatsToFill(
+  totalSeats: number,
+  intent: UsageIntentRow | null | undefined
+): number | null {
+  if (!intent || totalSeats > intent.declared_against_total) return null;
+  return Math.min(intent.intended_quantity, totalSeats);
+}
 
 // The shape of the client this needs. Kept structural rather than importing a
 // Supabase type so callers can pass an admin client or a scoped one.
@@ -220,6 +250,73 @@ export async function loadSeatHoldings(
   }
 
   return { seats: out, entitiesById: byId };
+}
+
+/**
+ * Every "using N of M" declaration for a conference, keyed `${orgId}|${entityId}`
+ * — the shape dropDeclinedSeats takes. Throws on a read failure: an unreadable
+ * declaration list silently becoming "nobody declared" would put the declined
+ * seats back on the headcount.
+ */
+export async function loadUsageIntents(
+  db: SeatDb,
+  conferenceId: string,
+  organizationId?: string
+): Promise<Map<string, UsageIntentRow>> {
+  let intentQuery = db
+    .from("conference_entity_usage_intents")
+    .select("organization_id, entity_id, intended_quantity, declared_against_total")
+    .eq("conference_id", conferenceId);
+  if (organizationId) intentQuery = intentQuery.eq("organization_id", organizationId);
+  const res = await intentQuery;
+  if (res.error) throw new Error(`Could not load seat usage declarations: ${res.error.message}`);
+  return new Map(
+    ((res.data ?? []) as Array<UsageIntentRow & { organization_id: string; entity_id: string }>).map(
+      (r) => [`${r.organization_id}|${r.entity_id}`, r]
+    )
+  );
+}
+
+/**
+ * The unnamed seats an org has declined, per (org, entity). Named seats are
+ * never declined — a person on a seat is coming whatever the number says. The
+ * lowest-numbered empty seats are the ones kept, so the result is stable.
+ *
+ * ⛔ Declined is not deleted. The seat is still paid for, and the check-in
+ * desk must still be able to name a walk-up to it. Use this for what counts
+ * PEOPLE (a headcount, a blank badge, a chase list), never for what assigns
+ * seats. Pass every seat of an entity: a pre-filtered list miscounts.
+ */
+export function declinedSeatIds(
+  seats: Array<Pick<SeatHolding, "seatId" | "organizationId" | "entityId" | "seatIndex" | "holderPersonId">>,
+  intents: Map<string, UsageIntentRow>
+): Set<string> {
+  const groups = new Map<string, typeof seats>();
+  for (const seat of seats) {
+    const key = `${seat.organizationId}|${seat.entityId}`;
+    const list = groups.get(key) ?? [];
+    list.push(seat);
+    groups.set(key, list);
+  }
+  const declined = new Set<string>();
+  for (const [key, group] of groups) {
+    const toFill = declaredSeatsToFill(group.length, intents.get(key));
+    if (toFill === null) continue;
+    const named = group.filter((s) => s.holderPersonId).length;
+    const keepEmpty = Math.max(0, toFill - named);
+    group
+      .filter((s) => !s.holderPersonId)
+      .sort((a, b) => (a.seatIndex ?? 0) - (b.seatIndex ?? 0))
+      .slice(keepEmpty)
+      .forEach((s) => declined.add(s.seatId));
+  }
+  return declined;
+}
+
+/** `seats` without the declined ones — see declinedSeatIds. */
+export function dropDeclinedSeats(seats: SeatHolding[], intents: Map<string, UsageIntentRow>): SeatHolding[] {
+  const declined = declinedSeatIds(seats, intents);
+  return seats.filter((s) => !declined.has(s.seatId));
 }
 
 /**

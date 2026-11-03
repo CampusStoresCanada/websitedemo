@@ -3,11 +3,13 @@
 import { requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { loadSeatHoldings } from "@/lib/conference/seats";
+import type { MeetingRuling } from "@/lib/conference/schedule-ops";
 
 /**
- * Manual per-cell overrides on the Schedule matrix. Writes directly to the
+ * Manual per-cell overrides on the meeting grid (War Room, Meetings). Writes directly to the
  * displayed run's `schedules` rows, marking them `is_manual` so a later
- * re-promote in Schedule Ops can warn before replacing hand edits. Blocks the
+ * publish can warn before replacing hand edits. Blocks the
  * one thing that's physically impossible — the same exhibitor or delegate in
  * two suites at the same time — but otherwise trusts the admin's intent.
  */
@@ -89,8 +91,24 @@ export async function setMeetingAssignment(
     .neq("status", "canceled")
     .maybeSingle();
 
+  // A cleared cell keeps its row as `canceled` (see clearMeetingAssignment),
+  // and (run, slot, exhibitor) is unique — so putting the same exhibitor back
+  // revives that row rather than inserting a duplicate.
+  const { data: revivable } = existing
+    ? { data: null }
+    : await db
+        .from("schedules")
+        .select("id")
+        .eq("conference_id", conferenceId)
+        .eq("scheduler_run_id", input.runId)
+        .eq("meeting_slot_id", input.meetingSlotId)
+        .eq("exhibitor_seat_id", input.exhibitorSeatId)
+        .eq("status", "canceled")
+        .maybeSingle();
+
   let id: string;
-  if (existing) {
+  if (existing || revivable) {
+    const target = (existing ?? revivable)!;
     const { error } = await db
       .from("schedules")
       .update({
@@ -99,9 +117,9 @@ export async function setMeetingAssignment(
         status: "scheduled",
         is_manual: true,
       })
-      .eq("id", existing.id);
+      .eq("id", target.id);
     if (error) return { success: false, error: error.message };
-    id = existing.id;
+    id = target.id;
   } else {
     const { data: inserted, error } = await db
       .from("schedules")
@@ -141,6 +159,15 @@ export async function setMeetingAssignment(
   return { success: true, data: { id } };
 }
 
+/**
+ * Clear a cell: the meeting is CANCELED, never deleted.
+ *
+ * ⛔ It used to delete the row. A check-in card scan points at its meeting
+ * (conference_check_in_events.schedule_id, on delete set null), so clearing a
+ * cell after the meeting happened silently erased the proof the CANCOLL
+ * bursary report is built from. `canceled` is already in the status vocabulary
+ * and every reader already skips it.
+ */
 export async function clearMeetingAssignment(
   conferenceId: string,
   input: { runId: string; meetingSlotId: string }
@@ -151,10 +178,11 @@ export async function clearMeetingAssignment(
   const db = createAdminClient();
   const { error } = await db
     .from("schedules")
-    .delete()
+    .update({ status: "canceled", is_manual: true })
     .eq("conference_id", conferenceId)
     .eq("scheduler_run_id", input.runId)
-    .eq("meeting_slot_id", input.meetingSlotId);
+    .eq("meeting_slot_id", input.meetingSlotId)
+    .neq("status", "canceled");
   if (error) return { success: false, error: error.message };
 
   await logAuditEventSafe({
@@ -163,6 +191,67 @@ export async function clearMeetingAssignment(
     actorId: auth.ctx.userId,
     actorType: "user",
     details: { conferenceId, runId: input.runId, meetingSlotId: input.meetingSlotId },
+  });
+  return { success: true, data: null };
+}
+
+const MEETING_RULINGS: readonly MeetingRuling[] = ["attended", "absent", "excused"];
+
+/**
+ * Staff's word on whether one delegate attended one meeting: attended, absent,
+ * or excused when the partner or CSC did not show (CANCOLL MOU 8.6). One more
+ * row in the record the check-in cards write; the newest ruling wins over the
+ * scans (loadMeetingConfirmations). A correction is another ruling, so the
+ * history stays.
+ */
+export async function setMeetingRuling(
+  conferenceId: string,
+  input: { scheduleId: string; delegateSeatId: string; ruling: MeetingRuling; note?: string | null }
+): Promise<Result<null>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!MEETING_RULINGS.includes(input.ruling)) return { success: false, error: "Unknown outcome." };
+
+  const db = createAdminClient();
+  const { data: schedule, error: scheduleError } = await db
+    .from("schedules")
+    .select("id, delegate_seat_ids, status")
+    .eq("id", input.scheduleId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  if (scheduleError || !schedule) return { success: false, error: "Meeting not found." };
+  if (schedule.status === "canceled") {
+    return { success: false, error: "This meeting was cancelled, so nobody missed it." };
+  }
+  if (!(schedule.delegate_seat_ids ?? []).includes(input.delegateSeatId)) {
+    return { success: false, error: "That delegate is not in this meeting." };
+  }
+
+  const { seats } = await loadSeatHoldings(db, { conferenceId, seatIds: [input.delegateSeatId] });
+  const personId = seats[0]?.holderPersonId;
+  if (!personId) return { success: false, error: "Nobody is named on that seat." };
+
+  const note = input.note?.trim() || null;
+  const { error } = await db.from("conference_check_in_events").insert({
+    conference_id: conferenceId,
+    person_id: personId,
+    schedule_id: input.scheduleId,
+    confirmed_by: "staff",
+    ruling: input.ruling,
+    ruling_note: note,
+    checked_in_by: auth.ctx.userId,
+    check_in_source: "manual",
+    result_state: "valid",
+  });
+  if (error) return { success: false, error: error.message };
+
+  await logAuditEventSafe({
+    action: "schedule_meeting_ruling",
+    entityType: "schedule",
+    entityId: input.scheduleId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { conferenceId, personId, ruling: input.ruling, note },
   });
   return { success: true, data: null };
 }

@@ -1,5 +1,7 @@
 import type { BuildEntity } from "../actions/conference-entities";
 import { effectiveRefs } from "./entity-graph";
+import { isOrgAccessActive } from "../membership/status";
+import type { OrgMembershipStatus } from "../membership/types";
 
 /**
  * Pure sellability rules — who may buy an Offer, at what price, and whether any
@@ -152,4 +154,61 @@ export function directPurchaseAllowed(
  */
 export function isDirectPurchaseOnly(attributes: Record<string, unknown> | null | undefined): boolean {
   return (attributes ?? {}).direct_purchase_only === true;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Funded registrations (CANCOLL)
+// ─────────────────────────────────────────────────────────────────
+
+/** The buyer facts the funded-registration gate needs. */
+export type FundedRegistrationBuyer = {
+  id: string;
+  type: string | null;
+  membershipStatus: OrgMembershipStatus | null;
+  isCancollMember: boolean | null;
+  isTest: boolean | null;
+};
+
+/**
+ * Is this offer a registration somebody else pays for?
+ *
+ * A funded offer is a hidden copy of a registration (`funds_offer_id` names the
+ * one it stands in for) that the school is charged $0 for. Today the only
+ * funder is CANCOLL, which pays the Registration Fee for one delegate from each
+ * school that belongs to both organizations (CSC/CANCOLL MOU, 2027).
+ *
+ * The school never picks it. Adding the ordinary registration to the cart swaps
+ * the first unit for this one, because the MOU issues the funded registration
+ * to the first delegate who registers.
+ */
+export function isFundedOffer(attributes: Record<string, unknown> | null | undefined): boolean {
+  const attrs = attributes ?? {};
+  return attrs.funded_by === "cancoll" && typeof attrs.funds_offer_id === "string";
+}
+
+/**
+ * May this school take the funded registration?
+ *
+ * ⛔ ONE implementation, used by the cart swap, the add-to-cart gate and the
+ * checkout recheck. A school offered the $0 line and then refused at the till,
+ * or charged $299 at a till that would have admitted it, are the two failures.
+ *
+ * A Dual Member is a current CSC member (the entitled set, so grace counts)
+ * that carries the CANCOLL flag at the moment it registers. The flag is the
+ * list CANCOLL sends, kept through the audited certification editor.
+ *
+ * ⛔ `funding_live` is the switch. Until it is exactly `true`, only test
+ * organisations qualify, so the program can be walked end to end without a
+ * real school ever seeing it. A string "true" does not count, same reasoning as
+ * isDirectPurchaseOnly: failing closed is the safe direction.
+ */
+export function fundedRegistrationAllowed(
+  attributes: Record<string, unknown> | null | undefined,
+  buyer: FundedRegistrationBuyer | null | undefined
+): boolean {
+  if (!buyer || !isFundedOffer(attributes)) return false;
+  if ((attributes ?? {}).funding_live !== true && buyer.isTest !== true) return false;
+  if (buyer.type !== "Member") return false;
+  if (!isOrgAccessActive(buyer.membershipStatus)) return false;
+  return buyer.isCancollMember === true;
 }

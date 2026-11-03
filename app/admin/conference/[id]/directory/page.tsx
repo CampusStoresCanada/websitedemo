@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import PublicationView from "@/components/publication/PublicationView";
-import { conferenceDirectory } from "@/lib/publication/composition";
+import { conferenceDirectory, mapSheet } from "@/lib/publication/composition";
 import { composeSavedPublication } from "@/lib/publication/render";
 import { loadPrintUsage } from "@/lib/publication/scan-tracking";
 import { loadPublicationForConference } from "@/lib/publication/store";
@@ -20,8 +20,10 @@ export const metadata = { title: "Directory | Conference Admin" };
  */
 export default async function ConferenceDirectoryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ sheet?: string }>;
 }) {
   const auth = await requireAdmin();
   if (!auth.ok) {
@@ -43,8 +45,14 @@ export default async function ConferenceDirectoryPage({
   // Prefer the saved definition so edits to it are what actually print. The
   // code-defined default is a fallback for a conference nobody has set one up
   // for yet — not the source of truth.
-  const saved = await loadPublicationForConference(conference.id);
-  const publication = saved?.publication ?? conferenceDirectory(conference.id, `${conference.name} — Directory`);
+  //
+  // ?sheet=map is the map handed out at the door (War Room → What's next):
+  // the same composition and renderer, its own definition.
+  const isMapSheet = (await searchParams).sheet === "map";
+  const saved = isMapSheet ? null : await loadPublicationForConference(conference.id);
+  const publication = isMapSheet
+    ? mapSheet(conference.id, `${conference.name} — Map`)
+    : saved?.publication ?? conferenceDirectory(conference.id, `${conference.name} — Directory`);
   const rejected = saved?.rejected ?? [];
   const doc = await composeSavedPublication(publication);
 
@@ -66,9 +74,11 @@ export default async function ConferenceDirectoryPage({
       <div className="print:hidden max-w-5xl mx-auto px-5 pt-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Directory preview</h1>
+            <h1 className="text-xl font-bold text-gray-900">{isMapSheet ? "Map preview" : "Directory preview"}</h1>
             <p className="mt-1 text-sm text-gray-500">
-              {saved
+              {isMapSheet
+              ? "The floor plan, every booth by number and every exhibitor A to Z. Print it straight from your browser."
+              : saved
               ? "From the saved definition. Print or save as PDF straight from your browser."
               : "No saved definition yet — showing the default layout. Print or save as PDF straight from your browser."}
             </p>
@@ -120,6 +130,8 @@ export default async function ConferenceDirectoryPage({
           </div>
         ) : null}
 
+        {/* The print-run question is about the book, not the door map. */}
+        {isMapSheet ? null : (
         <section className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
           <h2 className="text-sm font-semibold text-gray-900">Did the book get used?</h2>
           {usage.totalScans === 0 ? (
@@ -162,6 +174,7 @@ export default async function ConferenceDirectoryPage({
             </>
           )}
         </section>
+        )}
 
         <p className="mt-3 text-xs text-gray-400">
           {notes.totalCandidates} candidate{notes.totalCandidates === 1 ? "" : "s"} ·{" "}

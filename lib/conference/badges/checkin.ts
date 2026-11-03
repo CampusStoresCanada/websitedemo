@@ -119,7 +119,8 @@ export function checkInFactsFromRun(
   const unnamedSeatKeys = new Set<string>();
   for (const type of run.types) {
     for (const seat of type.seats) {
-      if (!seat.person && seat.organizationId) unnamedSeatKeys.add(blankCardKey(seat.organizationId, type.entityId));
+      // Declined seats got no blank (unnamedSeats), so none to overprint.
+      if (!seat.person && !seat.declined && seat.organizationId) unnamedSeatKeys.add(blankCardKey(seat.organizationId, type.entityId));
     }
   }
 
@@ -338,7 +339,7 @@ export async function openEventSeats(
  * The conference's timed events, for the door picker. Capped ones are the
  * doors the desk offers on its own; the rest can still be picked by hand.
  */
-async function loadDoorEvents(
+export async function loadDoorEvents(
   db: ReturnType<typeof createAdminClient>,
   conferenceId: string
 ): Promise<{ doorEvents: DoorEvent[]; timeZone: string }> {

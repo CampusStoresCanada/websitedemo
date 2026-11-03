@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { storeBoardDocument, BOARD_DOCUMENTS_BUCKET as BUCKET, type BoardDocumentType } from "@/lib/board/documents";
+import { exportBoardMeeting } from "@/lib/board/docx-export";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 
-const BUCKET = "board-documents";
 const MAX_BYTES = 52428800; // 50 MB (matches bucket limit)
 const ALLOWED_MIME = [
   "application/pdf",
@@ -19,7 +21,7 @@ const ALLOWED_MIME = [
   "image/png",
 ];
 
-export type BoardDocumentType = "agenda" | "minutes" | "financials" | "other";
+export type { BoardDocumentType };
 
 export interface BoardDocumentRow {
   id: string;
@@ -142,42 +144,20 @@ export async function uploadBoardDocument(
   if (!ALLOWED_MIME.includes(file.type)) return { error: "File type not allowed" };
   if (file.size > MAX_BYTES) return { error: "File must be under 50 MB" };
 
-  const ext = file.name.split(".").pop() ?? "pdf";
-  const path = `meetings/${meetingId}/${documentType}/${Date.now()}.${ext}`;
-
-  const db = createAdminClient();
-  const { error: uploadError } = await db.storage
-    .from(BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
-
-  if (uploadError) {
-    console.error("[uploadBoardDocument] storage error", uploadError);
-    return { error: "Upload failed" };
-  }
-
-  const { data: doc, error: insertError } = await db
-    .from("board_documents")
-    .insert({
-      meeting_id: meetingId,
-      title,
-      document_type: documentType,
-      context: "meeting",
-      storage_path: path,
-      mime_type: file.type,
-      file_size_bytes: file.size,
-      uploaded_by: auth.ctx.userId,
-    })
-    .select("id, title, document_type, mime_type, file_size_bytes, storage_path, created_at")
-    .single();
-
-  if (insertError || !doc) {
-    // Roll back storage upload
-    await db.storage.from(BUCKET).remove([path]);
-    return { error: "Failed to save document record" };
-  }
+  const stored = await storeBoardDocument({
+    meetingId,
+    documentType,
+    title,
+    body: file,
+    mimeType: file.type,
+    sizeBytes: file.size,
+    extension: file.name.split(".").pop() ?? "pdf",
+    uploadedBy: auth.ctx.userId,
+  });
+  if ("error" in stored) return stored;
 
   revalidatePath("/admin/board/meetings");
-  return { doc };
+  return { doc: stored.doc };
 }
 
 // ─── Cancel a board meeting ──────────────────────────────────────────────────
@@ -392,6 +372,23 @@ export async function completeBoardMeeting(
     entityId: meetingId,
     details: { title: meeting.title, meetingDate: meeting.meeting_date },
   });
+
+  // File the minutes (OneDrive archive + this meeting's Documents panel). A
+  // failure here must not undo closing out the meeting — it raises the same
+  // alert the monthly catch-up does, and that run will try again.
+  try {
+    const exported = await exportBoardMeeting(meetingId);
+    if (exported.errors.length > 0) {
+      await raiseAlertIfNotOpen({
+        ruleKey:  "board_docx_export_errors",
+        severity: "warning",
+        message:  `Board DOCX export completed with ${exported.errors.length} error(s)`,
+        details:  { errors: exported.errors.slice(0, 10), meetingId },
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[completeBoardMeeting] export failed", err);
+  }
 
   revalidatePath("/admin/board/meetings");
   revalidatePath(`/admin/board/meetings/${meetingId}`);

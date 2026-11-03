@@ -157,6 +157,31 @@ describe("generateSchedule honours blackouts in both directions", () => {
     });
     expect(pairIsScheduled(result)).toBe(false);
   });
+
+  /**
+   * The repair pass tops up under-served delegates into meetings that already
+   * exist. It read the score record's isBlackout, so a delegate who had refused
+   * the exhibitor was put back in with them; the run then reported a hard
+   * BLACKOUT and was thrown away as infeasible (CSC 2027, 2026-10-26).
+   */
+  it("the repair pass never adds a delegate to a meeting with an exhibitor they refused", () => {
+    const refuser = delegate({ blackoutList: ["org-e1"] });
+    const other = delegate({ registrationId: "d2", organizationId: "org-d2", userId: "u-d2" });
+    const e = exhibitor();
+    const scores = fixtureMatchScores([refuser, other], [e]).map((score) => ({ ...score, isBlackout: false }));
+    const result = generateSchedule({
+      delegates: [refuser, other],
+      exhibitors: [e],
+      meetingSlots: slots,
+      matchScores: scores,
+      policy,
+      suitePinnedExhibitorBySuiteId: { "suite-1": e.registrationId },
+      seed: 1,
+    });
+    expect(result.assignments.some((a) => a.delegateSeatIds.includes("d2"))).toBe(true);
+    expect(pairIsScheduled(result)).toBe(false);
+    expect(result.diagnostics.violations.some((v) => v.code === "BLACKOUT")).toBe(false);
+  });
 });
 
 describe("validateScheduleConstraints reports both directions", () => {

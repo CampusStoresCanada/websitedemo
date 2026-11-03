@@ -144,7 +144,9 @@ function getSortValue(org: HomeMapOrg, key: SortKey, searchRanking?: Map<string,
     case "primaryCategory":
       return org.primaryCategory?.toLowerCase() ?? null;
     case "posSystem":
-      return org.posSystem?.toLowerCase() ?? null;
+      // pos_system is text[]. `.toLowerCase()` on the array threw a TypeError and
+      // took the whole table down the moment anyone sorted by this column.
+      return org.posSystem?.length ? org.posSystem.join(", ").toLowerCase() : null;
     case "operationsMandate":
       return org.operationsMandate?.toLowerCase() ?? null;
     case "servicesCount":
@@ -702,7 +704,7 @@ export default function DirectoryTable({
                           {org.institutionType ?? "—"}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-                          {org.posSystem ?? "—"}
+                          {org.posSystem?.length ? org.posSystem.join(", ") : "—"}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
                           {org.operationsMandate ?? "—"}

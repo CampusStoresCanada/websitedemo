@@ -10,7 +10,7 @@ ours, and stickers line up with the card to fractions of a millimetre.
 
 ## On the conference laptop (Mac): the app
 
-1. On the laptop: desk toolkit → **Open the print station** → **Download CSC
+1. In the War Room: **What's next** → **Open the print station** → **Download CSC
    Print Station for Mac** (or AirDrop the zip from `dist/`). Unzip it and put
    it in Applications. Nothing else to install except Google Chrome
    (it draws each sticker with it): Python, the printer libraries and libusb
@@ -18,16 +18,29 @@ ours, and stickers line up with the card to fractions of a millimetre.
 2. **First launch:** the app is not signed with an Apple developer ID, so macOS
    refuses a double-click. Right-click it → **Open** → **Open**. Once only.
 3. Plug the QL in by USB, with the **62 mm continuous roll** loaded (DK-2113 clear).
-4. On the desk: **Open the print station** → **Get a key** → **Copy**. Paste it
-   into the app, **Save and start**. Printer: leave blank for USB.
+4. On the same page: **Get a key** → **Copy**. It is shown once. Paste it into
+   the app, **Save and start**. Printer: leave blank for USB.
 5. Leave it open, plugged in and awake. The window shows each job as it prints;
-   the desk's print station page shows it online within a few seconds.
+   the print station page shows it online within a few seconds.
 
 **Change settings** switches key or printer (Cancel goes back). Settings live in
 `~/.csc-print-station.json`, shared with the terminal version.
 
 A printer problem (wrong roll, out of film, lid open) leaves the job in the
 queue; it prints once fixed. A revoked key brings the app back to setup.
+
+## Documents (speeches, run-sheets)
+
+A document attached to a War Room task has **Send to printer**. It goes on the same
+queue; this laptop fetches it as a PDF and prints it on its ordinary paper printer
+(`lp`, so any printer the Mac can already print to). The app always uses the Mac's
+default printer; the terminal version asks at `--setup`, blank meaning the default.
+
+- A Google Doc must be shared as **anyone with the link can view**, or Google
+  answers with a sign-in page and the job fails saying so. An uploaded file must be
+  a PDF.
+- An older copy of this app never receives documents; update it to print them.
+- Mac and Linux only for now.
 
 ## Building the app
 

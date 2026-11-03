@@ -11,7 +11,11 @@ import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
-import { termEndsFor, surveyState } from "@/lib/benchmarking/lifecycle";
+import {
+  termEndsFor,
+  surveyState,
+  BENCHMARKING_REMINDERS,
+} from "@/lib/benchmarking/lifecycle";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import {
   formatDeadline,
@@ -330,6 +334,21 @@ export default async function BenchmarkingCyclePage({
       )
     : {};
 
+  /*
+    One control, reused under each key the chase step can carry. The recipient
+    count is looked up by ACTION key (`openReminders`), which is shared by all
+    five dated steps, so the number the confirmation names is the same wherever
+    the button appears.
+  */
+  const reminderControl = (
+    <ConfirmSendButton
+      action={send("reminder")}
+      label="Send the reminder"
+      recipients={sendCounts.openReminders?.recipients ?? null}
+      audience="invited stores that have not filed"
+    />
+  );
+
   const stageControls: Record<string, React.ReactNode> = latestSurvey
     ? {
         appoint_testers: (
@@ -355,13 +374,26 @@ export default async function BenchmarkingCyclePage({
             audience="stores with a confirmed respondent that have not been invited"
           />
         ),
-        reminders: (
-          <ConfirmSendButton
-            action={send("reminder")}
-            label="Send the reminder"
-            recipients={sendCounts.openReminders?.recipients ?? null}
-            audience="invited stores that have not filed"
-          />
+        /*
+          ⛔ Registered under EVERY key the chase can arrive as, because the
+          timeline names that step differently depending on the cycle's dates:
+          five dated steps (`reminder_30` … `reminder_1`) once opens_at and
+          closes_at are both set, and a single undated `reminders` when either
+          is missing. The renderer looks the control up by STAGE key, so wiring
+          only `reminders` meant the button existed on a cycle with no dates and
+          vanished the moment the dates were filled in — i.e. on every real
+          cycle. FY2026 sent 53 invitations and could not send one reminder; the
+          month-to-go step passed on 2026-10-21 with nothing to press, and the
+          step offered "available from the panels below", where the only panel
+          previews and cannot send.
+
+          ⛔ Derived from BENCHMARKING_REMINDERS rather than five literals, so
+          changing the ladder cannot silently unhook the button again.
+        */
+        ...Object.fromEntries(
+          ["reminders", ...BENCHMARKING_REMINDERS.steps.map((s) => `reminder_${s.daysBeforeClose}`)].map(
+            (key) => [key, reminderControl],
+          ),
         ),
       }
     : {};

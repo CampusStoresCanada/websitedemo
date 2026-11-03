@@ -1,6 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadSeatHoldings } from "./seats";
-import { offerRequiresOwnershipOfEntityIds } from "./ownership-gate";
+import { loadMeetingCandidates } from "./meeting-candidates";
 import { loadScheduleOpsSummary } from "./schedule-ops";
 import type { MatrixParticipant, ScheduleMatrixData } from "./schedule-coverage";
 
@@ -12,51 +11,57 @@ import type { MatrixParticipant, ScheduleMatrixData } from "./schedule-coverage"
  */
 
 export async function loadScheduleMatrixData(conferenceId: string): Promise<ScheduleMatrixData> {
-  const summary = await loadScheduleOpsSummary(conferenceId);
   const db = createAdminClient();
+  /**
+   * ⛔ WHO IS IN MEETINGS has one answer: the scheduler's (loadMeetingCandidates).
+   * This used to keep its own copy of the rule — named registration seats, split
+   * by "does the type need a booth" — and missed the half that asks whether the
+   * type is in meetings at all, so CSC's own staff were listed as delegates with
+   * no meetings (2026-10-26).
+   */
+  const [summary, candidates] = await Promise.all([
+    loadScheduleOpsSummary(conferenceId),
+    loadMeetingCandidates(db, conferenceId),
+  ]);
+
+  const seatIds = [...candidates.delegates, ...candidates.exhibitors].map((p) => p.registrationId);
+  const orgIds = [
+    ...new Set(seatIds.map((id) => candidates.seatById.get(id)?.organizationId).filter((id): id is string => !!id)),
+  ];
+  const { data: orgData } = orgIds.length
+    ? await db.from("organizations").select("id, name").in("id", orgIds)
+    : { data: [] as Array<{ id: string; name: string }> };
+  const orgById = new Map(((orgData ?? []) as Array<{ id: string; name: string }>).map((o) => [o.id, o.name] as const));
+
+  const toParticipant = (seatId: string, type: MatrixParticipant["type"]): MatrixParticipant => {
+    const seat = candidates.seatById.get(seatId);
+    const orgName = seat?.organizationId ? orgById.get(seat.organizationId) ?? null : null;
+    return {
+      registrationId: seatId,
+      // An exhibitor seat may have nobody named yet; it stands for its company.
+      name: seat?.holderName?.trim() || orgName || seatId,
+      orgName,
+      type,
+    };
+  };
 
   /**
-   * The eligible roster is NAMED SEATS — the same gate the scheduler uses, now
-   * that both read seats instead of conference_registrations (0 rows, no
-   * writer). This used to filter `registration_type` against the string
-   * literals "delegate"/"observer"/"exhibitor"; which side someone is on is a
-   * property of the type they hold — an exhibiting registration
-   * `requires_ownership_of` a booth.
+   * One exhibitor per company for the cell editor's picker, a named seat first:
+   * a company is the exhibitor (meeting-candidates.ts), and listing each of its
+   * unnamed staff seats would repeat it dozens of times.
    */
-  const { seats, entitiesById } = await loadSeatHoldings(db, {
-    conferenceId,
-    entityKinds: ["registration"],
-    assigned: true,
-  });
-
-  const exhibitingTypeIds = new Set(
-    [...entitiesById.values()]
-      .filter(
-        (e) =>
-          e.kind === "registration" &&
-          offerRequiresOwnershipOfEntityIds(e.refs).some((id) => entitiesById.get(id)?.kind === "booth")
-      )
-      .map((e) => e.id)
-  );
-
-  const orgIds = Array.from(new Set(seats.map((s) => s.organizationId).filter(Boolean)));
-  let orgs: Array<{ id: string; name: string }> = [];
-  if (orgIds.length > 0) {
-    const { data: orgData } = await db.from("organizations").select("id, name").in("id", orgIds);
-    orgs = (orgData ?? []) as Array<{ id: string; name: string }>;
+  const exhibitorSeats = new Map<string, string[]>();
+  for (const e of candidates.exhibitors) {
+    exhibitorSeats.set(e.organizationId, [...(exhibitorSeats.get(e.organizationId) ?? []), e.registrationId]);
   }
-  const orgById = new Map(orgs.map((o) => [o.id, o.name] as const));
-
-  const toParticipant = (seat: (typeof seats)[number]): MatrixParticipant => ({
-    registrationId: seat.seatId,
-    name: seat.holderName?.trim() || seat.seatId,
-    orgName: seat.organizationId ? orgById.get(seat.organizationId) ?? null : null,
-    type: exhibitingTypeIds.has(seat.entityId) ? "exhibitor" : "delegate",
+  const exhibitors = [...exhibitorSeats.values()].flatMap((ids) => {
+    const named = ids.filter((id) => candidates.seatById.get(id)?.holderPersonId);
+    return named.length > 0 ? named : ids.slice(0, 1);
   });
 
   return {
     summary,
-    delegates: seats.filter((s) => !exhibitingTypeIds.has(s.entityId)).map(toParticipant),
-    exhibitors: seats.filter((s) => exhibitingTypeIds.has(s.entityId)).map(toParticipant),
+    delegates: candidates.delegates.map((d) => toParticipant(d.registrationId, "delegate")),
+    exhibitors: exhibitors.map((id) => toParticipant(id, "exhibitor")),
   };
 }

@@ -396,7 +396,7 @@ export async function requestSwap(
       .eq("scheduler_run_id", activeRun.id)
       .single();
 
-    if (dropError || !dropSchedule) {
+    if (dropError || !dropSchedule || dropSchedule.status === "canceled") {
       return { success: false, error: "Drop schedule not found in active run." };
     }
 

@@ -428,8 +428,8 @@ export default function MapExplore({
         return members.filter((o) => o.enrollmentFte != null);
       case "pos_platform":
         return posFilter
-          ? members.filter((o) => o.posSystem === posFilter)
-          : members.filter((o) => o.posSystem != null);
+          ? members.filter((o) => o.posSystem?.includes(posFilter))
+          : members.filter((o) => o.posSystem != null && o.posSystem.length > 0);
       case "services":
         return serviceFilter
           ? members.filter((o) => o.servicesOffered?.includes(serviceFilter))
@@ -448,7 +448,7 @@ export default function MapExplore({
   const cohortPool = useMemo(() => {
     let pool = [...lensPool];
     if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
-    if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem === compoundFilters.pos);
+    if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem?.includes(compoundFilters.pos!));
     if (compoundFilters.service && lens !== "services") pool = pool.filter((o) => o.servicesOffered?.includes(compoundFilters.service!));
     if (compoundFilters.mandate && lens !== "operating_model") pool = pool.filter((o) => o.operationsMandate === compoundFilters.mandate);
     if (compoundFilters.scaleRange && lens !== "scale") {
@@ -503,13 +503,14 @@ export default function MapExplore({
   const posCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const org of lensMembers) {
-      if (org.posSystem) counts[org.posSystem] = (counts[org.posSystem] || 0) + 1;
+      // Per value — a store running two platforms counts toward both facets.
+      for (const pos of org.posSystem ?? []) counts[pos] = (counts[pos] || 0) + 1;
     }
     return counts;
   }, [lensMembers]);
 
   const membersWithPos = useMemo(
-    () => lensMembers.filter((o) => o.posSystem != null).length,
+    () => lensMembers.filter((o) => o.posSystem != null && o.posSystem.length > 0).length,
     [lensMembers]
   );
 
@@ -691,9 +692,9 @@ export default function MapExplore({
         break;
       case "pos_platform":
         if (posFilter) {
-          pool = members.filter((o) => o.posSystem === posFilter);
+          pool = members.filter((o) => o.posSystem?.includes(posFilter));
         } else {
-          pool = members.filter((o) => o.posSystem != null);
+          pool = members.filter((o) => o.posSystem != null && o.posSystem.length > 0);
         }
         break;
       case "services":
@@ -717,7 +718,7 @@ export default function MapExplore({
 
     // Apply compound cross-lens filters (skip if same dimension as primary lens)
     if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
-    if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem === compoundFilters.pos);
+    if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem?.includes(compoundFilters.pos!));
     if (compoundFilters.service && lens !== "services") pool = pool.filter((o) => o.servicesOffered?.includes(compoundFilters.service!));
     if (compoundFilters.mandate && lens !== "operating_model") pool = pool.filter((o) => o.operationsMandate === compoundFilters.mandate);
     if (compoundFilters.scaleRange && lens !== "scale") {
@@ -1907,10 +1908,10 @@ function OrgList({
                     : `${org.enrollmentFte} FTE`}
                 </span>
               )}
-              {org.posSystem && (
+              {org.posSystem && org.posSystem.length > 0 && (
                 isMember ? (
                   <span className="rounded bg-purple-50 border border-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
-                    {org.posSystem}
+                    {org.posSystem.join(", ")}
                   </span>
                 ) : (
                   <span className="rounded bg-gray-100 w-12 h-4 inline-block blur-[3px]" />

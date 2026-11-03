@@ -130,6 +130,16 @@ export interface DimensionBreakdown {
   /** Bucket → count among eligible member institutions. */
   membership: Record<string, number>;
   /**
+   * Bucket → count on the board that WOULD sit if every current nominee joined
+   * the directors whose terms continue past this AGM.
+   *
+   * ⚠️ A different denominator from `nominees`. That one is a share of the
+   * membership ("1 of the 14 colleges has put a name forward"); this is a share
+   * of the board ("3 of its 9 seats would be colleges"). They answer different
+   * questions and must never share a bar.
+   */
+  board: Record<string, number>;
+  /**
    * Buckets present in the membership but absent from the nominee pool. Stated
    * as an observation for the committee, never as a defect to be corrected.
    */
@@ -140,6 +150,16 @@ export interface DimensionBreakdown {
 
 export interface RepresentationSnapshot {
   nomineeCount: number;
+  /** Directors whose terms run past this AGM. */
+  continuingCount: number;
+  /** Continuing directors plus every current nominee. */
+  boardSize: number;
+  /**
+   * Whether the projection is a certainty or a ceiling. With no more nominees
+   * than seats everyone shown joins; with more, some will not, and the board
+   * figures are the most any bucket could reach rather than what it will be.
+   */
+  everyNomineeFits: boolean;
   /** Distinct institutions the nominees come from. */
   nomineeOrgCount: number;
   eligibleOrgCount: number;
@@ -166,7 +186,10 @@ function tally(values: (string | null)[]): Record<string, number> {
  */
 export function buildRepresentationSnapshot(
   nomineeOrgs: OrgProfile[],
-  eligibleOrgs: OrgProfile[]
+  eligibleOrgs: OrgProfile[],
+  /** Institutions of the directors whose terms continue past this AGM. */
+  continuingOrgs: OrgProfile[] = [],
+  seatsAvailable = 0
 ): RepresentationSnapshot {
   const typeOf = (o: OrgProfile) => resolveInstitutionType(o.name, o.institutionTypeConfirmed);
 
@@ -178,6 +201,7 @@ export function buildRepresentationSnapshot(
       label: "Institution type",
       nominees: tally(nomineeOrgs.map((o) => typeOf(o).value)),
       membership: tally(eligibleOrgs.map((o) => typeOf(o).value)),
+      board: tally([...continuingOrgs, ...nomineeOrgs].map((o) => typeOf(o).value)),
       unrepresented: [],
       containsDerivedValues: anyDerived([...nomineeOrgs, ...eligibleOrgs]),
     },
@@ -186,6 +210,7 @@ export function buildRepresentationSnapshot(
       label: "Region",
       nominees: tally(nomineeOrgs.map((o) => resolveRegion(o.province))),
       membership: tally(eligibleOrgs.map((o) => resolveRegion(o.province))),
+      board: tally([...continuingOrgs, ...nomineeOrgs].map((o) => resolveRegion(o.province))),
       unrepresented: [],
       containsDerivedValues: false,
     },
@@ -194,6 +219,7 @@ export function buildRepresentationSnapshot(
       label: "Province",
       nominees: tally(nomineeOrgs.map((o) => o.province?.toUpperCase() ?? null)),
       membership: tally(eligibleOrgs.map((o) => o.province?.toUpperCase() ?? null)),
+      board: tally([...continuingOrgs, ...nomineeOrgs].map((o) => o.province?.toUpperCase() ?? null)),
       unrepresented: [],
       containsDerivedValues: false,
     },
@@ -202,6 +228,7 @@ export function buildRepresentationSnapshot(
       label: "Size",
       nominees: tally(nomineeOrgs.map((o) => resolveSizeBand(o.fte))),
       membership: tally(eligibleOrgs.map((o) => resolveSizeBand(o.fte))),
+      board: tally([...continuingOrgs, ...nomineeOrgs].map((o) => resolveSizeBand(o.fte))),
       unrepresented: [],
       containsDerivedValues: false,
     },
@@ -220,6 +247,9 @@ export function buildRepresentationSnapshot(
 
   return {
     nomineeCount: nomineeOrgs.length,
+    continuingCount: continuingOrgs.length,
+    boardSize: continuingOrgs.length + nomineeOrgs.length,
+    everyNomineeFits: seatsAvailable === 0 || nomineeOrgs.length <= seatsAvailable,
     nomineeOrgCount: byOrg.size,
     eligibleOrgCount: eligibleOrgs.length,
     dimensions,

@@ -27,6 +27,59 @@ const person = (id: string, org = "Acme", fields: Record<string, unknown> = {}) 
   fields,
 });
 
+describe("summarizePersonTasks, scoped tasks", () => {
+  /**
+   * The CANCOLL consent is asked only of the delegate holding the funded
+   * registration. Everyone else at the conference is outside it: not done, not
+   * outstanding, and never in the chase list.
+   */
+  const CONSENT = {
+    id: "t-consent",
+    name: "Agree to CANCOLL information sharing",
+    description: "",
+    sort_order: 1,
+    deadline: null,
+    checklistName: "CANCOLL",
+    checkType: "legal_document_accepted",
+  };
+
+  it("counts only the people the task is asked of", () => {
+    const [task] = summarizePersonTasks(
+      [CONSENT],
+      [person("funded"), person("colleague"), person("other-school", "Other")],
+      [],
+      new Set(),
+      new Map([[CONSENT.id, new Set(["funded"])]])
+    );
+    expect(task.pending).toBe(1);
+    expect(task.done).toBe(0);
+    expect(task.outstanding.map((p) => p.personId)).toEqual(["funded"]);
+  });
+
+  it("shows it done once that delegate has agreed", () => {
+    const [task] = summarizePersonTasks(
+      [CONSENT],
+      [person("funded"), person("colleague")],
+      [],
+      new Set([`${CONSENT.id}:funded`]),
+      new Map([[CONSENT.id, new Set(["funded"])]])
+    );
+    expect(task.done).toBe(1);
+    expect(task.pending).toBe(0);
+  });
+
+  it("still asks an unscoped task of everyone", () => {
+    const [task] = summarizePersonTasks(
+      [HOTEL],
+      [person("a"), person("b")],
+      [],
+      new Set(),
+      new Map([[CONSENT.id, new Set(["a"])]])
+    );
+    expect(task.pending).toBe(2);
+  });
+});
+
 describe("summarizePersonTasks", () => {
   it("counts a person-grain check as done, without a tick", () => {
     /**

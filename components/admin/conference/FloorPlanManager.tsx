@@ -6,6 +6,7 @@ import { setBoothLayout, type FloorPlanBooth } from "@/lib/actions/conference-en
 import type { FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import { uploadFloorPlanImage, removeFloorPlanImage } from "@/lib/actions/conference-floor-plan";
 import BoothMoveModal from "@/components/admin/conference/BoothMoveModal";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 
 const VIEW_W = 1000;
 const DEFAULT_VB_H = 600;
@@ -542,8 +543,9 @@ export default function FloorPlanManager({
     setError(null); setBusy(true);
     const res = await removeFloorPlanImage(conferenceId);
     setBusy(false);
-    if (!res.success) { setError(res.error ?? "Could not remove the background."); return; }
+    if (!res.success) return { success: false, error: res.error ?? "Could not remove the background." };
     router.refresh();
+    return { success: true };
   };
 
   // ── keyboard shortcuts ────────────────────────────────────────────────────────
@@ -662,10 +664,13 @@ export default function FloorPlanManager({
             {busy ? "Working…" : floorPlanUrl ? "Replace background" : "Upload background"}
           </button>
           {floorPlanUrl ? (
-            <button type="button" disabled={busy} onClick={onRemoveBackground}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-              Remove
-            </button>
+            <ConfirmAction
+              label="Remove"
+              tone="danger"
+              disabled={busy}
+              consequence="Removes the floor plan image. The booths stay where they are, on a blank background."
+              onConfirm={onRemoveBackground}
+            />
           ) : null}
         </div>
       </div>

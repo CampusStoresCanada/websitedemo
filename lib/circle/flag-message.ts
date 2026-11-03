@@ -9,6 +9,25 @@
  * it by mocking four modules instead of reading the warning sitting next to me.
  */
 
+/**
+ * The staff-only message beside an Ask CSC room: everything the asker does not
+ * need to see — priority, who they are and where to find them, and the War Room
+ * record to resolve. Sent to CSC staff without the asker.
+ */
+export function buildAskStaffNote(input: {
+  priorityLabel: string;
+  who: string;
+  note: string | null;
+  details: string | null;
+  reviewLink: string;
+}): string {
+  const details = input.details?.trim() ? `\n\n${input.details.trim().slice(0, 600)}` : "";
+  return (
+    `${input.priorityLabel} — ${input.who} asked CSC.${quoted(input.note, 600)}${details}\n\n` +
+    `They're in a Butler room with us; reply there. Mark it Done in the War Room once it's sorted: ${input.reviewLink}`
+  );
+}
+
 /** One line, collapsed and clipped. Page text arrives with layout whitespace in it. */
 export function oneLine(text: string, max: number): string {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
@@ -35,9 +54,21 @@ export function buildFlagDm(input: {
   note: string | null;
   elementContent: string | null;
   survey: boolean;
+  /**
+   * "Ask CSC" at a conference. `elementContent` is then who they are and where
+   * they are — store, booth, phone, what they're in now and next — written as
+   * lines, so it is printed whole rather than as one clipped line.
+   */
+  conferenceAsk?: boolean;
   issuesUrl: string;
   reviewLink: string;
 }): string {
+  if (input.conferenceAsk) {
+    // ⛔ Their question and nothing else: the asker is in this room. Priority,
+    // their details and the War Room link are ours (Stephen, 2026-10-22) and go
+    // to CSC staff alone — buildAskStaffNote.
+    return quoted(input.note, 600).trim() || `${input.who} asked CSC.`;
+  }
   /*
     ⛔ Written to a ROOM that contains the person who raised it, not to a
     committee about them. They can read it, so it cannot be a report on their

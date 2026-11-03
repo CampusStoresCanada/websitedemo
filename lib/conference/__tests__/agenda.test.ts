@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BuildEntity, EntityRefView } from "../../actions/conference-entities";
-import { deriveAgenda } from "../agenda";
+import { deriveAgenda, deriveAnswers, nowAndNext } from "../agenda";
 
 type RefSpec = [role: string, toId: string, toName: string, toKind: string];
 
@@ -124,5 +124,57 @@ describe("deriveAgenda", () => {
   it("carries where/who metadata", () => {
     expect(byId.get("lunch-tue")!.locationLabel).toBe("Vista Salon");
     expect(byId.get("lunch-tue")!.audienceNames).toEqual(["Member"]);
+  });
+});
+
+describe("now and next, for Ask CSC", () => {
+  const item = (id: string, startsAt: string | null, endsAt: string | null) => ({ id, startsAt, endsAt });
+  const items = [
+    item("show", "2027-02-02T14:00:00Z", "2027-02-02T22:00:00Z"),
+    item("meeting", "2027-02-02T15:30:00Z", "2027-02-02T15:45:00Z"),
+    item("lunch", "2027-02-02T17:00:00Z", "2027-02-02T18:00:00Z"),
+    item("untimed", null, null),
+  ];
+
+  it("says where they are (the meeting, not the show it sits inside) and what's next", () => {
+    const { now, next } = nowAndNext(items, new Date("2027-02-02T15:35:00Z"));
+    expect(now?.id).toBe("meeting");
+    expect(next?.id).toBe("lunch");
+  });
+
+  it("has nothing now before the day starts, and nothing next after it ends", () => {
+    expect(nowAndNext(items, new Date("2027-02-02T12:00:00Z"))).toEqual({ now: null, next: items[0] });
+    expect(nowAndNext(items, new Date("2027-02-03T12:00:00Z"))).toEqual({ now: null, next: null });
+  });
+});
+
+describe("answers and menus (what people ask at the conference)", () => {
+  const graph = () => [
+    ent("day-tue", "day", "Tue, Feb 2", { date: "2027-02-02" }),
+    ent("ballroom", "venue", "Ballroom", {}),
+    ent("wifi", "answer", "Wi-Fi", { answer: "CSC2027 / campusstores" }),
+    ent("coat", "answer", "Coat check", { answer: "Until 11 pm" }, [
+      ["where", "ballroom", "Ballroom", "venue"],
+      ["when", "day-tue", "Tue, Feb 2", "day"],
+    ]),
+    ent("blank", "answer", "Parking", { answer: "" }),
+    ent("dinner", "meal", "Dinner", { start_time: "18:30", end_time: "20:00", notes: "plated", menu: "Roast chicken" }, [
+      ["when", "day-tue", "Tue, Feb 2", "day"],
+    ]),
+  ];
+
+  it("lists answers A to Z with their Where, and skips ones with no answer", () => {
+    const answers = deriveAnswers(graph());
+    expect(answers.map((a) => a.question)).toEqual(["Coat check", "Wi-Fi"]);
+    expect(answers[0].where).toBe("Ballroom");
+  });
+
+  it("never puts an answer on the timeline, even with a When", () => {
+    expect(deriveAgenda(graph(), "America/Toronto").some((i) => i.kind === "answer")).toBe(false);
+  });
+
+  it("carries a meal's menu as its description", () => {
+    const dinner = deriveAgenda(graph(), "America/Toronto").find((i) => i.id === "dinner");
+    expect(dinner?.description).toBe("Menu: Roast chicken");
   });
 });

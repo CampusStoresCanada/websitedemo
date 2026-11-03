@@ -24,8 +24,10 @@ function assignment(
     exhibitorOrganizationName: "Acme",
     delegateSeatIds,
     delegateNames: delegateSeatIds,
+    delegatePersonIds: delegateSeatIds.map(() => null),
     status: "scheduled",
     isManual: false,
+    confirmation: null,
   };
 }
 

@@ -9,15 +9,25 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
  * `entity_balance_seats` would have told a caterer to plan for one.
  */
 
-type Seat = { entityId: string; holderPersonId: string | null };
+type Seat = {
+  entityId: string;
+  holderPersonId: string | null;
+  seatId?: string;
+  organizationId?: string;
+  seatIndex?: number | null;
+};
 let seats: Seat[] = [];
 let entities: Array<Record<string, unknown>> = [];
+let intents = new Map<string, { intended_quantity: number; declared_against_total: number }>();
 
-vi.mock("@/lib/conference/seats", () => ({
+vi.mock("@/lib/conference/seats", async (importOriginal) => ({
+  // The declined-seat rule is real; only the reads are faked.
+  ...(await importOriginal<typeof import("@/lib/conference/seats")>()),
   loadSeatHoldings: async () => ({
-    seats,
+    seats: seats.map((s, i) => ({ seatId: `seat-${i}`, organizationId: "org-1", seatIndex: i, ...s })),
     entitiesById: new Map(entities.map((e) => [e.id as string, e])),
   }),
+  loadUsageIntents: async () => intents,
 }));
 
 const db = {
@@ -42,6 +52,7 @@ const load = async () => (await import("../attendance")).loadAttendance(db, "con
 beforeEach(() => {
   seats = [];
   entities = [];
+  intents = new Map();
 });
 
 describe("loadAttendance", () => {
@@ -144,5 +155,19 @@ describe("loadAttendance", () => {
     entities = [entity("s", "S", { inventory: "40" })];
     seats = [{ entityId: "s", holderPersonId: "p1" }];
     expect((await load())[0].capacity).toBe(40);
+  });
+  it("leaves declined seats out of expected but still counts them as sold (Rains: using 1 of 4)", async () => {
+    entities = [entity("staff", "Exhibitor Staff Registration", { kind: "registration", inventory: 200 })];
+    seats = [
+      { entityId: "staff", holderPersonId: "jason" },
+      { entityId: "staff", holderPersonId: null },
+      { entityId: "staff", holderPersonId: null },
+      { entityId: "staff", holderPersonId: null },
+    ];
+    intents = new Map([["org-1|staff", { intended_quantity: 1, declared_against_total: 4 }]]);
+    const staff = (await load()).find((r) => r.entityId === "staff")!;
+    expect(staff.directSeats).toBe(4);
+    expect(staff.expected).toBe(1);
+    expect(staff.expectedNamed).toBe(1);
   });
 });

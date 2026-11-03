@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import type { ConferenceDocument } from "@/lib/conference-documents";
 import {
   addConferenceDocument,
   removeConferenceDocument,
 } from "@/lib/actions/manage-conference-documents";
 import { uploadConferenceDocument } from "@/lib/actions/upload-conference-document";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import { getConferenceDocumentUrl } from "@/lib/actions/get-conference-document-url";
 
 interface Props {
@@ -183,24 +184,20 @@ function AddDocumentForm({
 export default function ConferenceDocumentsEditor({ conferenceId, initialDocuments }: Props) {
   const [documents, setDocuments] = useState<ConferenceDocument[]>(initialDocuments);
   const [adding, setAdding] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
 
   const handleAdded = (doc: ConferenceDocument) => {
     setDocuments((prev) => [...prev, doc]);
     setAdding(false);
   };
 
-  const handleRemove = (docId: string) => {
-    setRemovingId(docId);
-    startTransition(async () => {
-      const result = await removeConferenceDocument(conferenceId, docId);
-      setRemovingId(null);
-      if (result.success && result.documents) {
-        setDocuments(result.documents);
-      }
-    });
+  const handleRemove = async (docId: string) => {
+    const result = await removeConferenceDocument(conferenceId, docId);
+    if (result.success && result.documents) {
+      setDocuments(result.documents);
+      return { success: true };
+    }
+    return { success: false, error: result.error ?? "It could not be removed." };
   };
 
   const handleOpen = async (doc: ConferenceDocument) => {
@@ -264,15 +261,14 @@ export default function ConferenceDocumentsEditor({ conferenceId, initialDocumen
                   <span className="truncate">{doc.label}</span>
                   {openingId === doc.id && <span className="text-xs text-gray-400">opening…</span>}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(doc.id)}
-                  disabled={isPending && removingId === doc.id}
-                  className="flex-shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-colors disabled:opacity-50"
-                  aria-label={`Remove ${doc.label}`}
-                >
-                  {removingId === doc.id ? "…" : "✕"}
-                </button>
+                {/* ⛔ Asked twice: a task's document and the War Room's "Send to
+                    printer" go with it (WAR_ROOM_OPERATE_PLAN §8.8). */}
+                <ConfirmAction
+                  label="Remove"
+                  tone="danger"
+                  consequence={`Removes "${doc.label}" from this conference. Any checklist task that shows it loses it.`}
+                  onConfirm={() => handleRemove(doc.id)}
+                />
               </li>
             ))}
           </ul>

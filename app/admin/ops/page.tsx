@@ -892,7 +892,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const qbReconPendingRows = (qboReconPendingRes.data ?? []) as QBReconPendingRow[];
   const qboExportFailedRows = (qboExportFailedRes.data ?? []) as QBExportFailureRow[];
 
-  // The other four QBO queues. Fetched separately rather than threaded into
+  // The other QBO queues. Fetched separately rather than threaded into
   // the big positional Promise.all above — that array is destructured by
   // position and inserting into it is how you silently shift every later row.
   const [
@@ -900,6 +900,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     conferenceReceiptFailedRes,
     conferenceRefundFailedRes,
     miscReceiptFailedRes,
+    expenseBillFailedRes,
   ] = await Promise.all([
     adminClient
       .from("qbo_membership_refund_queue")
@@ -922,6 +923,12 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     adminClient
       .from("qbo_misc_receipt_queue")
       .select("id, payment_kind, payment_id, retry_count, error_message, created_at, qbo_sales_receipt_id")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    adminClient
+      .from("qbo_expense_bill_queue")
+      .select("id, expense_claim_id, retry_count, error_message, created_at, qbo_bill_id")
       .eq("status", "failed")
       .order("created_at", { ascending: false })
       .limit(10),
@@ -989,6 +996,14 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       "Misc receipt",
       (row) => `${row.payment_kind} ${row.payment_id}`,
       "qbo_sales_receipt_id",
+      false
+    ),
+    ...buildQueueFailures(
+      (expenseBillFailedRes.data ?? []) as RawQueueRow[],
+      "qbo_expense_bill_queue",
+      "Expense bill",
+      (row) => `Expense claim ${row.expense_claim_id}`,
+      "qbo_bill_id",
       false
     ),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));

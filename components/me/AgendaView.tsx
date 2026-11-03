@@ -1,5 +1,6 @@
 import Link from "next/link";
 import MeetingSwapControl from "@/components/me/MeetingSwapControl";
+import AgreeToDocument from "@/components/me/AgreeToDocument";
 import type { PersonAgenda } from "@/lib/conference/person-agenda";
 import type { SwapCapStatus } from "@/lib/scheduler/types";
 import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgency";
@@ -96,6 +97,14 @@ export default function AgendaView({
                     {d.ctaLabel ?? "Open"} &rarr;
                   </Link>
                 )}
+                {/* Agreed to right here: the editor at the bottom cannot do it. */}
+                {d.how === "agree" && d.document && (
+                  <AgreeToDocument
+                    versionId={d.document.versionId}
+                    title={d.document.title}
+                    content={d.document.content}
+                  />
+                )}
               </li>
             ))}
           </ul>
@@ -108,12 +117,12 @@ export default function AgendaView({
             A block holding one `go` item would otherwise offer "Answer it"
             pointing at a modal that cannot answer it.
           */}
-          {agenda.deadlines.some((d) => d.how !== "go") && (
+          {agenda.deadlines.some((d) => d.how === "field" || d.how === "answer") && (
             <a
               href="#edit-conference"
               className="mt-3 inline-block rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
             >
-              {agenda.deadlines.filter((d) => d.how !== "go").length === 1
+              {agenda.deadlines.filter((d) => d.how === "field" || d.how === "answer").length === 1
                 ? "Answer it"
                 : "Answer these"}
             </a>
@@ -176,6 +185,10 @@ export default function AgendaView({
                     {conflicted.has(item.id) && (
                       <span className="ml-2 text-xs font-semibold text-amber-700">overlaps</span>
                     )}
+                    {/* "What's for dinner?" — the meal's menu, from Build. */}
+                    {item.kind === "meal" && item.description?.startsWith("Menu: ") ? (
+                      <span className="mt-0.5 block text-xs text-gray-600">{item.description}</span>
+                    ) : null}
                     {/* Counted: the record bursary travellers look for. */}
                     {agenda.counted?.[item.id] ? (
                       <span className="ml-2 text-xs font-semibold text-emerald-700">

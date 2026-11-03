@@ -2,8 +2,9 @@
  * GET /api/cron/board-docx-export
  *
  * Runs on the 15th of each month at midnight UTC.
- * Finds board meetings from the prior month that have agenda or minutes content,
- * exports them to DOCX, and pushes to OneDrive.
+ * Finds board meetings from the prior month that have agenda or minutes content
+ * and files them (see exportBoardMeeting): minutes to the OneDrive minutes
+ * archive and the meeting's website documents, agenda to OneDrive.
  *
  * Schedule: 0 0 15 * *  (15th of every month, midnight UTC)
  * Auth: Bearer CRON_SECRET
@@ -11,7 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { exportMeetingToOneDrive } from "@/lib/board/docx-export";
+import { exportBoardMeeting } from "@/lib/board/docx-export";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 
@@ -40,28 +41,13 @@ export async function GET(request: NextRequest) {
 
   const db = createAdminClient();
 
-  // Load OneDrive config
-  const { data: settings } = await db
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["onedrive_drive_id", "onedrive_board_folder_path"]);
-
-  const settingsMap: Record<string, string> = {};
-  for (const row of settings ?? []) settingsMap[row.key] = row.value ?? "";
-
-  const driveId    = settingsMap["onedrive_drive_id"];
-  const boardFolder = settingsMap["onedrive_board_folder_path"] || "Board Meetings";
-
-  if (!driveId) {
-    console.warn("[board-docx-export] onedrive_drive_id not configured — skipping OneDrive push");
-  }
-
-  // Find meetings from the prior month with content
+  // Catch-up for meetings from the prior month. "Mark completed" files a
+  // meeting's documents as it happens; this re-files anything that missed it.
   const { start, end } = getPriorMonthRange();
 
   const { data: meetings, error } = await db
     .from("board_meetings")
-    .select("id, meeting_date, agenda_html, minutes_html")
+    .select("id")
     .gte("meeting_date", start)
     .lte("meeting_date", end)
     .or("agenda_html.not.is.null,minutes_html.not.is.null");
@@ -75,23 +61,7 @@ export async function GET(request: NextRequest) {
   const allErrors: string[] = [];
 
   for (const meeting of meetings ?? []) {
-    if (!driveId) {
-      // No OneDrive configured — log but don't fail
-      results.push({ meetingId: meeting.id, skipped: "no_drive_id" });
-      continue;
-    }
-
-    const result = await exportMeetingToOneDrive(
-      {
-        meetingId:   meeting.id,
-        meetingDate: meeting.meeting_date,
-        agendaHtml:  (meeting as Record<string, string | null>)["agenda_html"] ?? null,
-        minutesHtml: (meeting as Record<string, string | null>)["minutes_html"] ?? null,
-      },
-      driveId,
-      boardFolder
-    );
-
+    const result = await exportBoardMeeting(meeting.id);
     results.push(result);
     allErrors.push(...result.errors);
   }

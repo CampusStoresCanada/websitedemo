@@ -224,6 +224,28 @@ export function conferenceDirectory(conferenceId: string, title: string): Public
 }
 
 /**
+ * The map sheet handed out at the door (War Room → What's next → Map): the
+ * floor plan, then every booth by number, then every exhibitor A to Z — so
+ * "who is in 412?" and "where is X?" are both one glance.
+ *
+ * The directory's own sections, fewer of them: a map is this book without the
+ * listings' detail, not a second renderer.
+ */
+export function mapSheet(conferenceId: string, title: string): Publication {
+  return {
+    id: `map-sheet-${conferenceId}`,
+    title,
+    source: { kind: "conference", conferenceId },
+    selection: {},
+    sections: [
+      { type: "map", title: "Floor Plan" },
+      { type: "booth_index", title: "By Booth Number" },
+      { type: "listings", title: "Exhibitors A to Z", groupBy: "name", style: "compact" },
+    ],
+  };
+}
+
+/**
  * The whole network in one book: exhibitors, partners, members, people.
  *
  * The four sections are four populations, not four filters on one — which is

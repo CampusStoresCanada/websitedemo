@@ -34,10 +34,12 @@ import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import { iaEaContradiction } from "@/lib/benchmarking/iaea-consistency";
 import { hasAnySales } from "@/lib/benchmarking/completeness";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
-import type {
-  OtherIncomeRow,
-  OtherExpenseRow,
-  StaffRow,
+import {
+  seedServiceIncome,
+  seedStaffFromContacts,
+  type OtherIncomeRow,
+  type OtherExpenseRow,
+  type StaffRow,
 } from "@/lib/actions/benchmarking-financials";
 import {
   NAMED_EXPENSE_LINES,
@@ -106,20 +108,48 @@ export default function BenchmarkingSurveyForm({
   surveyClosesAt,
   fieldConfig,
   storeContacts = [],
-  locations = [],
-  keyDates = [],
+  locations: initialLocations = [],
+  keyDates: initialKeyDates = [],
   profileKeyDates = [],
   isBetaTester = false,
   logos,
-  gmCategories = [],
-  cmCategories = [],
-  otherIncome = [],
-  otherExpenses = [],
-  staff = [],
-  competitors = [],
+  gmCategories: initialGmCategories = [],
+  cmCategories: initialCmCategories = [],
+  otherIncome: initialOtherIncome = [],
+  otherExpenses: initialOtherExpenses = [],
+  staff: initialStaff = [],
+  competitors: initialCompetitors = [],
   worksheetPriorYears = [],
   figureOverrides = {},
 }: BenchmarkingSurveyFormProps) {
+  /*
+    The lists a store builds itself live HERE, not in the editors that render
+    them. ⛔ Do not move them back down.
+
+    Only the active section is mounted. An editor that held its own rows in
+    `useState(initialRows)` therefore re-seeded from the page-load snapshot
+    every time the store left the section and came back — empty, for a draft
+    that started empty. The rows were safely in the database the whole time;
+    they simply stopped being on screen, the chips for categories already added
+    reappeared, and clicking one returned "you already have that category".
+
+    ⛔ The server props are a snapshot, not a subscription. Nothing on this page
+    calls router.refresh(), so they are fixed from first render to reload, and
+    the only live copy of these lists is the one held here. That is also what
+    the whole-survey review reads: before this, §8 reported "None added" for
+    everything added in the current sitting, which reads as lost work.
+
+    Found 2026-10-29, on a store nine categories deep.
+  */
+  const [locations, setLocations] = useState<SurveyLocation[]>(initialLocations);
+  const [keyDates, setKeyDates] = useState<KeyDate[]>(initialKeyDates);
+  const [gmCategories, setGmCategories] = useState<SurveyCategory[]>(initialGmCategories);
+  const [cmCategories, setCmCategories] = useState<SurveyCategory[]>(initialCmCategories);
+  const [otherIncome, setOtherIncome] = useState<OtherIncomeRow[]>(initialOtherIncome);
+  const [otherExpenses, setOtherExpenses] = useState<OtherExpenseRow[]>(initialOtherExpenses);
+  const [staff, setStaff] = useState<StaffRow[]>(initialStaff);
+  const [competitors, setCompetitors] = useState<CompetitorRow[]>(initialCompetitors);
+
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
     [fieldConfig]
@@ -255,6 +285,43 @@ export default function BenchmarkingSurveyForm({
 
   const isSubmitted = formData.status === "submitted";
   const isReadOnly = isSubmitted;
+
+  /*
+    Two lists start from what we already hold, rather than from nothing.
+
+    Both seeders used to run inside the section that shows their rows, which
+    meant re-running on every visit to it, each time judging "has this been
+    seeded?" against the page-load snapshot. §4 replaced the list wholesale on
+    every visit; §6 re-added exactly the people the store had deleted. Up here
+    they run once, on the mount that lasts as long as the page does.
+
+    ⛔ Never a page reload to reveal what was seeded. Saves in this form are
+    debounced by 800ms, so a reload can discard a figure typed seconds ago in
+    another section.
+  */
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (isReadOnly || seeded.current) return;
+    seeded.current = true;
+    let cancelled = false;
+
+    void seedServiceIncome(benchmarkingId).then((r) => {
+      if (!cancelled && r.rows.length > 0) setOtherIncome(r.rows);
+    });
+
+    // Only for a store that has not named its team yet: the seeder skips
+    // contacts that already have a row, so running it over a list somebody has
+    // pruned would put the pruned people back.
+    if (initialStaff.length === 0) {
+      void seedStaffFromContacts(benchmarkingId).then((r) => {
+        if (!cancelled && r.rows.length > 0) setStaff(r.rows);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [benchmarkingId, isReadOnly, initialStaff.length]);
 
   /*
     Running totals for the sections that show the store where it stands before
@@ -811,24 +878,27 @@ export default function BenchmarkingSurveyForm({
                     key="general_merchandise"
                     benchmarkingId={benchmarkingId}
                     scope="general_merchandise"
-                    initialCategories={gmCategories}
+                    categories={gmCategories}
+                    onCategoriesChange={setGmCategories}
                     locations={locations}
                     contacts={storeContacts}
                     isReadOnly={isReadOnly}
                   />
                 ) : sections[activeSection]?.id === "course_materials" ? (
                   /*
-                    Keyed, or §3 opens showing §2's categories until a reload.
-                    Both branches render CategorySales at the same position in
-                    the tree, so React reuses the instance and its
-                    useState(initialCategories) — set once, on first mount —
-                    keeps §2's list.
+                    Still keyed. Both branches render CategorySales at the same
+                    position in the tree, so without a key React reuses the one
+                    instance across the switch and whatever it holds of its own
+                    goes with it — today the error line, so §3 would open under
+                    a complaint about a category in §2. The lists themselves no
+                    longer travel that way; they are held above.
                   */
                   <CategorySales
                     key="course_materials"
                     benchmarkingId={benchmarkingId}
                     scope="course_materials"
-                    initialCategories={cmCategories}
+                    categories={cmCategories}
+                    onCategoriesChange={setCmCategories}
                     locations={locations}
                     contacts={storeContacts}
                     isReadOnly={isReadOnly}
@@ -839,7 +909,8 @@ export default function BenchmarkingSurveyForm({
                      together, and it is the context for everything under it. */
                   <OtherIncomeEditor
                     benchmarkingId={benchmarkingId}
-                    initialRows={otherIncome}
+                    rows={otherIncome}
+                    onRowsChange={setOtherIncome}
                     merchandiseTotal={merchandiseTotal}
                     courseMaterialsTotal={courseMaterialsTotal}
                     centralFunding={
@@ -879,7 +950,8 @@ export default function BenchmarkingSurveyForm({
             {sections[activeSection]?.id === "staffing" && (
               <StaffingEditor
                 benchmarkingId={benchmarkingId}
-                initialStaff={staff}
+                staff={staff}
+                onStaffChange={setStaff}
                 isReadOnly={isReadOnly}
               />
             )}
@@ -887,7 +959,8 @@ export default function BenchmarkingSurveyForm({
             {sections[activeSection]?.id === "expenses" && (
               <OtherExpensesEditor
                 benchmarkingId={benchmarkingId}
-                initialRows={otherExpenses}
+                rows={otherExpenses}
+                onRowsChange={setOtherExpenses}
                 namedExpenseTotal={namedExpenseTotal}
                 isReadOnly={isReadOnly}
               />
@@ -909,7 +982,8 @@ export default function BenchmarkingSurveyForm({
             {sections[activeSection]?.id === "institution_profile" && (
               <LocationsEditor
                 benchmarkingId={benchmarkingId}
-                initialLocations={locations}
+                locations={locations}
+                onLocationsChange={setLocations}
                 isReadOnly={isReadOnly}
               />
             )}
@@ -917,7 +991,8 @@ export default function BenchmarkingSurveyForm({
               <>
                 <KeyDatesEditor
                   benchmarkingId={benchmarkingId}
-                  initialDates={keyDates}
+                  dates={keyDates}
+                  onDatesChange={setKeyDates}
                   isReadOnly={isReadOnly}
                   isSemesterBased={formData.is_semester_based === true}
                   inventoryCountStyle={
@@ -929,7 +1004,8 @@ export default function BenchmarkingSurveyForm({
                 />
                 <CompetitorsEditor
                   benchmarkingId={benchmarkingId}
-                  initialRows={competitors}
+                  rows={competitors}
+                  onRowsChange={setCompetitors}
                   isReadOnly={isReadOnly}
                 />
                 <ServicesJourney

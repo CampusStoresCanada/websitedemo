@@ -4,6 +4,7 @@ import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/li
 import { loadSeatHoldings, pickMeetingSeat } from "@/lib/conference/seats";
 import { offerRequiresOwnershipOfEntityIds } from "@/lib/conference/ownership-gate";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
+import { deriveAnswers, type ConferenceAnswer } from "@/lib/conference/agenda";
 import {
   getConferenceScheduleTimeline,
   type ConferenceScheduleItem,
@@ -75,12 +76,17 @@ export type AgendaDeadline = {
    *            elsewhere on the page (picking their top five). Never a tick: a
    *            tick can be ticked without doing it, so the task would read
    *            complete when it is not.
+   *   agree  — a document only they can agree to (the CANCOLL consent), read
+   *            and agreed to in the row itself. Recorded as a legal acceptance
+   *            against its version, which is also how we see it was done.
    *
    * The two are stored differently and always were — a column versus an
    * acknowledgement row — but that is a storage fact, not a reason to show a
    * person two separate lists of things they owe before the same conference.
    */
-  how: "field" | "answer" | "go";
+  how: "field" | "answer" | "go" | "agree";
+  /** For `agree`: the document, newest version. */
+  document?: { versionId: string; title: string; content: string };
   /** For `go`: where the control lives, relative to this page, and its label. */
   href?: string;
   ctaLabel?: string;
@@ -117,6 +123,8 @@ export type PersonAgenda = {
    * says who confirmed it: her, the exhibitor, or both.
    */
   counted: Record<string, { attendee: boolean; exhibitor: boolean }>;
+  /** Wi-Fi, coat check, the shuttle: answered once in Build, for everyone. */
+  answers: ConferenceAnswer[];
 };
 
 /**
@@ -326,7 +334,9 @@ export async function loadPersonAgenda(
      * nothing here for them to confirm.
      */
     const destination =
-      task.source === "monitored" ? getPersonTaskDestination(task.checkType as never) : null;
+      task.source === "monitored" && !task.document
+        ? getPersonTaskDestination(task.checkType as never)
+        : null;
     deadlines.push({
       key: `task:${task.taskId}`,
       label: task.name,
@@ -335,7 +345,8 @@ export async function loadPersonAgenda(
       // the answer and re-reading it in a timezone loses one.
       dueOn: task.deadline ? task.deadline.slice(0, 10) : null,
       waitingOn: "before the conference",
-      how: destination ? ("go" as const) : ("answer" as const),
+      how: task.document ? ("agree" as const) : destination ? ("go" as const) : ("answer" as const),
+      document: task.document ?? undefined,
       href: destination?.path,
       ctaLabel: destination?.label,
       taskId: task.taskId,
@@ -376,6 +387,8 @@ export async function loadPersonAgenda(
             .from("conference_check_in_events")
             .select("schedule_id, confirmed_by, person_id")
             .eq("is_test", false)
+            // Scans only: a staff ruling is never shown to the person (CANCOLL MOU 12.6).
+            .in("confirmed_by", ["attendee", "exhibitor"])
             .in("schedule_id", scheduleIds);
           return isExhibitor ? q : q.eq("person_id", personId);
         })()
@@ -405,6 +418,8 @@ export async function loadPersonAgenda(
       meetingSeatId: meetingSeat?.seatId ?? null,
       dayKeys: [...new Set(items.map((i) => i.dayKeyLocal))].sort(),
       conflicts: clashes,
+      // Not entitlement-gated: the Wi-Fi password is for everyone there.
+      answers: deriveAnswers([...byId.values()]),
     },
   };
 }

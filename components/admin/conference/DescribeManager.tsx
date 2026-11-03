@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import ConfirmAction from "@/components/ui/ConfirmAction";
 import {
   ensureConferenceDays,
   updateConferenceDay,
@@ -167,14 +168,16 @@ function DayRow({
       >
         Save
       </button>
-      <button
-        type="button"
+      {/* ⛔ Asked twice (WAR_ROOM_OPERATE_PLAN §8.8); run() shows any failure above. */}
+      <ConfirmAction
+        label="Delete"
+        tone="danger"
         disabled={busy}
-        onClick={() => run(() => deleteConferenceDay(day.id))}
-        className="text-xs text-red-600 hover:underline disabled:opacity-40"
-      >
-        Delete
-      </button>
+        consequence={`Deletes ${day.date}${day.label ? ` (${day.label})` : ""} from the conference.`}
+        onConfirm={async () => {
+          await run(() => deleteConferenceDay(day.id));
+        }}
+      />
     </li>
   );
 }

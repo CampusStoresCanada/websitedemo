@@ -360,15 +360,12 @@ export default function CartClient({
                       {isMembershipRenewal || isBooth ? (
                         <span className="text-sm text-gray-500">1</span>
                       ) : (
-                        <input
-                          type="number"
-                          min={0}
-                          value={item.quantity}
-                          onChange={(event) =>
-                            handleUpdateQuantity(item.cartItemId, Math.max(0, Number(event.target.value) || 0))
-                          }
-                          className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                        <QuantityInput
+                          // Keyed on the saved quantity so the box resets to it after every refresh.
+                          key={`${item.cartItemId}:${item.quantity}`}
+                          quantity={item.quantity}
                           disabled={isPending}
+                          onCommit={(quantity) => handleUpdateQuantity(item.cartItemId, quantity)}
                         />
                       )}
                     </td>
@@ -474,5 +471,50 @@ export default function CartClient({
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * A cart line's quantity, saved when the buyer is done typing, not per keystroke.
+ *
+ * ⛔ It used to save on every change, so clearing the box to type a new number
+ * sent 0 for an instant, and 0 removes the line: the registration vanished
+ * from the cart mid-edit. Now an empty box puts the old number back, and only
+ * an explicit 0 (or the Remove button) removes the line.
+ */
+function QuantityInput({
+  quantity,
+  disabled,
+  onCommit,
+}: {
+  quantity: number;
+  disabled: boolean;
+  onCommit: (quantity: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(quantity));
+
+  const commit = () => {
+    const next = Number(draft);
+    if (draft.trim() === "" || !Number.isFinite(next) || next < 0) {
+      setDraft(String(quantity));
+      return;
+    }
+    const whole = Math.floor(next);
+    if (whole !== quantity) onCommit(whole);
+  };
+
+  return (
+    <input
+      type="number"
+      min={0}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
+      disabled={disabled}
+    />
   );
 }

@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  applyCanonicalConferencePersonIdentityEdit,
   markConferencePersonCheckedInManual,
-  reprintConferenceBadge,
   updateConferencePersonOps,
 } from "@/lib/actions/conference-people";
 
@@ -41,38 +39,17 @@ export async function PATCH(
     );
   }
 
-  let payload: {
-    op?: "update" | "manual_check_in" | "reprint_badge";
+  // A badge is printed through the one print engine (printBadge), not here.
+  type Payload = {
+    op?: "update" | "manual_check_in";
     testMode?: boolean;
     /** The event a door device is checking in to (lib/conference/door.ts). */
     entityId?: string | null;
     patch?: Record<string, unknown>;
-    reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
-    reprintNote?: string | null;
-    stockInHand?: string;
-    transportMethod?: "pdf" | "printer_bridge";
-    canonicalPatch?: {
-      displayName?: string | null;
-      contactEmail?: string | null;
-      roleTitle?: string | null;
-    };
   };
+  let payload: Payload;
   try {
-    payload = (await request.json()) as {
-      op?: "update" | "manual_check_in" | "reprint_badge";
-      testMode?: boolean;
-      entityId?: string | null;
-      patch?: Record<string, unknown>;
-      reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
-      reprintNote?: string | null;
-      stockInHand?: string;
-      transportMethod?: "pdf" | "printer_bridge";
-      canonicalPatch?: {
-        displayName?: string | null;
-        contactEmail?: string | null;
-        roleTitle?: string | null;
-      };
-    };
+    payload = (await request.json()) as Payload;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -96,50 +73,6 @@ export async function PATCH(
     return NextResponse.json(result.data ?? null);
   }
 
-  if (payload.op === "reprint_badge") {
-    if (!payload.reprintReason) {
-      return NextResponse.json(
-        { error: "reprintReason is required for badge reprints." },
-        { status: 400 }
-      );
-    }
-    if (payload.canonicalPatch) {
-      const canonicalEdit = await applyCanonicalConferencePersonIdentityEdit(personId, {
-        displayName: payload.canonicalPatch.displayName ?? null,
-        contactEmail: payload.canonicalPatch.contactEmail ?? null,
-        roleTitle: payload.canonicalPatch.roleTitle ?? null,
-      });
-      if (!canonicalEdit.success) {
-        return NextResponse.json(
-          { error: canonicalEdit.error ?? "Failed to apply canonical edits before reprint." },
-          { status: 500 }
-        );
-      }
-    }
-
-    const result = await reprintConferenceBadge(
-      personId,
-      payload.reprintReason,
-      payload.reprintNote ?? null,
-      // Anything unrecognised is "did not say", which plans a full badge.
-      payload.stockInHand === "company_blank" || payload.stockInHand === "spare"
-        ? payload.stockInHand
-        : undefined
-    );
-    if (!result.success) {
-      const lowerError = result.error?.toLowerCase() ?? "";
-      const status =
-        lowerError.includes("access required") || lowerError.includes("not authorized")
-          ? 403
-          : 500;
-      return NextResponse.json(
-        { error: result.error ?? "Failed to reprint badge." },
-        { status }
-      );
-    }
-    return NextResponse.json(result.data ?? null);
-  }
-
   const identityKeys = ["display_name", "contact_email", "role_title"];
   const attemptedIdentity = Object.keys(payload.patch ?? {}).filter((key) =>
     identityKeys.includes(key)
@@ -148,7 +81,7 @@ export async function PATCH(
     return NextResponse.json(
       {
         error:
-          "Identity fields must be updated via canonicalPatch (canonical-first), not op=update.",
+          "Identity fields are edited on their contact record (updateField), not op=update.",
       },
       { status: 400 }
     );

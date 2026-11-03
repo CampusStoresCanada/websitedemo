@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { readPreferences, writePreference } from "@/lib/profile/preferences";
 
 /**
  * Personal off-switch for the header's Circle notification poll.
@@ -22,10 +22,6 @@ const PAUSE_ALLOWED_EMAILS = new Set(["google@campusstores.ca"]);
 /** Key inside profiles.preferences (see 20260825180000_profiles_preferences). */
 const PREFERENCE_KEY = "circle_badge_paused";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** True if this account is allowed to pause its own Circle badge poll. */
 export function canPauseCircleBadge(email: string | null | undefined): boolean {
   if (!email) return false;
@@ -44,36 +40,12 @@ export async function isCircleBadgePaused(
   email: string | null | undefined
 ): Promise<boolean> {
   if (!canPauseCircleBadge(email)) return false;
-
-  try {
-    const db = createAdminClient();
-    const { data, error } = await db
-      .from("profiles")
-      .select("preferences")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (error) {
-      console.warn("[circle/badge-preference] read failed:", error.message);
-      return false;
-    }
-
-    return isRecord(data?.preferences) && data.preferences[PREFERENCE_KEY] === true;
-  } catch (err) {
-    console.warn(
-      "[circle/badge-preference] read threw:",
-      err instanceof Error ? err.message : err
-    );
-    return false;
-  }
+  return (await readPreferences(userId))[PREFERENCE_KEY] === true;
 }
 
 /**
  * Persist the pause flag for this account. Returns false if the account isn't
  * allowed to set it, or the write failed.
- *
- * Read-modify-write so unrelated preference keys survive; the admin client is
- * required because a session client hits RLS and reports a silent no-op.
  */
 export async function setCircleBadgePaused(
   userId: string,
@@ -81,32 +53,5 @@ export async function setCircleBadgePaused(
   paused: boolean
 ): Promise<boolean> {
   if (!canPauseCircleBadge(email)) return false;
-
-  const db = createAdminClient();
-  const { data, error: readError } = await db
-    .from("profiles")
-    .select("preferences")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (readError || !data) {
-    console.error(
-      "[circle/badge-preference] write aborted, profile unreadable:",
-      readError?.message ?? "no profile row"
-    );
-    return false;
-  }
-
-  const current = isRecord(data.preferences) ? data.preferences : {};
-  const { error } = await db
-    .from("profiles")
-    .update({ preferences: { ...current, [PREFERENCE_KEY]: paused } })
-    .eq("id", userId);
-
-  if (error) {
-    console.error("[circle/badge-preference] write failed:", error.message);
-    return false;
-  }
-
-  return true;
+  return writePreference(userId, PREFERENCE_KEY, paused);
 }

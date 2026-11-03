@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { todayVerdict } from "@/lib/conference/badges/checkin-verdict";
 import type { OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
-import { listDeskCompanyContacts, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
+import { listDeskCompanyContacts, printBadge, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
 import {
   listPrintStations,
   loadReprintPreview,
@@ -14,6 +14,7 @@ import {
   type ReprintPreview,
 } from "@/lib/actions/conference-badges";
 import { updateField } from "@/lib/actions/update-field";
+import { cardChoices } from "@/lib/conference/badges/reprint-plan";
 import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
@@ -1230,22 +1231,9 @@ export default function CheckInDeskClient({
     cardInHandRef.current = cardInHand;
   }, [cardInHand]);
   const cardInHandPicker = (personId: string) => {
-    // ⛔ Only cards that EXIST for this person: a blank printed for their
-    // company AND their type, or a spare of their type. Another type's card
-    // carries another type's schedule on its back.
-    const cards = facts[personId]?.reprintCards;
-    const type = cards?.typeName ? ` (${cards.typeName})` : "";
-    // In a rehearsal every card is offered, so printing can be tried on the
-    // test badges without changing the conference's print-stock settings.
-    const options: Array<["company_blank" | "spare" | "none", string]> = [
-      ...(cards?.companyBlank || testMode ? [["company_blank", `Company blank${type}`] as ["company_blank", string]] : []),
-      // A spare fits anyone whose badge looks the same; the desk prints their
-      // schedule on a sticker, so it is named by its stack, not a type.
-      ...((cards && cards.spareCount > 0) || testMode
-        ? [["spare", cards?.spareLabel ? `Spare (${cards.spareLabel.toLowerCase()})` : "Spare"] as ["spare", string]]
-        : []),
-      ["none", "No card"],
-    ];
+    // Only cards that exist for them; in a rehearsal every card is offered, so
+    // printing can be tried on the test badges.
+    const options = cardChoices(facts[personId]?.reprintCards, testMode);
     const suggested = facts[personId]?.reprintStock ?? "none";
     const chosen =
       cardInHand[personId] ?? (options.some(([value]) => value === suggested) ? suggested : "none");
@@ -1291,48 +1279,34 @@ export default function CheckInDeskClient({
     ): Promise<boolean> => {
       setReprintBusy(personId);
       try {
-        const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          // The card the desk suggested, so the job is planned for what is
-          // actually in hand rather than always as a full badge.
-          body: JSON.stringify({
-            op: "reprint_badge",
-            reprintReason: reason,
-            ...(note ? { reprintNote: note } : {}),
-            // What the operator says they are holding, else the desk's guess.
-            stockInHand: cardInHandRef.current[personId] ?? knownStock ?? facts[personId]?.reprintStock,
-          }),
+        // The one print engine: planned for the card in hand and, when that is
+        // a sticker, straight to the print station (one tap prints).
+        const result = await printBadge({
+          conferenceId,
+          personId,
+          reason,
+          note: note ?? null,
+          // What the operator says they are holding, else the desk's guess.
+          stockInHand: cardInHandRef.current[personId] ?? knownStock ?? facts[personId]?.reprintStock ?? "none",
+          stationId: deskPrinterRef.current,
         });
-        const payload = (await response.json()) as {
-          error?: string;
-          badgePrintJobId?: string;
-          labelPrintable?: boolean;
-        };
-        if (!response.ok) {
-          pushScanCard("scan_failed", personId, payload.error ?? "The reprint could not be sent.");
+        if (!result.success) {
+          pushScanCard("scan_failed", personId, result.error);
           return false;
         }
-        if (payload.labelPrintable === true && payload.badgePrintJobId) {
-          // ⛔ One tap prints (Stephen, 2026-10-21): the reprint goes straight
-          // to the print station, no second "Send to printer".
-          const sent = await sendReprintToQueue({
-            conferenceId,
-            jobId: payload.badgePrintJobId,
-            stationId: deskPrinterRef.current,
-          });
+        const printed = result.data;
+        if (printed.labelPrintable) {
           pushScanCard(
-            sent.success ? "badge_reprinted" : "scan_failed",
+            printed.queued ? "badge_reprinted" : "scan_failed",
             personId,
-            !sent.success
-              ? sent.error
-              : sent.data.stationOnline
+            printed.queueError ??
+              (printed.stationOnline
                 ? null
-                : offlineNote(sent.data.stationLabel),
-            { jobId: payload.badgePrintJobId, labelPrintable: true, queued: sent.success }
+                : offlineNote(printed.stationLabel)),
+            { jobId: printed.jobId, labelPrintable: true, queued: printed.queued }
           );
           setReprintOpenId(null);
-          if (!sent.success) return false;
+          if (!printed.queued) return false;
         } else {
           pushScanCard(
             "reprint_needs_full_badge",
@@ -2520,6 +2494,11 @@ export default function CheckInDeskClient({
                 }}
               />
             ) : null}
+            {/* ⛔ The one print the desk keeps: a door's backup list, the moment
+                a phone fails (Stephen, 2026-10-22). Everything else that
+                prints — the print station, check-in cards, the map — is run
+                from the War Room's What's next, not from the desk. Which
+                printer THIS device sends to is a desk setting, so it stays. */}
             {printStations.length > 1 ? (
               <ToolButton
                 size="lg"
@@ -2537,26 +2516,6 @@ export default function CheckInDeskClient({
                 }}
               />
             ) : null}
-            <ToolButton
-              size="lg"
-              showLabel
-              icon={<PrintIcon />}
-              label="Open the print station (laptop by the printer)"
-              onClick={() => {
-                setDeskMenuOpen(false);
-                window.open(`/admin/conference/${conferenceId}/check-in/print-station`, "_blank", "noopener");
-              }}
-            />
-            <ToolButton
-              size="lg"
-              showLabel
-              icon={<PrintIcon />}
-              label="Print check-in cards (booths and events)"
-              onClick={() => {
-                setDeskMenuOpen(false);
-                window.open(`/admin/conference/${conferenceId}/check-in/cards`, "_blank", "noopener");
-              }}
-            />
             {activeDoorEvent ? (
               <ToolButton
                 size="lg"

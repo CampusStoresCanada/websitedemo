@@ -70,6 +70,10 @@ export type TemplateKey =
   | "partnership_renewal_reminder"
   | "partnership_grace_reminder"
   | "partnership_suspended"
+  // Billing. Every invoice, every program: sent to ALL org admins in place of
+  // Stripe's own invoice email, which reaches one address. See
+  // finalizeAndSendInvoice in lib/stripe/billing.ts.
+  | "invoice_issued"
   // User management
   | "org_user_invited"
   | "org_user_added_to_org"
@@ -91,6 +95,17 @@ export type TemplateKey =
   | "conference_checklist_reminder"
   /** A walk-up named at the check-in desk without an email: no login. Tells their org admins. */
   | "conference_walkup_without_email"
+  // Travel bursary (lib/actions/conference-bursary.ts): the school's own request,
+  // told to the people who filled it in. Transactional.
+  | "bursary_request_received"
+  | "bursary_request_approved"
+  | "bursary_request_denied"
+  // Expense claims (lib/actions/expense-claims.ts): any program. Told to the
+  // people who filled the claim in. Transactional.
+  | "expense_claim_received"
+  | "expense_claim_returned"
+  | "expense_claim_rejected"
+  | "expense_claim_approved"
   // Sent to ONE person about their own listing — never to their org admin.
   | "directory_visibility_ask"
   // Benchmarking. Transactional: the survey is a membership obligation and a

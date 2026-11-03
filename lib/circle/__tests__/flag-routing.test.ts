@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBenchmarkingSurveyFlag } from "@/lib/circle/flag-routing";
+import { isBenchmarkingSurveyFlag, isConferenceAskFlag } from "@/lib/circle/flag-routing";
 
 /**
  * Who hears about a flag depends on what was flagged.
@@ -32,5 +32,14 @@ describe("flag routing", () => {
     ]) {
       expect(isBenchmarkingSurveyFlag(url)).toBe(false);
     }
+  });
+
+  it("sends a conference ask to CSC staff, not to the asker's own store", () => {
+    expect(isConferenceAskFlag("/admin/conference/abc/war-room")).toBe(true);
+    expect(isConferenceAskFlag("/admin/conference/abc/war-room?ask=person-1")).toBe(true);
+    // Other conference admin pages are CSC's own pages and route normally.
+    expect(isConferenceAskFlag("/admin/conference/abc/badges")).toBe(false);
+    expect(isConferenceAskFlag("/admin/conference/abc/war-roomy")).toBe(false);
+    expect(isConferenceAskFlag("/conference/2027/99")).toBe(false);
   });
 });

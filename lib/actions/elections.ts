@@ -479,6 +479,67 @@ export async function certifyElectionAction(slug: string, formData: FormData): P
 
 
 /**
+ * Move board access for one side of the changeover.
+ *
+ * Two presses, not one: the incoming join at the meeting, the outgoing keep
+ * theirs through the conference after it. A single button would be wrong on
+ * one of them.
+ */
+export async function applyBoardTransitionAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult & { groups?: string[]; groupsFailed?: boolean }> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const side = formData.get("side") === "outgoing" ? "outgoing" : "incoming";
+  const choice = String(formData.get("dateChoice") ?? "agm");
+
+  const { getBoardTransition, applyBoardTransition } = await import("@/lib/elections/service");
+  const { resolveEffectiveDate } = await import("@/lib/elections/transition");
+
+  const state = await getBoardTransition(slug);
+  if (!state) return { ok: false, error: "That election does not exist." };
+
+  const resolved = resolveEffectiveDate(
+    choice === "after_conference" ? "after_conference" : choice === "custom" ? "custom" : "agm",
+    {
+      agmDate: state.agmDate,
+      conferenceEndsOn: state.conferenceEndsOn,
+      custom: String(formData.get("customDate") ?? "").trim() || null,
+    }
+  );
+  if (!resolved.date) return { ok: false, error: resolved.problem ?? "Pick a date." };
+
+  const result = await applyBoardTransition(slug, {
+    side,
+    effectiveOn: resolved.date,
+    actorProfileId: guard.userId,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  // What the groups actually did, carried back to the press. ⛔ This returned
+  // a bare ok before, so the page said "access moved" whether or not a single
+  // person had reached the mailing list.
+  const { describeOutcome } = await import("@/lib/google/governance-group");
+  const groups = result.data.groups.map(describeOutcome);
+  // ⛔ stillThere belongs here as much as missing. A removal that Google
+  // accepted and did not perform leaves somebody reading the board's mail
+  // after they left the board, and a green banner over that is the exact
+  // failure this path was rewritten to stop.
+  const groupsFailed = result.data.groups.some(
+    (g) =>
+      g.error !== null ||
+      g.missing.length > 0 ||
+      g.stillThere.length > 0 ||
+      g.failed.length > 0
+  );
+
+  revalidatePath(`/admin/elections/${slug}/audit`);
+  return { ok: true, groups, groupsFailed };
+}
+
+/**
  * Give notice of the AGM. The window check lives in the service; this only
  * carries the meeting details a person has to supply.
  */

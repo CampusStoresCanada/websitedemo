@@ -40,7 +40,14 @@ const TASKS: Record<string, unknown[]> = {
   "cl-directory": [{ id: "t-2", name: "Complete your listing", description: "d", check_type: "self_reported", check_entity_id: null }],
 };
 
-const captured = { logInserts: [] as unknown[][], campaigns: [] as { name: string; recipients: unknown[] }[] };
+const captured = {
+  logInserts: [] as unknown[][],
+  campaigns: [] as { name: string; recipients: unknown[] }[],
+  /** Every table written to, for the dry run. */
+  inserts: [] as string[],
+  /** The filters the checklist query was narrowed by. */
+  checklistFilters: [] as Record<string, unknown>[],
+};
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
@@ -70,7 +77,9 @@ vi.mock("@/lib/supabase/admin", () => ({
       };
       b.single = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
       b.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
+      if (table === "conference_checklists") captured.checklistFilters.push(filters);
       b.insert = (r: unknown[]) => {
+        captured.inserts.push(table);
         if (table === "conference_checklist_reminder_log") captured.logInserts.push(r);
         return Promise.resolve({ error: null });
       };
@@ -102,6 +111,33 @@ vi.mock("../checklist-checks", () => ({
 beforeEach(() => {
   captured.logInserts = [];
   captured.campaigns = [];
+  captured.inserts = [];
+  captured.checklistFilters = [];
+});
+
+/**
+ * The War Room's Preview is a dry run, and its button runs ONE conference
+ * (WAR_ROOM_OPERATE_PLAN §8.1). A dry run that wrote checkpoints or a log row
+ * would change the very send it is previewing.
+ */
+describe("the War Room's reminder preview and button", () => {
+  it("a dry run names who would be written to, and writes and sends nothing", async () => {
+    const { runChecklistReminders } = await import("../checklist-engine");
+    const result = await runChecklistReminders({ dryRun: true });
+
+    expect(captured.campaigns).toHaveLength(0);
+    expect(captured.inserts).toEqual([]);
+    expect(result.preview).toEqual([
+      expect.objectContaining({ organizationId: ORG, recipients: ["admin@greentown.test"] }),
+    ]);
+    expect(result.orgsReminded).toBe(1);
+  });
+
+  it("scoped to a conference, asks only for that conference's checklists", async () => {
+    const { runChecklistReminders } = await import("../checklist-engine");
+    await runChecklistReminders({ conferenceId: CONFERENCE, dryRun: true });
+    expect(captured.checklistFilters[0]).toMatchObject({ active: true, conference_id: CONFERENCE });
+  });
 });
 
 describe("an org due on two checklists at once", () => {
