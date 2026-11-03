@@ -54,6 +54,8 @@ function accountSetupBlock(code: string, email: string): string {
 
 interface SendEmailOptions {
   to: string;
+  /** Copied in, visible to the recipient. Dropped under DEV_EMAIL_INTERCEPT. */
+  cc?: string[];
   subject: string;
   html: string;
   replyTo?: string;
@@ -212,6 +214,8 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     const { data, error } = await resend.emails.send({
       from: await resolveFromAddress(),
       to,
+      // A local run reaches the intercept address only, never a real CC.
+      ...(!intercept && options.cc?.length ? { cc: options.cc } : {}),
       subject,
       html: await wrapEmailBody(options.html, undefined, options.manageUrl),
       replyTo: options.replyTo,

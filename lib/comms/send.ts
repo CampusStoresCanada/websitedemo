@@ -29,6 +29,9 @@ export async function sendTransactional(options: {
   to: string;
   recipientName?: string;
   variables: Record<string, string | number | boolean | null | undefined>;
+  /** Copied in on the same message (the CANCOLL invoice copies both presidents). */
+  cc?: string[];
+  attachments?: Array<{ filename: string; content: string | Buffer }>;
 }): Promise<{ success: boolean; error?: string }> {
   const template = await getTemplate(options.templateKey);
   if (!template) {
@@ -39,7 +42,7 @@ export async function sendTransactional(options: {
     app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
     ...options.variables,
   });
-  return sendEmail({ to: options.to, subject, html: bodyHtml });
+  return sendEmail({ to: options.to, cc: options.cc, subject, html: bodyHtml, attachments: options.attachments });
 }
 
 /**

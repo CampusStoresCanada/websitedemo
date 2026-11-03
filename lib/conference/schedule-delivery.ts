@@ -82,6 +82,7 @@ export async function sendSchedulesForRun(params: DeliveryParams): Promise<Sched
       orgName: target.orgName,
       meetingCount: target.meetingCount,
       dayCount: target.dayCount,
+      seatId: target.seatId,
     });
     result.sent.push(target.seatId);
   }

@@ -7,7 +7,24 @@ import {
   markCancollFirstInvoicePaid,
   type FundedConversionBoard,
 } from "@/lib/actions/conference-funded-conversion";
+import {
+  exportCancollRegistrationReport,
+  issueCancollInvoice,
+  type CancollBillingSummary,
+} from "@/lib/actions/cancoll-billing";
 import { formatCents } from "@/lib/utils";
+
+/** Hand a file the server built to the browser to save, as the War Room's Data tab does. */
+function saveFile(filename: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8;" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Staff list of schools whose paid registration can be cleared through to the
@@ -18,14 +35,57 @@ import { formatCents } from "@/lib/utils";
 export default function FundedConversionPanel({
   conferenceId,
   board,
+  billing,
 }: {
   conferenceId: string;
   board: FundedConversionBoard;
+  /** Where invoicing CANCOLL stands (lib/actions/cancoll-billing.ts). */
+  billing: CancollBillingSummary | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [paidOn, setPaidOn] = useState("");
+  // Schedule A's first invoice covers registrations confirmed on or before
+  // November 30; the second, to January 17.
+  const [throughDate, setThroughDate] = useState("2026-11-30");
+
+  const downloadReport = () => {
+    startTransition(async () => {
+      const result = await exportCancollRegistrationReport(conferenceId);
+      if (!result.success) {
+        setMessage({ tone: "error", text: result.error });
+        return;
+      }
+      saveFile(result.data.filename, result.data.csv);
+    });
+  };
+
+  const invoice = () => {
+    if (!billing) return;
+    const cc = billing.invoiceCc.length ? `, copying ${billing.invoiceCc.join(" and ")}` : "";
+    if (
+      !window.confirm(
+        `Invoice CANCOLL for every registration confirmed on or before ${throughDate} that hasn't been invoiced yet? ` +
+          `It is emailed to ${billing.invoiceTo ?? "nobody"}${cc}, with the registration report attached, and sent to QuickBooks now.`
+      )
+    )
+      return;
+    startTransition(async () => {
+      const result = await issueCancollInvoice({ conferenceId, throughDate });
+      if (!result.success) {
+        setMessage({ tone: "error", text: result.error });
+        return;
+      }
+      setMessage({
+        tone: result.data.emailed ? "ok" : "error",
+        text: result.data.emailed
+          ? `Invoiced ${result.data.count} registrations, ${formatCents(result.data.totalCents)} with tax. Emailed and queued for QuickBooks.`
+          : `Invoiced ${result.data.count} registrations, ${formatCents(result.data.totalCents)} with tax, and queued for QuickBooks, but the email didn't send. Send the invoice from Stripe.`,
+      });
+      router.refresh();
+    });
+  };
   const locked = !board.firstInvoicePaidAt;
 
   const recordPaid = () => {
@@ -99,6 +159,60 @@ export default function FundedConversionPanel({
 
       {message && (
         <p className={`mt-3 text-sm ${message.tone === "ok" ? "text-green-700" : "text-red-700"}`}>{message.text}</p>
+      )}
+
+      {billing && (
+        <div className="mt-4 rounded-md border border-gray-200 p-3 text-sm">
+          <p className="font-medium text-gray-900">Invoicing CANCOLL</p>
+          <p className="mt-1 text-gray-600">
+            {billing.count} Supported Registration{billing.count === 1 ? "" : "s"} to date, {formatCents(billing.valueCents)} before
+            tax. {billing.waiting} not invoiced yet.
+          </p>
+          {billing.invoices.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-gray-700">
+              {billing.invoices.map((inv) => (
+                <li key={inv.id}>
+                  {inv.number ?? "Invoice"}: {inv.count} registration{inv.count === 1 ? "" : "s"}, {formatCents(inv.totalCents)},{" "}
+                  {inv.status === "paid" ? "paid" : inv.status === "draft" ? "not sent" : "sent, unpaid"}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={downloadReport}
+              disabled={isPending}
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Download registration report (CSV)
+            </button>
+            <label className="ml-2 text-xs text-gray-600" htmlFor="cancoll-through">
+              Confirmed on or before
+            </label>
+            <input
+              id="cancoll-through"
+              type="date"
+              value={throughDate}
+              onChange={(e) => setThroughDate(e.target.value)}
+              className="rounded-md border border-gray-300 px-2 py-1 text-sm"
+            />
+            <button
+              type="button"
+              onClick={invoice}
+              disabled={!throughDate || billing.waiting === 0 || !billing.invoiceTo || isPending}
+              className="rounded-md bg-[#163D6D] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              Invoice CANCOLL
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            {billing.invoiceTo
+              ? <>Goes to {billing.invoiceTo}{billing.invoiceCc.length > 0 && <>, copying {billing.invoiceCc.join(" and ")}</>}.</>
+              : "Nobody is set to receive CANCOLL's invoice yet."}{" "}
+            Corrections go on the next invoice (MOU 11.4).
+          </p>
+        </div>
       )}
 
       {board.schools.length === 0 ? (

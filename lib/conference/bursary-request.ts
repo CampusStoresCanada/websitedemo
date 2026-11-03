@@ -169,3 +169,43 @@ export function hotelNightsText(nights: number, rate: HotelRate): string {
 export function defaultHotelNights(organizationId: string, fourNightOrgIds: readonly string[] | null | undefined): number {
   return fourNightOrgIds?.includes(organizationId) ? 4 : 3;
 }
+
+/**
+ * The attendance terms in a supported delegate's "your schedule is ready"
+ * email, or "" for everyone else. MOU Schedule B: before the conference, each
+ * Supported Delegate gets in writing their Assigned Schedule, the attendance
+ * standard, and the financial consequence to their institution of missing any
+ * of it. The same rule binds a travel bursary delegate (Travel Bursary Terms).
+ *
+ * The schedule itself is the link in the same email: it carries every meeting
+ * and, for CANCOLL, the AGM with its time and room, and stays right when a
+ * swap moves something.
+ */
+export function attendanceTermsHtml(params: { funded: boolean; designated: boolean; institution: string }): string {
+  const { funded, designated } = params;
+  if (!funded && !designated) return "";
+  const org = params.institution
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const why =
+    funded && designated
+      ? `Your registration is funded by CANCOLL, and ${org} asked Campus Stores Canada for travel support for you.`
+      : funded
+        ? "Your registration is funded by CANCOLL."
+        : `${org} asked Campus Stores Canada for travel support for you.`;
+  const what = funded
+    ? "every partner meeting on your schedule, for its full scheduled time, and the CANCOLL Annual General Meeting, which is on your schedule with its time and room. Attendance is recorded at each meeting and at the door of the AGM."
+    : "every partner meeting on your schedule, for its full scheduled time. Attendance is recorded at each meeting.";
+  const value =
+    funded && designated
+      ? "your registration and any hotel and travel costs Campus Stores Canada pays"
+      : funded
+        ? "your registration"
+        : "the support, including any hotel and travel costs Campus Stores Canada pays";
+  return (
+    `<p><strong>${why}</strong> In return, you must attend ${what} ` +
+    `If you miss any of them without a reasonable excuse, such as illness or a travel disruption, ` +
+    `${org} will be invoiced for the full value of ${value}.</p>`
+  );
+}

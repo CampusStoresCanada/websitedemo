@@ -115,3 +115,28 @@ describe("hotel nights (Steve, 2026-11-02)", async () => {
     expect(bursaryRequestGaps({ ...complete, delegate_seat_id: null }, true)).toEqual([]);
   });
 });
+
+describe("attendanceTermsHtml (MOU Schedule B)", async () => {
+  const { attendanceTermsHtml } = await import("../bursary-request");
+  it("says nothing to someone who isn't supported", () => {
+    expect(attendanceTermsHtml({ funded: false, designated: false, institution: "UVic" })).toBe("");
+  });
+  it("names the CANCOLL AGM only for a CANCOLL-funded delegate", () => {
+    const funded = attendanceTermsHtml({ funded: true, designated: false, institution: "UVic" });
+    expect(funded).toContain("CANCOLL Annual General Meeting");
+    expect(funded).toContain("UVic will be invoiced for the full value of your registration.");
+    const bursary = attendanceTermsHtml({ funded: false, designated: true, institution: "UVic" });
+    expect(bursary).not.toContain("Annual General Meeting");
+    expect(bursary).toContain("including any hotel and travel costs");
+  });
+  it("covers both when a CANCOLL delegate also has travel support", () => {
+    expect(attendanceTermsHtml({ funded: true, designated: true, institution: "UVic" })).toContain(
+      "your registration and any hotel and travel costs"
+    );
+  });
+  it("escapes the institution's name, and uses no em dashes", () => {
+    const html = attendanceTermsHtml({ funded: true, designated: true, institution: "A&B <College>" });
+    expect(html).toContain("A&amp;B &lt;College&gt;");
+    expect(html).not.toContain("—");
+  });
+});

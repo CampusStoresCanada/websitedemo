@@ -61,3 +61,32 @@ set body_blocks = $blocks$[{"id": "hi", "type": "text", "html": "<p>Hi {{first_n
     variable_keys = array['first_name', 'organization_name', 'conference_name', 'request_url', 'hotel_nights_text', 'claims_open_date', 'claims_close_date'],
     updated_at = now()
 where key = 'bursary_request_received';
+
+-- 4. Who CANCOLL's invoice goes to (Steve, 2026-11-03): Lorraine Hamilton,
+--    copying Greg McPherson and Kelly Abraham. Read by
+--    lib/conference/cancoll-report.ts. The addresses are MOU Schedule A's
+--    notice contacts and Kelly's current TMU address.
+update public.conference_entities
+set attributes = attributes || jsonb_build_object(
+  'invoice_to', 'busdevmgr@cancoll.ca',
+  'invoice_contact_name', 'Lorraine',
+  'invoice_cc', jsonb_build_array('greg@campusstores.ca', 'kabraham@torontomu.ca')
+)
+where id = 'faff5494-27b5-4587-981a-037103a642cc';
+
+-- 5. MOU Schedule B: each supported delegate gets, in writing and before the
+--    conference, their schedule, the attendance standard and the financial
+--    consequence of missing it. The "your schedule is ready" email carries it
+--    as {{attendance_terms}}, blank for everyone else
+--    (attendanceTermsHtml in lib/conference/bursary-request.ts). This template
+--    is stored as HTML with no blocks, so the variable goes into the HTML.
+update public.message_templates
+set body_html = replace(
+      body_html,
+      'scheduled across <strong>{{day_count}} days</strong>.</p>',
+      'scheduled across <strong>{{day_count}} days</strong>.</p>' || chr(10) || '  {{attendance_terms}}'
+    ),
+    variable_keys = array_append(variable_keys, 'attendance_terms'),
+    updated_at = now()
+where key = 'conference_schedule_ready'
+  and body_html not like '%{{attendance_terms}}%';

@@ -1,0 +1,232 @@
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadSeatHoldings } from "@/lib/conference/seats";
+import { isFundedOffer } from "@/lib/conference/entity-pricing";
+
+/**
+ * The CANCOLL registration report (CSC/CANCOLL MOU 9.1(a), Schedule C): every
+ * Supported Registration, who holds it, when CSC confirmed it, which invoice
+ * billed it, and any refund to the school under 5.5.
+ *
+ * One reader for the CSV, the invoice and the staff panel, so the report sent
+ * with an invoice can never list different registrations from the invoice.
+ *
+ * A Supported Registration is a seat on the CANCOLL-funded offer, read through
+ * loadSeatHoldings. "Confirmed" is when the seat was issued, or for a paid seat
+ * switched over under 5.5, the date of that switch and refund (5.6). Test
+ * organizations never appear.
+ */
+
+export type CancollRegistration = {
+  seatId: string;
+  organizationId: string;
+  institution: string;
+  delegateName: string | null;
+  positionTitle: string | null;
+  /** ISO instant CSC confirmed it. */
+  confirmedAt: string;
+  /** The CANCOLL invoice that billed it, if one has. */
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  /** The school's refund under 5.5, when it paid first and was switched over. */
+  refund: { cents: number | null; at: string } | null;
+};
+
+export type CancollBilling = {
+  conferenceId: string;
+  conferenceName: string;
+  timeZone: string;
+  offerId: string;
+  /** $299.00 (MOU Schedule A), from the funded offer's funder_unit_cents. */
+  unitCents: number;
+  /** QuickBooks item and the conference's tax, for the invoice. */
+  qboItemId: string | null;
+  stripeTaxRateId: string | null;
+  qboTaxCodeRef: string | null;
+  /** Who the invoice goes to, from the funded offer (invoice_to, invoice_cc). */
+  invoiceTo: string | null;
+  invoiceCc: string[];
+  invoiceContactName: string | null;
+  rows: CancollRegistration[];
+  invoices: Array<{ id: string; number: string | null; status: string; totalCents: number; createdAt: string; count: number }>;
+};
+
+type Db = ReturnType<typeof createAdminClient>;
+
+/** Columns of the CSV, in Schedule C's order. */
+const CSV_HEADER = [
+  "Institution",
+  "Delegate name",
+  "Position title",
+  "Registration confirmed",
+  "Amount invoiced",
+  "Invoice",
+  "Refund issued",
+  "Refund date",
+];
+
+const dollars = (cents: number) => (cents / 100).toFixed(2);
+
+/** "2026-11-14", the calendar day in the conference's own zone. */
+export function dayInZone(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date(iso)
+  );
+}
+
+/** Quote a cell, and defuse a leading = + - @ the way the roster export does. */
+function cell(value: string): string {
+  return `"${(/^[=+\-@]/.test(value) ? `'${value}` : value).replaceAll('"', '""')}"`;
+}
+
+/**
+ * The registration report as CSV, ending with Schedule C's running total:
+ * the count and value of Supported Registrations to date.
+ */
+export function cancollReportCsv(
+  rows: CancollRegistration[],
+  params: { unitCents: number; timeZone: string }
+): string {
+  const lines = [...rows]
+    .sort((a, b) => a.confirmedAt.localeCompare(b.confirmedAt) || a.institution.localeCompare(b.institution))
+    .map((r) =>
+      [
+        r.institution,
+        r.delegateName ?? "",
+        r.positionTitle ?? "",
+        dayInZone(r.confirmedAt, params.timeZone),
+        dollars(params.unitCents),
+        r.invoiceNumber ?? "",
+        r.refund?.cents != null ? dollars(r.refund.cents) : r.refund ? "Owed, issued by hand" : "",
+        r.refund ? dayInZone(r.refund.at, params.timeZone) : "",
+      ]
+        .map(cell)
+        .join(",")
+    );
+  const total = [
+    `Running total: ${rows.length} Supported Registration${rows.length === 1 ? "" : "s"}`,
+    "",
+    "",
+    "",
+    dollars(rows.length * params.unitCents),
+    "",
+    "",
+    "",
+  ]
+    .map(cell)
+    .join(",");
+  return [CSV_HEADER.map(cell).join(","), ...lines, total].join("\n");
+}
+
+/**
+ * The registrations a new invoice would bill: not yet on a CANCOLL invoice, and
+ * confirmed before `boundary` (exclusive). Schedule A's first invoice covers
+ * registrations confirmed on or before November 30; the second covers the rest
+ * to January 17, including the 5.5 switches.
+ */
+export function registrationsToInvoice(rows: CancollRegistration[], boundary: string): CancollRegistration[] {
+  const cutoff = Date.parse(boundary);
+  return rows.filter((r) => !r.invoiceId && Date.parse(r.confirmedAt) < cutoff);
+}
+
+/** Everything about CANCOLL's billing for one conference. Null: it has no funded offer. */
+export async function loadCancollBilling(db: Db, conferenceId: string): Promise<CancollBilling | null> {
+  const [{ data: offers }, { data: conference }] = await Promise.all([
+    db
+      .from("conference_entities")
+      .select("id, attributes, qbo_item_id")
+      .eq("conference_id", conferenceId)
+      .eq("kind", "registration")
+      .eq("attributes->>funded_by", "cancoll"),
+    db
+      .from("conference_instances")
+      .select("name, timezone, stripe_tax_rate_id, qbo_tax_code_ref")
+      .eq("id", conferenceId)
+      .maybeSingle(),
+  ]);
+  const offer = (offers ?? []).find((e) => isFundedOffer(e.attributes as Record<string, unknown> | null));
+  if (!offer || !conference) return null;
+  const attrs = (offer.attributes as Record<string, unknown> | null) ?? {};
+
+  const { seats } = await loadSeatHoldings(db, { conferenceId });
+  const funded = seats.filter((s) => s.entityId === offer.id);
+  const orgIds = [...new Set(funded.map((s) => s.organizationId))];
+  const contactIds = [...new Set(funded.map((s) => s.holderContactId).filter((id): id is string => !!id))];
+
+  const [{ data: orgs }, { data: contacts }, { data: conversions }, { data: invoiceRows }] = await Promise.all([
+    orgIds.length
+      ? db.from("organizations").select("id, name, is_test").in("id", orgIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string; is_test: boolean | null }> }),
+    contactIds.length
+      ? db.from("contacts").select("id, name, role_title").in("id", contactIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string | null; role_title: string | null }> }),
+    db.from("conference_funded_conversions").select("seat_id, refund_cents, created_at").eq("conference_id", conferenceId),
+    db
+      .from("invoices")
+      .select("id, status, total_cents, created_at, metadata, stripe_invoice_id")
+      .eq("type", "conference")
+      .eq("metadata->>cancoll_conference_id", conferenceId)
+      .neq("status", "voided"),
+  ]);
+
+  const orgById = new Map((orgs ?? []).map((o) => [o.id, o]));
+  const contactById = new Map((contacts ?? []).map((c) => [c.id, c]));
+  const conversionBySeat = new Map((conversions ?? []).map((c) => [c.seat_id, c]));
+  const invoices = (invoiceRows ?? []).map((inv) => {
+    const meta = (inv.metadata as Record<string, unknown> | null) ?? {};
+    const seatIds = Array.isArray(meta.seat_ids) ? (meta.seat_ids as string[]) : [];
+    return {
+      id: inv.id,
+      number: (meta.number as string | undefined) ?? null,
+      status: inv.status,
+      totalCents: inv.total_cents,
+      createdAt: inv.created_at,
+      seatIds,
+      count: seatIds.length,
+    };
+  });
+  const invoiceBySeat = new Map<string, { id: string; number: string | null }>();
+  for (const inv of invoices) for (const seatId of inv.seatIds) invoiceBySeat.set(seatId, inv);
+
+  const rows: CancollRegistration[] = [];
+  for (const seat of funded) {
+    const org = orgById.get(seat.organizationId);
+    if (!org || org.is_test) continue;
+    const contact = seat.holderContactId ? contactById.get(seat.holderContactId) : undefined;
+    const conversion = conversionBySeat.get(seat.seatId);
+    const invoice = invoiceBySeat.get(seat.seatId);
+    rows.push({
+      seatId: seat.seatId,
+      organizationId: seat.organizationId,
+      institution: org.name,
+      delegateName: seat.holderName ?? contact?.name ?? null,
+      positionTitle: contact?.role_title ?? null,
+      confirmedAt: conversion?.created_at ?? seat.seatedAt ?? new Date(0).toISOString(),
+      invoiceId: invoice?.id ?? null,
+      invoiceNumber: invoice?.number ?? null,
+      refund: conversion ? { cents: conversion.refund_cents, at: conversion.created_at } : null,
+    });
+  }
+
+  return {
+    conferenceId,
+    conferenceName: conference.name,
+    timeZone: conference.timezone ?? "America/Toronto",
+    offerId: offer.id,
+    unitCents: typeof attrs.funder_unit_cents === "number" ? attrs.funder_unit_cents : 29900,
+    qboItemId: offer.qbo_item_id ?? null,
+    stripeTaxRateId: conference.stripe_tax_rate_id ?? null,
+    qboTaxCodeRef: conference.qbo_tax_code_ref ?? null,
+    invoiceTo: typeof attrs.invoice_to === "string" ? attrs.invoice_to : null,
+    invoiceCc: Array.isArray(attrs.invoice_cc) ? (attrs.invoice_cc as string[]) : [],
+    invoiceContactName: typeof attrs.invoice_contact_name === "string" ? attrs.invoice_contact_name : null,
+    rows,
+    invoices: invoices.map((inv) => ({
+      id: inv.id,
+      number: inv.number,
+      status: inv.status,
+      totalCents: inv.totalCents,
+      createdAt: inv.createdAt,
+      count: inv.count,
+    })),
+  };
+}
