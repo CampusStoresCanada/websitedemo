@@ -8,12 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Seat = { id: string; balance_id: string; entity_id: string; seat_index: number; holder: string | null; kind: string };
 
 let seats: Seat[] = [];
-const balances = [
-  { id: "bal-reg", purchase_id: "pur-1" },
-  { id: "bal-mg", purchase_id: "pur-1" },
-  { id: "bal-off", purchase_id: "pur-1" },
-  { id: "bal-other", purchase_id: "pur-2" },
-];
+let balances: Array<{ id: string; purchase_id: string }> = [];
+let conversions: Array<{ funded_purchase_id: string; source_order_id: string; from_entity_id: string }> = [];
+const orderItems = [{ id: "item-1", order_id: "order-1" }];
+const purchases = [{ id: "pur-1", order_item_id: "item-1", offer_entity_id: "full" }];
+const tables: Record<string, () => Array<Record<string, unknown>>> = {
+  entity_balances: () => balances,
+  conference_funded_conversions: () => conversions,
+  conference_order_items: () => orderItems,
+  entity_purchases: () => purchases,
+};
 
 vi.mock("@/lib/conference/seats", () => ({
   loadSeatHoldings: async (
@@ -47,14 +51,18 @@ vi.mock("@/lib/conference/seats", () => ({
 
 function fakeDb() {
   return {
-    from() {
-      const filters: Array<[string, unknown]> = [];
+    from(table: string) {
+      const filters: Array<(r: Record<string, unknown>) => boolean> = [];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const b: any = {};
-      const rows = () => balances.filter((r) => filters.every(([k, v]) => (r as Record<string, unknown>)[k] === v));
+      const rows = () => tables[table]().filter((r) => filters.every((f) => f(r)));
       b.select = () => b;
       b.eq = (col: string, val: unknown) => {
-        filters.push([col, val]);
+        filters.push((r) => r[col] === val);
+        return b;
+      };
+      b.in = (col: string, vals: unknown[]) => {
+        filters.push((r) => vals.includes(r[col]));
         return b;
       };
       b.maybeSingle = () => Promise.resolve({ data: rows()[0] ?? null, error: null });
@@ -67,6 +75,13 @@ function fakeDb() {
 const { seatIncludedEvents, freeIncludedEvents } = await import("../included-seats");
 
 beforeEach(() => {
+  balances = [
+    { id: "bal-reg", purchase_id: "pur-1" },
+    { id: "bal-mg", purchase_id: "pur-1" },
+    { id: "bal-off", purchase_id: "pur-1" },
+    { id: "bal-other", purchase_id: "pur-2" },
+  ];
+  conversions = [];
   seats = [
     { id: "reg-1", balance_id: "bal-reg", entity_id: "full", seat_index: 1, holder: "karen", kind: "registration" },
     { id: "mg-1", balance_id: "bal-mg", entity_id: "meet", seat_index: 1, holder: null, kind: "event" },
@@ -105,5 +120,24 @@ describe("a registration's included events", () => {
     expect(holder("mg-1")).toBeNull();
     expect(holder("off-1")).toBeNull();
     expect(holder("mg-2")).toBe("bob");
+  });
+
+  it("still follow the registration after it is switched to the CANCOLL-funded one", async () => {
+    // The switch moves the registration onto a $0 purchase of the funded
+    // offer; the reception and offsite stay on the purchase the school paid for.
+    balances.find((b) => b.id === "bal-reg")!.purchase_id = "pur-funded";
+    conversions = [{ funded_purchase_id: "pur-funded", source_order_id: "order-1", from_entity_id: "full" }];
+    seats.find((s) => s.id === "reg-1")!.entity_id = "full-cancoll";
+    seats.find((s) => s.id === "mg-1")!.holder = "karen";
+    seats.find((s) => s.id === "off-1")!.holder = "karen";
+
+    await freeIncludedEvents(db(), "conf-1", "reg-1", "karen");
+    expect(holder("mg-1")).toBeNull();
+    expect(holder("off-1")).toBeNull();
+
+    await seatIncludedEvents(db(), "conf-1", "reg-1", "bob");
+    expect(holder("mg-1")).toBe("bob");
+    expect(holder("off-1")).toBe("bob");
+    expect(holder("mg-other")).toBeNull();
   });
 });
