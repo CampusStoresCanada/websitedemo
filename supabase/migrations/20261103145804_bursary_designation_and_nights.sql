@@ -17,6 +17,7 @@
 --     A prepay request waits in the War Room until staff mark it booked.
 --
 -- Only columns and settings: nothing here changes what the deployed site does.
+-- Applied 2026-11-03.
 
 alter table public.conference_bursary_applications
   add column if not exists delegate_seat_id uuid references public.entity_balance_seats(id) on delete set null,
