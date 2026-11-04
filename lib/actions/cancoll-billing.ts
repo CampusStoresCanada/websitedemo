@@ -24,7 +24,6 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
 import { ensureStripeCustomer, finalizeAndSendInvoice } from "@/lib/stripe/billing";
-import { enqueueQBExport } from "@/lib/quickbooks/export";
 import { sendTransactional } from "@/lib/comms/send";
 import { formatMemberFacingDate } from "@/lib/comms/format";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -214,9 +213,6 @@ export async function issueCancollInvoice(params: {
     // The invoice number, which the report and the panel show.
     .update({ metadata: { ...metadata, number: issued.number ?? null } })
     .eq("id", invoice.id);
-
-  // QuickBooks now, not on payment (Steve, 2026-11-03).
-  await enqueueQBExport(invoice.id);
 
   // The report sent with it lists every Supported Registration to date, with
   // this invoice's number on the ones it bills.

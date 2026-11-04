@@ -1,5 +1,6 @@
 // QuickBooks export worker — Chunk 21
-// Processes qbo_export_queue: creates QB invoices + payments for paid local invoices.
+// Processes qbo_export_queue: an invoice goes to QuickBooks when it is issued,
+// dated the day Stripe issued it, and its payment follows when it is paid.
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -9,7 +10,9 @@ import {
   createQBRefundReceipt,
   qboDocNumber,
   findQBDocumentByDocNumber,
+  fetchQBBookCloseDate,
 } from "./client";
+import { parseSupabaseTimestamp } from "@/lib/time/supabase-timestamp";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { isFeatureEnabled } from "@/lib/data";
@@ -73,9 +76,13 @@ async function resolveManualConferenceInvoiceItemId(
 
 /**
  * Idempotently enqueue an invoice for QB export.
- * Called from the Stripe webhook handler on invoice paid events, and when the
- * CANCOLL invoice is issued (lib/actions/cancoll-billing.ts), which goes to
- * QuickBooks before it is paid.
+ * Called when an invoice is issued (finalizeAndSendInvoice), so QuickBooks
+ * records it the day it goes out to the customer, and again from the Stripe
+ * webhook when it is paid. The bookkeeper's rule (Ewa, 2026-11-03): an invoice
+ * is recorded on the date it goes out, and its tax is reported then, paid or
+ * not. Invoices issued before this rule shipped first reach QuickBooks on the
+ * paid event; the closed-period hold below catches the ones dated into a
+ * quarter already filed.
  *
  * An invoice already posted unpaid is opened again when it is paid, so the
  * worker posts its payment. Without that, the paid event's insert hits the
@@ -355,8 +362,13 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
     }
     result.processed++;
     try {
-      await processExportRow(db, row);
-      result.succeeded++;
+      const held = await processExportRow(db, row);
+      if (held) {
+        result.failed++;
+        result.errors.push(`invoice ${row.invoice_id}: ${held}`);
+      } else {
+        result.succeeded++;
+      }
     } catch (err) {
       result.failed++;
       const message = err instanceof Error ? err.message : String(err);
@@ -372,17 +384,18 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
 // Per-row processing
 // ─────────────────────────────────────────────────────────────────
 
+/** Returns the reason when the row was held for the bookkeeper, else null. */
 async function processExportRow(
   db: ReturnType<typeof createAdminClient>,
   row: QBExportQueueRow
-): Promise<void> {
+): Promise<string | null> {
   // Load invoice + organization
   const { data: invoice, error: invErr } = await db
     .from("invoices")
     .select(`
       id, type, description, amount_cents, tax_amount_cents, total_cents,
       currency, status, paid_at, due_date, created_at, metadata,
-      organization_id,
+      organization_id, stripe_invoice_id,
       organization:organizations(
         id, name, email, quickbooks_customer_id, province, country
       )
@@ -396,6 +409,34 @@ async function processExportRow(
     ? invoice.organization[0]
     : invoice.organization;
   if (!org) throw new Error(`Organization not found for invoice ${row.invoice_id}`);
+
+  // Voided (or never issued) before it reached QuickBooks: nothing to record.
+  if (!row.qbo_invoice_id && (invoice.status === "voided" || invoice.status === "draft")) {
+    await markSkipped(db, row, `Not posted: the invoice is ${invoice.status}.`);
+    return null;
+  }
+
+  // The dates each document would carry, and the bookkeeper's closing date.
+  // Anything on or before it lands in a period she has already filed, so it
+  // waits for her instead of changing a filed return.
+  const issueDate = await invoiceIssueDate(invoice);
+  const needsInvoice = !row.qbo_invoice_id;
+  const needsPayment = !row.qbo_payment_id && invoice.status === "paid" && !!invoice.paid_at;
+  const paymentDate = needsPayment ? stripeAccountDay(parseSupabaseTimestamp(invoice.paid_at!)) : null;
+  const closeDate = needsInvoice || needsPayment ? await fetchQBBookCloseDate() : null;
+  if (closeDate) {
+    const late = [
+      needsInvoice && issueDate <= closeDate ? `the invoice is dated ${issueDate}` : null,
+      paymentDate && paymentDate <= closeDate ? `the payment is dated ${paymentDate}` : null,
+    ].filter(Boolean);
+    if (late.length > 0) {
+      const reason =
+        `Held for the bookkeeper: ${late.join(" and ")}, on or before the QuickBooks closing date ` +
+        `${closeDate}. Enter or redate it in QuickBooks and Skip this row, or move the closing date and Retry.`;
+      await holdRow(db, row, reason);
+      return reason;
+    }
+  }
 
   // Find or create QB customer
   const billingEmail = await resolveQBBillingEmail(db, org.id, org.email);
@@ -435,14 +476,14 @@ async function processExportRow(
       typeof meta.qbo_tax_code_ref === "string" && meta.qbo_tax_code_ref
         ? meta.qbo_tax_code_ref
         : await resolveMembershipTaxCode(db, org);
-    const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef);
+    const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef, issueDate);
     qbInvoiceId = (await createQBInvoice(invoiceInput)).Id;
   }
 
-  // Posted earlier, unpaid at the time (the CANCOLL invoice goes to QuickBooks
-  // when it is issued): now the payment, once.
+  // Posted when it was issued, unpaid at the time: now the payment, once,
+  // dated the day it was paid.
   let qbPaymentId: string | null = row.qbo_payment_id;
-  if (!qbPaymentId && invoice.status === "paid" && invoice.paid_at) {
+  if (needsPayment && paymentDate) {
     const depositAccountId = await resolveStripeDepositAccountId(db);
     const payment = await createQBPayment({
       CustomerRef: { value: customer.Id },
@@ -451,7 +492,7 @@ async function processExportRow(
         Amount: invoice.total_cents / 100,
         LinkedTxn: [{ TxnId: qbInvoiceId, TxnType: "Invoice" }],
       }],
-      TxnDate: invoice.paid_at.slice(0, 10),
+      TxnDate: paymentDate,
       CurrencyRef: { value: invoice.currency ?? "CAD" },
       DepositToAccountRef: { value: depositAccountId },
     });
@@ -459,13 +500,40 @@ async function processExportRow(
   }
 
   await markComplete(db, row, qbInvoiceId, qbPaymentId);
+  return null;
+}
+
+// The Stripe account's own timezone (Dashboard > Settings > Business), so the
+// date QuickBooks records is the date on the customer's Stripe invoice.
+const STRIPE_ACCOUNT_TIMEZONE = "America/Edmonton";
+
+/** The calendar day, YYYY-MM-DD, of an instant in the Stripe account's timezone. */
+export function stripeAccountDay(at: Date): string {
+  return at.toLocaleDateString("en-CA", { timeZone: STRIPE_ACCOUNT_TIMEZONE });
+}
+
+/**
+ * The day the invoice went out: when Stripe finalized it, which is the date
+ * printed on the customer's invoice. An invoice with no Stripe invoice (or one
+ * Stripe has no finalize time for) falls back to when we created it.
+ */
+async function invoiceIssueDate(invoice: { stripe_invoice_id: string | null; created_at: string }): Promise<string> {
+  if (invoice.stripe_invoice_id) {
+    // Loaded here, not at the top: the Stripe client throws at import without
+    // its key, and much of the app imports this file only to enqueue.
+    const { stripe } = await import("@/lib/stripe/client");
+    const stripeInvoice = await stripe.invoices.retrieve(invoice.stripe_invoice_id);
+    const finalizedAt = stripeInvoice.status_transitions?.finalized_at;
+    if (finalizedAt) return stripeAccountDay(new Date(finalizedAt * 1000));
+  }
+  return stripeAccountDay(parseSupabaseTimestamp(invoice.created_at));
 }
 
 // ─────────────────────────────────────────────────────────────────
 // Invoice mapping
 // ─────────────────────────────────────────────────────────────────
 
-function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, taxCodeRef: string) {
+function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, taxCodeRef: string, txnDate: string) {
   // A quantity and unit price when the invoice carries them (CANCOLL: N
   // registrations at $299.00), else one unit of the whole amount.
   const meta = ((invoice as { metadata?: unknown }).metadata as Record<string, unknown> | null) ?? {};
@@ -477,7 +545,7 @@ function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, 
   return {
     CustomerRef: { value: customerQBId },
     DocNumber: qboDocNumber(invoice.id),
-    TxnDate: invoice.created_at.slice(0, 10),
+    TxnDate: txnDate,
     DueDate: invoice.due_date ?? undefined,
     CurrencyRef: { value: invoice.currency ?? "CAD" },
     Line: [
@@ -516,6 +584,38 @@ async function markComplete(
       processed_at: new Date().toISOString(),
       lease_expires_at: null,
       error_message: null,
+    })
+    .eq("id", row.id);
+}
+
+/** Closed on purpose without posting: the reason is the row's message. */
+async function markSkipped(db: ReturnType<typeof createAdminClient>, row: QBExportQueueRow, reason: string) {
+  await db
+    .from("qbo_export_queue")
+    .update({
+      status: "skipped",
+      processed_at: new Date().toISOString(),
+      lease_expires_at: null,
+      next_retry_at: null,
+      error_message: reason,
+    })
+    .eq("id", row.id);
+}
+
+/**
+ * Stop, without retrying, and wait for a person. The row shows as failed on
+ * /admin/ops with the reason, where Skip (she entered it herself) and Retry
+ * (she moved the closing date) are the two ways out.
+ */
+async function holdRow(db: ReturnType<typeof createAdminClient>, row: QBExportQueueRow, reason: string) {
+  await db
+    .from("qbo_export_queue")
+    .update({
+      status: "failed",
+      retry_count: row.max_retries,
+      next_retry_at: null,
+      lease_expires_at: null,
+      error_message: reason,
     })
     .eq("id", row.id);
 }

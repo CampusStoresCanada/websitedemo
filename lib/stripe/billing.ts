@@ -1,7 +1,7 @@
 import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
-import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
+import { enqueueQBExport, enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import { getBillingConfig, getEffectivePolicy, getRenewalConfig, getProgramsConfig } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { settlePaidInvoiceMembership } from "@/lib/membership/renewal-activation";
@@ -372,6 +372,11 @@ export async function finalizeAndSendInvoice(
       updated_at: new Date().toISOString(),
     })
     .eq("id", invoiceId);
+
+  // Issued, so it goes to QuickBooks now, dated today, whether or not anyone
+  // is emailed: a paused notification still leaves a real invoice the member
+  // owes. The payment follows on the paid event.
+  await enqueueQBExport(invoiceId);
 
   if (notify) await notifyInvoiceIssued(invoiceId, finalized.hosted_invoice_url ?? null);
 

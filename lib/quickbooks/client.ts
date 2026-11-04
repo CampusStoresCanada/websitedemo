@@ -665,6 +665,22 @@ export async function fetchQBReport(
   return qbRequest<QBReport>("GET", `/reports/${reportType}?${params.toString()}`);
 }
 
+/**
+ * The bookkeeper's closing date (QuickBooks: Settings > Account and settings >
+ * Advanced > Close the books), or null when the books are not closed.
+ *
+ * Everything on or before it is a period she has already filed. Read live each
+ * time: closing a quarter is her act, done in QuickBooks, and the export must
+ * respect it the moment she does it.
+ */
+export async function fetchQBBookCloseDate(): Promise<string | null> {
+  const res = await qbRequest<{ Preferences?: { AccountingInfoPrefs?: { BookCloseDate?: string } } }>(
+    "GET",
+    "/preferences"
+  );
+  return res.Preferences?.AccountingInfoPrefs?.BookCloseDate ?? null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Chart of Accounts
 // ─────────────────────────────────────────────────────────────────

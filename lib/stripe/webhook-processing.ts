@@ -199,6 +199,50 @@ async function handleInvoiceVoided(stripeInvoice: Stripe.Invoice, db: AdminClien
   console.info(
     `invoice.voided: local invoice ${localInvoice.id} (org ${localInvoice.organization_id}) marked voided from Stripe`
   );
+
+  await settleVoidedInvoiceInQuickBooks(db, localInvoice.id);
+}
+
+/**
+ * Invoices go to QuickBooks when they are issued, so a void can arrive after
+ * QuickBooks already holds one. Not yet posted: the row is closed and nothing
+ * is posted. Posted: the open invoice is left alone and the bookkeeper is told,
+ * because voiding it in QuickBooks changes the period it was issued in, which
+ * may already be filed, and whether to void it or credit it today is hers.
+ */
+async function settleVoidedInvoiceInQuickBooks(db: AdminClient, invoiceId: string) {
+  const { data: row } = await db
+    .from("qbo_export_queue")
+    .select("id, status, qbo_invoice_id")
+    .eq("invoice_id", invoiceId)
+    .maybeSingle();
+  if (!row) return;
+
+  if (!row.qbo_invoice_id) {
+    if (row.status !== "processing") {
+      await db
+        .from("qbo_export_queue")
+        .update({
+          status: "skipped",
+          processed_at: new Date().toISOString(),
+          next_retry_at: null,
+          error_message: "Not posted: the invoice was voided before it reached QuickBooks.",
+        })
+        .eq("id", row.id);
+    }
+    // A row mid-post is caught by the worker's own voided check on its next
+    // pass, or posts and is then reported below on a replay of this event.
+    return;
+  }
+
+  await raiseAlertIfNotOpen({
+    ruleKey: `qbo_invoice_voided_after_posting:${invoiceId}`,
+    severity: "warning",
+    message:
+      `Invoice ${invoiceId} was voided in Stripe but is still open in QuickBooks ` +
+      `(QuickBooks invoice ${row.qbo_invoice_id}). Void or credit it in QuickBooks.`,
+    details: { invoiceId, qboInvoiceId: row.qbo_invoice_id },
+  });
 }
 
 async function processEventTicketPurchase(

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   sendTransactional: vi.fn(),
   resolveOrgAdminEmails: vi.fn(),
   resolveRenewalRecipients: vi.fn(),
+  enqueueQBExport: vi.fn(),
   rows: {} as Record<string, unknown>,
   updates: [] as unknown[],
 }));
@@ -25,6 +26,10 @@ vi.mock("../client", () => ({
     invoices: { finalizeInvoice: mocks.finalizeInvoice, sendInvoice: mocks.sendInvoice },
     customers: { update: mocks.customersUpdate },
   },
+}));
+vi.mock("@/lib/quickbooks/export", () => ({
+  enqueueQBExport: mocks.enqueueQBExport,
+  enqueueQBExportRefund: vi.fn(),
 }));
 vi.mock("@/lib/comms/send", () => ({ sendTransactional: mocks.sendTransactional }));
 vi.mock("@/lib/renewal/jobs", () => ({ resolveRenewalRecipients: mocks.resolveRenewalRecipients }));
@@ -110,6 +115,8 @@ describe("finalizeAndSendInvoice", () => {
     expect(mocks.finalizeInvoice).toHaveBeenCalledWith("in_1");
     expect(mocks.sendTransactional).not.toHaveBeenCalled();
     expect(mocks.sendInvoice).not.toHaveBeenCalled();
+    // Still a real invoice the member owes, so QuickBooks gets it today.
+    expect(mocks.enqueueQBExport).toHaveBeenCalledWith("inv-1");
   });
 
   it("a failed email does not fail the invoice: it is finalized and payable", async () => {
