@@ -267,6 +267,24 @@ export function deriveStatement(parts: StatementParts): Statement {
 
   const grossMargin = orNull(marginDollars, fromCategories && marginDollars > 0);
 
+  /*
+    ⛔ Gross margin is MERCHANDISE margin only, so everything below it has to
+    keep merchandise and the rest of revenue apart.
+
+    Cost of sales is what the merchandise cost, not total revenue less margin:
+    other income and funding have no cost of goods, and counting them as one
+    inflated inventory turns for every store that has them.
+
+    Operating income adds back the income the store said counts and its
+    institutional funding, the same two lines already in Total revenue. Without
+    them the statement charged a service's running costs to expenses and never
+    credited what it earned (McGill, 2026-11-04: $491k of income missing).
+    Income a store switched off, and IA/EA money the institution collected,
+    stay out here as they do everywhere else.
+  */
+  const merchandiseSales =
+    merchandiseRetail + merchandiseOnline + courseMaterialsRetail + courseMaterialsOnline;
+
   return {
     merchandiseRetail,
     merchandiseOnline,
@@ -279,11 +297,12 @@ export function deriveStatement(parts: StatementParts): Statement {
     grossMargin,
     // Implied, not asked. Asking for cost of sales AND a margin per category is
     // how a total and its parts end up disagreeing.
-    costOfSales: grossMargin === null ? null : totalRevenue - grossMargin,
+    costOfSales: grossMargin === null ? null : merchandiseSales - grossMargin,
     openingInventory: orNull(openingInventory, fromCategories),
     closingInventory: orNull(closingInventory, fromCategories),
     operatingExpenses,
-    operatingIncome: grossMargin === null ? null : grossMargin - operatingExpenses,
+    operatingIncome:
+      grossMargin === null ? null : grossMargin + income + funding - operatingExpenses,
     campusContribution: sumFields(formData, CONTRIBUTION_LINES),
     fromCategories,
   };

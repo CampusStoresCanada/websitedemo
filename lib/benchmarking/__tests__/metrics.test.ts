@@ -261,9 +261,10 @@ describe("a 2026 submission, whose figures are no longer columns", () => {
   });
 
   it("uses operating income as the bottom line it can actually see", () => {
-    // 300k margin less 250k salaries and 15k of named-yourself expenses.
+    // 300k margin plus 50k counted income, less 250k salaries and 15k of
+    // named-yourself expenses. The excluded 9k never reaches it.
     const m = computeMetrics(row, { statement, orgFte: 10_000 });
-    expect(m.net_margin_pct).toBeCloseTo((35_000 / 1_050_000) * 100, 2);
+    expect(m.net_margin_pct).toBeCloseTo((85_000 / 1_050_000) * 100, 2);
   });
 
   it("returns nulls when there is no statement, which is the bug it fixes", () => {
@@ -364,5 +365,51 @@ describe("staff cost on the statement", () => {
   it("does not add a lone benefits figure on top either", () => {
     const lone = { ...parts, formData: { expense_hr: 792_225, benefits_total: 184_729 } };
     expect(deriveStatement(lone).operatingExpenses).toBe(792_225);
+  });
+});
+
+describe("operating income below merchandise margin", () => {
+  const category = {
+    id: "gm",
+    department: "Apparel",
+    splitBySubcategory: false,
+    buyerContactIds: [],
+    locations: [],
+    lines: [
+      {
+        id: "l",
+        subcategory: null,
+        retailSales: 1_000_000,
+        onlineSales: null,
+        grossMarginPct: 40,
+        inventoryOpen: null,
+        inventoryClose: null,
+        unitsSold: null,
+        unitsAvailable: null,
+      },
+    ],
+  };
+  const service = (amount: number, countsAsIncome: boolean) => ({
+    amount,
+    countsAsIncome,
+    directCost: null,
+    directCostInExpenses: true,
+  });
+  const parts = {
+    gmCategories: [category],
+    cmCategories: [],
+    otherIncome: [service(250_000, true), service(900_000, false)],
+    otherExpenses: [],
+    formData: { central_funding: 50_000, expense_hr: 500_000 },
+  };
+
+  it("credits counted income and funding, never a line the store switched off", () => {
+    // 400k margin + 250k income + 50k funding - 500k expenses. The 900k stays out.
+    expect(deriveStatement(parts).operatingIncome).toBe(200_000);
+  });
+
+  it("charges cost of sales against merchandise only", () => {
+    // 1.3M total revenue less 400k margin would be 900k; the goods cost 600k.
+    expect(deriveStatement(parts).costOfSales).toBe(600_000);
   });
 });

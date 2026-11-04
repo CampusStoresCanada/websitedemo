@@ -493,7 +493,7 @@ export default function ReviewFinancials({
           onOverwrite={openOverwrite}
           value={money(operatingIncome)}
           strong
-          from="Gross margin less total operating expenses"
+          from="Gross margin, plus other income and institutional funding, less total operating expenses"
         />
 
         <div className="h-4" />
