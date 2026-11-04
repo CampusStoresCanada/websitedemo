@@ -18,7 +18,7 @@ import type {
   BadgeTextBindingKey,
   BadgeTemplateConfigV1,
 } from "@/lib/conference/badges/template";
-import { DEFAULT_VARIANT, normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
+import { DEFAULT_VARIANT, normalizeBadgeTemplateConfig, seedLayoutsFor } from "@/lib/conference/badges/template";
 import { designPxFromPt, fitTextLayout, slotHeightDesignPx } from "@/lib/conference/badges/text-fit";
 
 type Props = {
@@ -232,26 +232,6 @@ function cloneDeep<T>(value: T): T {
     return globalThis.structuredClone(value);
   }
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-/**
- * A layout for every variant the template has, seeded from the base where one
- * is missing. Four separate places used to hand-build `{delegate, exhibitor}`
- * here; each of them silently dropped every registration-type layout.
- */
-function seedLayoutsFor(
-  config: BadgeTemplateConfigV1,
-  extraKeys: string[] = []
-): NonNullable<BadgeTemplateConfigV1["variantLayouts"]> {
-  const out: NonNullable<BadgeTemplateConfigV1["variantLayouts"]> = {};
-  for (const key of new Set([DEFAULT_VARIANT, ...Object.keys(config.variants), ...extraKeys])) {
-    out[key] =
-      config.variantLayouts?.[key] ?? {
-        front: cloneDeep(config.front),
-        back: cloneDeep(config.back),
-      };
-  }
-  return out;
 }
 
 export default function BadgeTemplateEditor({
@@ -1992,7 +1972,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             frontBackgroundUrl: null,
           },
         },
@@ -2006,7 +1986,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             frontOverlayUrl: null,
           },
         },
@@ -2020,7 +2000,7 @@ export default function BadgeTemplateEditor({
         variants: {
           ...prev.variants,
           [role]: {
-            ...prev.variants[role],
+            ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
             mapTintOpacity: 0,
           },
         },
@@ -2181,7 +2161,11 @@ export default function BadgeTemplateEditor({
       const layouts = roleLayoutSnapshot(prev);
       const source = layouts[role];
       const target = cloneDeep(layouts[targetRole]);
-      const targetTheme = cloneDeep(prev.variants[targetRole]);
+      // A type with no colours of its own prints with Default's, so both sides
+      // start there; only a cloned colour layer gives the target its own theme.
+      const sourceTheme = prev.variants[role] ?? prev.variants[DEFAULT_VARIANT];
+      const targetTheme = cloneDeep(prev.variants[targetRole] ?? prev.variants[DEFAULT_VARIANT]);
+      let themeChanged = false;
       const nextLayerOrder = [...target.front.layerOrder];
       const layersToClone: SelectedLayer[] = Array.from(
         new Set(
@@ -2219,16 +2203,19 @@ export default function BadgeTemplateEditor({
           continue;
         }
         if (layerId === "role_background") {
-          targetTheme.frontBackgroundUrl = prev.variants[role].frontBackgroundUrl;
+          targetTheme.frontBackgroundUrl = sourceTheme.frontBackgroundUrl;
+          themeChanged = true;
           continue;
         }
         if (layerId === "role_overlay") {
-          targetTheme.frontOverlayUrl = prev.variants[role].frontOverlayUrl;
+          targetTheme.frontOverlayUrl = sourceTheme.frontOverlayUrl;
+          themeChanged = true;
           continue;
         }
         if (layerId === "role_tint") {
-          targetTheme.mapTintColor = prev.variants[role].mapTintColor;
-          targetTheme.mapTintOpacity = prev.variants[role].mapTintOpacity;
+          targetTheme.mapTintColor = sourceTheme.mapTintColor;
+          targetTheme.mapTintOpacity = sourceTheme.mapTintOpacity;
+          themeChanged = true;
           continue;
         }
         if (layerId === "logo") {
@@ -2309,10 +2296,7 @@ export default function BadgeTemplateEditor({
 
       return {
         ...prev,
-        variants: {
-          ...prev.variants,
-          [targetRole]: targetTheme,
-        },
+        variants: themeChanged ? { ...prev.variants, [targetRole]: targetTheme } : prev.variants,
         variantLayouts: nextLayouts,
       };
     });
@@ -4186,7 +4170,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           frontBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4205,7 +4189,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           frontOverlayUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4224,7 +4208,7 @@ export default function BadgeTemplateEditor({
                       variants: {
                         ...prev.variants,
                         [role]: {
-                          ...prev.variants[role],
+                          ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                           backBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4500,7 +4484,7 @@ export default function BadgeTemplateEditor({
                               variants: {
                                 ...prev.variants,
                                 [role]: {
-                                  ...prev.variants[role],
+                                  ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                   frontBackgroundUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4521,7 +4505,7 @@ export default function BadgeTemplateEditor({
                               variants: {
                                 ...prev.variants,
                                 [role]: {
-                                  ...prev.variants[role],
+                                  ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                   frontOverlayUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4543,7 +4527,7 @@ export default function BadgeTemplateEditor({
                                 variants: {
                                   ...prev.variants,
                                   [role]: {
-                                    ...prev.variants[role],
+                                    ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                     mapTintColor: event.target.value,
                                   },
                                 },
@@ -4566,7 +4550,7 @@ export default function BadgeTemplateEditor({
                                 variants: {
                                   ...prev.variants,
                                   [role]: {
-                                    ...prev.variants[role],
+                                    ...(prev.variants[role] ?? prev.variants[DEFAULT_VARIANT]),
                                     mapTintOpacity: Number(event.target.value || 0),
                                   },
                                 },

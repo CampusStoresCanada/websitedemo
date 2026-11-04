@@ -21,6 +21,8 @@ import {
   type BadgeRun,
 } from "@/lib/conference/badges/run";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ORG_TYPE } from "@/lib/constants/org-types";
+import { localIsoDate, todayVerdict, verdictForDay } from "@/lib/conference/badges/checkin-verdict";
 import { loadActiveBadgeTemplate } from "@/lib/conference/badges/document";
 import { badgeLookKey } from "@/lib/conference/badges/template";
 import {
@@ -63,6 +65,12 @@ export type CheckInFacts = {
   reprintReason: string;
   /** The cards that exist for them — what "Which card are you holding?" offers. */
   reprintCards?: CardsOnHand;
+  /**
+   * Hand them a CANCOLL pin at pickup: their SCHOOL is in the CANCOLL
+   * purchasing group (Stephen, 2026-10-27). A school, not a vendor partner,
+   * though partners carry the flag too.
+   */
+  cancollPin?: boolean;
 };
 
 /**
@@ -88,49 +96,7 @@ function deskAccessLines(access: AccessSummary | null): string[] {
   return lines;
 }
 
-/** Today where the DESK is standing, as an ISO date. */
-export function localIsoDate(now: Date = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate()
-  ).padStart(2, "0")}`;
-}
-
-/**
- * Does this badge cover today?
- *
- * ⛔ Returns null unless today is a conference day. Listing the days is only
- * half an answer — the operator still has to compare them to a calendar with
- * somebody waiting — but stamping "NOT VALID TODAY" on every badge scanned
- * during setup, or while somebody tests the desk in September, is worse than
- * saying nothing. The verdict only means something once the doors are open.
- *
- * ⚠️ Local dates, not UTC. The desk is a laptop on a table in Mississauga and
- * "today" is the day the people in the room are having; a UTC comparison flips
- * the answer for everything after 7pm local.
- */
-export function todayVerdict(
-  facts: Pick<CheckInFacts, "dayDates"> | null,
-  conferenceDates: string[],
-  now: Date = new Date()
-): { admitted: boolean } | null {
-  if (!facts) return null;
-  return verdictForDay(facts.dayDates, conferenceDates, localIsoDate(now));
-}
-
-/**
- * The rule itself, for a known "today". ⛔ ONE rule: the desk card shows it and
- * the scan enforces it (personVerdictToday) — a badge for another day is
- * REFUSED at pickup, not checked in with a warning (Stephen, 2026-10-19).
- */
-export function verdictForDay(
-  dayDates: string[],
-  conferenceDates: string[],
-  today: string
-): { admitted: boolean } | null {
-  if (dayDates.length === 0) return null;
-  if (!conferenceDates.includes(today)) return null;
-  return { admitted: dayDates.includes(today) };
-}
+export { localIsoDate, todayVerdict, verdictForDay };
 
 /** Build the desk's facts from an already-resolved run. */
 export function checkInFactsFromRun(
@@ -138,7 +104,9 @@ export function checkInFactsFromRun(
   /** Day entity name → ISO date, for the "is today included" answer. */
   dateByDayName: Map<string, string> = new Map(),
   /** The run's spare stacks, one per badge look. Empty when spares are off. */
-  spareStacks: ReadonlyArray<SpareStack> = []
+  spareStacks: ReadonlyArray<SpareStack> = [],
+  /** Schools in the CANCOLL purchasing group: their people get a pin. */
+  cancollSchoolIds: ReadonlySet<string> = new Set()
 ): Record<string, CheckInFacts> {
   const entitlementByPerson = new Map(run.entitlements.map((e) => [e.personId, e]));
   const facts: Record<string, CheckInFacts> = {};
@@ -191,6 +159,7 @@ export function checkInFactsFromRun(
           });
           return { reprintStock: stock, reprintReason: reason, reprintCards: cards };
         })(),
+        cancollPin: Boolean(seat.organizationId && cancollSchoolIds.has(seat.organizationId)),
       };
     }
   }
@@ -269,7 +238,8 @@ export async function loadCheckInFacts(
 ): Promise<CheckInFactsPayload> {
   const db = createAdminClient();
   const [run, dateByDayName, printStock] = await Promise.all([
-    resolveBadgeRun(conferenceId),
+    // The desk rehearses on test organisations, so it sees them.
+    resolveBadgeRun(conferenceId, { includeTestOrganizations: true }),
     loadDayDates(db, conferenceId),
     getBadgePrintStock(conferenceId),
   ]);
@@ -289,9 +259,11 @@ export async function loadCheckInFacts(
   const door = await loadDoorEvents(db, conferenceId).catch(() => ({ doorEvents: [], timeZone: DEFAULT_DOOR_TIME_ZONE }));
   // ⚠️ A failure here costs naming at a door, never the desk.
   const eventSeats = await openEventSeats(db, conferenceId).catch(() => [] as OpenSeat[]);
+  // ⚠️ A failure here costs the pin prompt, never the desk.
+  const cancollSchoolIds = await loadCancollSchoolIds(db).catch(() => new Set<string>());
 
   return {
-    facts: checkInFactsFromRun(run, dateByDayName, spareStackList),
+    facts: checkInFactsFromRun(run, dateByDayName, spareStackList, cancollSchoolIds),
     openSeats: [...openSeatsFromRun(run), ...eventSeats],
     conferenceDates: [...new Set(dateByDayName.values())].sort(),
     ...door,
@@ -406,6 +378,36 @@ export async function personReachesEntity(conferenceId: string, personId: string
   const heldIds = [...new Set(seats.map((seat) => seat.entityId))];
   if (heldIds.length === 0) return false;
   return resolveAccess(heldIds, entitiesById).has(entityId);
+}
+
+/**
+ * Does this person hold anything their registration does not include? Their
+ * seats' access, minus what the registration seats alone reach. The same
+ * resolveAccess walk as personReachesEntity.
+ */
+export async function personHoldsExtras(conferenceId: string, personId: string): Promise<boolean> {
+  const { seats, entitiesById } = await loadSeatHoldings(createAdminClient(), {
+    conferenceId,
+    holderPersonId: personId,
+  });
+  const registrations = seats.filter((seat) => seat.entityKind === "registration").map((seat) => seat.entityId);
+  const covered = resolveAccess([...new Set(registrations)], entitiesById);
+  return seats.some((seat) => seat.entityKind !== "registration" && !covered.has(seat.entityId));
+}
+
+/**
+ * Schools in the CANCOLL purchasing group (`is_cancoll_member`): member and
+ * non-member stores alike. Vendor partners carry the flag too and are left out:
+ * the pins are for schools.
+ */
+async function loadCancollSchoolIds(db: ReturnType<typeof createAdminClient>): Promise<Set<string>> {
+  const { data, error } = await db
+    .from("organizations")
+    .select("id")
+    .eq("is_cancoll_member", true)
+    .neq("type", ORG_TYPE.vendorPartner);
+  if (error) throw new Error(error.message);
+  return new Set((data ?? []).map((row) => row.id));
 }
 
 /** Day entity name → ISO date, for this conference. */

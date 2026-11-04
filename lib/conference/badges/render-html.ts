@@ -9,6 +9,7 @@ import {
   type BadgeSlotText,
   type BadgeTemplateConfigV1,
   type BadgeTextBindingKey,
+  type LogoContentBox,
   resolveBadgeVariant,
 } from "@/lib/conference/badges/template";
 import {
@@ -208,6 +209,43 @@ function resolveLogoUrl(
   }
   const personLogo = person.logoUrl?.trim() || "";
   return personLogo.length > 0 ? personLogo : null;
+}
+
+/**
+ * Size and place a measured logo in its frame, centred on its content.
+ *
+ * In a circle the logo is scaled until its farthest real pixel sits just
+ * inside the edge, so a round crest fills the circle and only a logo with
+ * something in its corners is pulled in, and only as far as those corners
+ * need. In a square frame its content box is contained. Pixel values are
+ * relative to the frame.
+ */
+function placeLogo(params: {
+  box: LogoContentBox;
+  frameSize: number;
+  circle: boolean;
+  /** Share of the frame the content may reach, so it never touches the edge. */
+  fill?: number;
+}): { left: number; top: number; width: number; height: number } {
+  const { box, frameSize, circle } = params;
+  const fill = params.fill ?? 0.96;
+  let imgW: number;
+  if (circle && box.reach > 0) {
+    imgW = (fill * frameSize) / (2 * box.reach);
+  } else {
+    const d = frameSize * fill;
+    const contentW = Math.min(d, d * box.aspect);
+    imgW = contentW / box.width;
+  }
+  const imgH = imgW / box.imageAspect;
+  const centreX = box.left + box.width / 2;
+  const centreY = box.top + box.height / 2;
+  return {
+    width: imgW,
+    height: imgH,
+    left: frameSize / 2 - centreX * imgW,
+    top: frameSize / 2 - centreY * imgH,
+  };
 }
 
 function renderTextBlock(params: {
@@ -730,11 +768,37 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     maxLines: 1,
     lineHeightEm: 1.0,
   });
-  const lastLayout = fitTextLayout(bindingValues.lastName || " ", front.lastName, template.canvas.dpi, {
-    maxLines: front.lastName.maxLines ?? 2,
+  /**
+   * ⛔ A LAST NAME SHRINKS BEFORE IT WRAPS, AND A WRAP MOVES THE TITLE.
+   *
+   * The title sits at a fixed baseline one line below the last name. Fitting
+   * the last name with two lines allowed broke a two-word surname at full size
+   * ("Test Full / Conference" at 29pt) and printed its second line on top of
+   * the title. So: one line, shrinking to the slot's minimum. Only a name that
+   * cannot fit on one line even then wraps, at the minimum size, and the title
+   * moves down by exactly the extra line.
+   */
+  const lastMaxLines = front.lastName.maxLines ?? 2;
+  const lastOneLine = fitTextLayout(bindingValues.lastName || " ", front.lastName, template.canvas.dpi, {
+    maxLines: 1,
     lineHeightEm: 1.02,
   });
-  const titleLayout = fitTextLayout(bindingValues.title, front.title, template.canvas.dpi, {
+  const lastLayout =
+    lastOneLine.overflowed && lastMaxLines > 1
+      ? fitTextLayout(
+          bindingValues.lastName || " ",
+          { ...front.lastName, defaultPt: front.lastName.minPt },
+          template.canvas.dpi,
+          { maxLines: lastMaxLines, lineHeightEm: 1.02 }
+        )
+      : lastOneLine;
+  const lastExtraPx =
+    (lastLayout.lines.length - 1) *
+    designPxFromPt(lastLayout.sizePt, template.canvas.dpi) *
+    lastLayout.lineHeightEm;
+  const titleSlot =
+    lastExtraPx > 0 ? { ...front.title, baselineY: front.title.baselineY + lastExtraPx } : front.title;
+  const titleLayout = fitTextLayout(bindingValues.title, titleSlot, template.canvas.dpi, {
     maxLines: front.title.maxLines ?? 3,
     lineHeightEm: front.title.lineHeight ?? 1.15,
   });
@@ -904,6 +968,23 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
       : ""
   );
 
+  // A measured logo is placed so its content is as large as the frame allows
+  // without clipping; the person's own logo only, since a static URL is
+  // template art and was sized when it was drawn.
+  const renderLogoImage = (url: string): string => {
+    const circle = front.logo.shape === "circle";
+    const fit = front.bindings.logo === "static_url" ? null : person.logoFit ?? null;
+    if (!fit) {
+      return `<img class="org-logo ${circle ? "circle safe" : ""}" src="${escapeHtml(url)}" alt="" />`;
+    }
+    if (fit.photo) {
+      return `<img class="org-logo photo ${circle ? "circle" : ""}" src="${escapeHtml(url)}" alt="" />`;
+    }
+    const frame = front.logo.diameter * scaleX;
+    const at = placeLogo({ box: fit, frameSize: frame, circle });
+    return `<img class="org-logo fitted" src="${escapeHtml(url)}" alt="" style="left:${at.left}px;top:${at.top}px;width:${at.width}px;height:${at.height}px;" />`;
+  };
+
   frontLayerHtml.set(
     "logo",
     `<div class="org-logo-shell ${front.logo.shape === "circle" ? "circle" : ""}" style="left:${
@@ -911,11 +992,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     }px;top:${(front.logo.y + frontOffsetY) * scaleY}px;width:${
       front.logo.diameter * scaleX
     }px;height:${front.logo.diameter * scaleY}px;">${
-      logoUrl
-        ? `<img class="org-logo ${front.logo.shape === "circle" ? "circle" : ""}" src="${escapeHtml(
-            logoUrl
-          )}" alt="" />`
-        : ""
+      logoUrl ? renderLogoImage(logoUrl) : ""
     }</div>`
   );
 
@@ -986,7 +1063,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     bindingValues.title
       ? renderTextBlock({
           lines: titleLayout.lines,
-          slot: front.title,
+          slot: titleSlot,
           layout: titleLayout,
           dpi: template.canvas.dpi,
           scaleX,
@@ -1166,9 +1243,10 @@ export function renderJobDocumentHtml(params: {
         inset: 0;
         mix-blend-mode: multiply;
       }
+      /* ⛔ No background of its own. The white disc is the overlay's plate, and
+         a second white circle drawn here never sat exactly on it. */
       .org-logo-shell {
         position: absolute;
-        background: #fff;
         overflow: hidden;
       }
       .org-logo-shell.circle { border-radius: 999px; }
@@ -1181,6 +1259,10 @@ export function renderJobDocumentHtml(params: {
         background: transparent;
       }
       .org-logo.circle { border-radius: 999px; }
+      /* Unmeasured: the square inside the circle, which nothing can poke out of. */
+      .org-logo.safe { inset: 14.6%; width: auto; height: auto; border-radius: 0; }
+      .org-logo.fitted { inset: auto; object-fit: fill; }
+      .org-logo.photo { object-fit: cover; }
       .shape-layer { position: absolute; box-sizing: border-box; }
       .image-layer { position: absolute; }
       .slot-text {

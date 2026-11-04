@@ -97,6 +97,14 @@ describe("which stock to reach for", () => {
   it("a spare reprint prints the schedule; a company blank already has it", () => {
     expect(planReprint({ stock: "spare", personIsSeated: true }).delta).toContain("schedule");
     expect(planReprint({ stock: "company_blank", personIsSeated: true }).delta).not.toContain("schedule");
+    // ...unless they hold something their type doesn't include: the blank's
+    // back carries the TYPE's schedule, so theirs is added (Stephen, 2026-10-22).
+    expect(planReprint({ stock: "company_blank", personIsSeated: true, holdsExtras: true }).delta).toEqual([
+      "name",
+      "title",
+      "qr",
+      "schedule",
+    ]);
   });
 });
 

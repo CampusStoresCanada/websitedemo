@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { todayVerdict, type OpenSeat } from "@/lib/conference/badges/checkin";
+import { todayVerdict } from "@/lib/conference/badges/checkin-verdict";
+import type { OpenSeat } from "@/lib/conference/badges/checkin";
 import { addConferenceAttendee, allocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { listDeskCompanyContacts, printBadge, recordNameOnlyWalkUp } from "@/lib/actions/conference-people";
 import {
+  listPrintStations,
   loadReprintPreview,
   sendReprintToQueue,
+  type PrintStationRow,
   type BadgeReprintReason,
   type ReprintPreview,
 } from "@/lib/actions/conference-badges";
@@ -16,6 +19,9 @@ import { ToolButton, ToolkitFabButton } from "@/components/ui/ToolkitFab";
 import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conference/DeskSellPanel";
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
 import { getDeskPinState } from "@/lib/actions/desk-pin";
+import { acceptAgreementsAtDesk } from "@/lib/actions/conference-legal";
+import type { OwedAgreement } from "@/lib/conference/legal-acceptance";
+import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "@/lib/constants/conference";
 import { shortDay } from "@/lib/conference/desk-offers";
 import {
   doorChoiceStillValid,
@@ -60,6 +66,8 @@ type CheckInFacts = {
   reprintReason?: string;
   /** The cards that exist for them (reprint-plan cardsOnHand). */
   reprintCards?: { companyBlank: boolean; spareCount: number; spareLabel: string | null; typeName: string | null };
+  /** Their school is in CANCOLL: hand them a pin at pickup. */
+  cancollPin?: boolean;
 };
 
 type PendingScan = {
@@ -136,8 +144,8 @@ const SCAN_STATUS_COPY: Record<
     className: "text-red-700",
   },
   legal_not_accepted: {
-    title: "Documents not accepted",
-    description: "An old result. Check-in no longer waits on documents.",
+    title: "Agreements not accepted",
+    description: "Not checked in. Scan their badge again to show them the agreements.",
     className: "text-amber-700",
   },
   queued_offline: {
@@ -302,6 +310,13 @@ const FAILED_SCAN_STATES = new Set([
 
 
 
+/** What a desk says when its sticker went to a printer nobody is running. */
+function offlineNote(label: string | null): string {
+  return label
+    ? `Sent, but ${label} is offline. Start CSC Print Station on that laptop.`
+    : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.";
+}
+
 interface CheckInDeskClientProps {
   conferenceId: string;
   initialRows: ConferencePerson[];
@@ -415,6 +430,59 @@ export default function CheckInDeskClient({
   );
   // The + menu and the camera picker under it.
   const [deskMenuOpen, setDeskMenuOpen] = useState(false);
+  /**
+   * Agreements owed at check-in (Stephen, 2026-10-23: "that is our last
+   * shot"). The scan or check-in by name came back `legal_not_accepted`; the
+   * sheet shows them to the attendee, the desk records their acceptance, and
+   * `then` runs the check-in again. The camera ignores codes while it is open.
+   */
+  const [agreementGate, setAgreementGate] = useState<{
+    personId: string;
+    owed: OwedAgreement[];
+    then: () => Promise<void>;
+  } | null>(null);
+  const agreementOpenRef = useRef(false);
+  useEffect(() => {
+    agreementOpenRef.current = agreementGate !== null;
+  }, [agreementGate]);
+  /**
+   * This device's printer (Stephen, 2026-10-22: one printer is today, desks
+   * must be able to keep their own). Picked once from the toolkit, kept on the
+   * device; null = whichever station claims it first, which with one printer
+   * is that printer. The picker only appears once there are two.
+   */
+  const [printStations, setPrintStations] = useState<PrintStationRow[]>([]);
+  const [deskPrinterId, setDeskPrinterId] = useState<string | null>(null);
+  const [printerPickerOpen, setPrinterPickerOpen] = useState(false);
+  const deskPrinterRef = useRef<string | null>(null);
+  const deskPrinterKey = `desk-printer:${conferenceId}`;
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(deskPrinterKey);
+      deskPrinterRef.current = saved;
+      setDeskPrinterId(saved);
+    } catch {
+      // No storage (private mode): every print goes to any printer.
+    }
+    void listPrintStations(conferenceId).then((res) => {
+      if (res.success) setPrintStations(res.data);
+    });
+  }, [conferenceId, deskPrinterKey]);
+  const chooseDeskPrinter = useCallback(
+    (stationId: string | null) => {
+      deskPrinterRef.current = stationId;
+      setDeskPrinterId(stationId);
+      setPrinterPickerOpen(false);
+      try {
+        if (stationId) window.localStorage.setItem(deskPrinterKey, stationId);
+        else window.localStorage.removeItem(deskPrinterKey);
+      } catch {
+        // Kept for this page load only.
+      }
+    },
+    [deskPrinterKey]
+  );
+
   const [cameraPanelOpen, setCameraPanelOpen] = useState(false);
   // A panel is over the camera: drop the guide, soften the feed, stop reading.
   const panelOpen = lookupOpen || cameraPanelOpen;
@@ -698,7 +766,7 @@ export default function CheckInDeskClient({
     async (
       scan: PendingScan,
       allowQueue: boolean
-    ): Promise<{ state: string; personId: string | null }> => {
+    ): Promise<{ state: string; personId: string | null; owed?: OwedAgreement[] }> => {
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/check-in/scan`, {
           method: "POST",
@@ -709,6 +777,7 @@ export default function CheckInDeskClient({
           state?: string;
           error?: string;
           person_id?: string | null;
+          owed?: OwedAgreement[];
         };
         if (!response.ok) {
           return { state: payload.error ?? "scan_failed", personId: null };
@@ -716,6 +785,7 @@ export default function CheckInDeskClient({
         return {
           state: payload.state ?? "invalid_token",
           personId: payload.person_id ?? null,
+          owed: payload.owed ?? [],
         };
       } catch {
         if (allowQueue) {
@@ -742,6 +812,15 @@ export default function CheckInDeskClient({
         },
         true
       );
+      if (result.state === "legal_not_accepted" && result.personId && result.owed?.length) {
+        // Not checked in yet: show them what they owe, then scan again.
+        setAgreementGate({
+          personId: result.personId,
+          owed: result.owed,
+          then: () => submitTokenRef.current(token),
+        });
+        return;
+      }
       pushScanCard(result.state, result.personId);
       await loadRows();
     },
@@ -823,6 +902,8 @@ export default function CheckInDeskClient({
           // ⛔ Typing a name in Find with a badge somewhere in view must not
           // check that badge in behind the operator's back.
           if (lookupOpenRef.current) return;
+          // Nor while an attendee is reading the agreements on this device.
+          if (agreementOpenRef.current) return;
           const raw = result.getText?.().trim();
           if (!raw) return;
           const now = Date.now();
@@ -876,14 +957,14 @@ export default function CheckInDeskClient({
    */
   /** Check somebody in by hand: the one request Find and Name someone share. */
   const checkInByHand = useCallback(
-    async (personId: string): Promise<{ ok: boolean; state?: string; error?: string }> => {
+    async (personId: string): Promise<{ ok: boolean; state?: string; error?: string; owed?: OwedAgreement[] }> => {
       const response = await fetch(`/api/admin/conference/${conferenceId}/people/${personId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ op: "manual_check_in", testMode, entityId: doorEntityRef.current }),
       });
-      const payload = (await response.json()) as { error?: string; state?: string };
-      return { ok: response.ok, state: payload.state, error: payload.error };
+      const payload = (await response.json()) as { error?: string; state?: string; owed?: OwedAgreement[] };
+      return { ok: response.ok, state: payload.state, error: payload.error, owed: payload.owed };
     },
     [conferenceId, testMode]
   );
@@ -895,6 +976,12 @@ export default function CheckInDeskClient({
         const payload = await checkInByHand(personId);
         if (!payload.ok) {
           pushScanCard("scan_failed", personId, payload.error ?? "They could not be checked in by name.");
+          return;
+        }
+        if (payload.state === "legal_not_accepted" && payload.owed?.length) {
+          setLookupOpen(false);
+          setNameLookup("");
+          setAgreementGate({ personId, owed: payload.owed, then: () => manualCheckInRef.current(personId) });
           return;
         }
         // Announce it the same way a scan does, so the desk has one place to
@@ -918,6 +1005,10 @@ export default function CheckInDeskClient({
     },
     [checkInByHand, pushScanCard, loadRows]
   );
+  const manualCheckInRef = useRef(manualCheckIn);
+  useEffect(() => {
+    manualCheckInRef.current = manualCheckIn;
+  }, [manualCheckIn]);
 
   /**
    * ⚠️ Searches the desk's roster snapshot, which polls every 30 seconds — so a
@@ -1046,9 +1137,8 @@ export default function CheckInDeskClient({
         }
         // ⛔ They are standing at the desk: naming them IS checking them in
         // (Stephen, 2026-10-21). The same hand check-in Find uses.
-        const checkedIn: { ok: boolean; state?: string; error?: string } = await checkInByHand(added.data.id).catch(() => ({
-          ok: false,
-        }));
+        const checkedIn: { ok: boolean; state?: string; error?: string; owed?: OwedAgreement[] } =
+          await checkInByHand(added.data.id).catch(() => ({ ok: false }));
         if (!checkedIn.ok) {
           recordProblem = [recordProblem, `Named, but not checked in: ${checkedIn.error ?? "try Find"}.`]
             .filter(Boolean)
@@ -1060,40 +1150,62 @@ export default function CheckInDeskClient({
         setWalkUpContactId(null);
         setNameLookup("");
         setLookupOpen(false);
-        if (eventTicket) {
-          // In the room on their company's ticket. An event ticket has no
-          // badge, so nothing prints; the card says whose ticket it was.
-          pushScanCard(
-            checkedIn.ok ? checkedIn.state ?? "valid" : "seat_named",
-            added.data.id,
-            [`On ${org.organizationName}'s ${type.name} ticket.`, recordProblem].filter(Boolean).join(" ")
+        const personId = added.data.id;
+        // The check-in, then (for a registration) their first badge.
+        const finish = async (done: { ok: boolean; state?: string }) => {
+          if (eventTicket) {
+            // In the room on their company's ticket. An event ticket has no
+            // badge, so nothing prints; the card says whose ticket it was.
+            pushScanCard(
+              done.ok ? done.state ?? "valid" : "seat_named",
+              personId,
+              [`On ${org.organizationName}'s ${type.name} ticket.`, recordProblem].filter(Boolean).join(" ")
+            );
+            return;
+          }
+          // ⛔ Naming them at the desk PRINTS their badge (Stephen, 2026-10-21):
+          // no second tap. The card is the desk's own suggestion for them (a
+          // company blank, else a spare), read fresh because they are new here.
+          let stock: "company_blank" | "spare" | "none" | undefined;
+          try {
+            const factsResponse = await fetch(`/api/admin/conference/${conferenceId}/check-in/facts`, {
+              cache: "no-store",
+            });
+            if (factsResponse.ok) {
+              const fresh = (await factsResponse.json()) as { facts?: Record<string, CheckInFacts> };
+              stock = fresh.facts?.[personId]?.reprintStock;
+            }
+          } catch {
+            // No suggestion: the print path plans it as a full badge and says so.
+          }
+          if (recordProblem) pushScanCard("seat_named", personId, recordProblem);
+          const printed = await reprintBadgeRef.current(
+            personId,
+            "ops_override",
+            "First badge, named at the desk",
+            stock
           );
+          // If the print did not go, the named card stays with its Print badge.
+          if (!printed && !recordProblem) pushScanCard("seat_named", personId, null);
+        };
+        // Agreements owed: they accept on this device first (agreementGate),
+        // then the check-in runs again and the badge prints.
+        if (checkedIn.state === "legal_not_accepted" && checkedIn.owed?.length) {
+          setAgreementGate({
+            personId,
+            owed: checkedIn.owed,
+            then: async () => {
+              const again = await checkInByHand(personId).catch(() => ({ ok: false, error: undefined }));
+              if (!again.ok) {
+                pushScanCard("scan_failed", personId, "Accepted, but the check-in did not go through. Try Find.");
+                return;
+              }
+              await finish(again);
+            },
+          });
           return;
         }
-        // ⛔ Naming them at the desk PRINTS their badge (Stephen, 2026-10-21):
-        // no second tap. The card is the desk's own suggestion for them (a
-        // company blank, else a spare), read fresh because they are new here.
-        let stock: "company_blank" | "spare" | "none" | undefined;
-        try {
-          const factsResponse = await fetch(`/api/admin/conference/${conferenceId}/check-in/facts`, {
-            cache: "no-store",
-          });
-          if (factsResponse.ok) {
-            const fresh = (await factsResponse.json()) as { facts?: Record<string, CheckInFacts> };
-            stock = fresh.facts?.[added.data.id]?.reprintStock;
-          }
-        } catch {
-          // No suggestion: the print path plans it as a full badge and says so.
-        }
-        if (recordProblem) pushScanCard("seat_named", added.data.id, recordProblem);
-        const printed = await reprintBadgeRef.current(
-          added.data.id,
-          "ops_override",
-          "First badge, named at the desk",
-          stock
-        );
-        // If the print did not go, the named card stays with its Print badge.
-        if (!printed && !recordProblem) pushScanCard("seat_named", added.data.id, null);
+        await finish(checkedIn);
       } catch {
         setNamingError("Could not name them to that seat. Try again.");
       } finally {
@@ -1176,6 +1288,7 @@ export default function CheckInDeskClient({
           note: note ?? null,
           // What the operator says they are holding, else the desk's guess.
           stockInHand: cardInHandRef.current[personId] ?? knownStock ?? facts[personId]?.reprintStock ?? "none",
+          stationId: deskPrinterRef.current,
         });
         if (!result.success) {
           pushScanCard("scan_failed", personId, result.error);
@@ -1189,7 +1302,7 @@ export default function CheckInDeskClient({
             printed.queueError ??
               (printed.stationOnline
                 ? null
-                : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer."),
+                : offlineNote(printed.stationLabel)),
             { jobId: printed.jobId, labelPrintable: true, queued: printed.queued }
           );
           setReprintOpenId(null);
@@ -1361,7 +1474,7 @@ export default function CheckInDeskClient({
   // "Send to print queue": the laptop beside the QL prints it (print station).
   const sendToPrintQueue = useCallback(
     async (cardId: string, jobId: string) => {
-      const res = await sendReprintToQueue({ conferenceId, jobId });
+      const res = await sendReprintToQueue({ conferenceId, jobId, stationId: deskPrinterRef.current });
       if (!res.success) {
         pushScanCard("scan_failed", null, res.error);
         return;
@@ -1373,9 +1486,7 @@ export default function CheckInDeskClient({
                 ...card,
                 printJob: { ...card.printJob, queued: true },
                 // Nothing will print it until a station is running.
-                detail: res.data.stationOnline
-                  ? card.detail
-                  : "Sent, but the printer laptop is offline. Start CSC Print Station on the laptop by the printer.",
+                detail: res.data.stationOnline ? card.detail : offlineNote(res.data.stationLabel),
               }
             : card
         )
@@ -1596,6 +1707,33 @@ export default function CheckInDeskClient({
           }}
         />
       ) : null}
+      {agreementGate ? (
+        <AgreementSheet
+          personName={rows.find((row) => row.id === agreementGate.personId)?.display_name ?? null}
+          owed={agreementGate.owed}
+          onAccept={async (versionIds) => {
+            const gate = agreementGate;
+            const res = await acceptAgreementsAtDesk({ conferenceId, personId: gate.personId, versionIds });
+            if (!res.success) return res.error;
+            setAgreementGate(null);
+            await gate.then();
+            return null;
+          }}
+          onNotNow={() => {
+            const gate = agreementGate;
+            setAgreementGate(null);
+            pushScanCard("legal_not_accepted", gate.personId);
+          }}
+        />
+      ) : null}
+      {printerPickerOpen ? (
+        <PrinterPicker
+          stations={printStations}
+          activeId={deskPrinterId}
+          onPick={chooseDeskPrinter}
+          onClose={() => setPrinterPickerOpen(false)}
+        />
+      ) : null}
       {/* ⛔ The door picker comes AFTER the PIN: it only shows once the desk is
           unlocked and nothing else is covering it. */}
       {pinState?.hasPin && !handOverOrderId && doorPicker ? (
@@ -1739,6 +1877,12 @@ export default function CheckInDeskClient({
               {card.facts?.admittedTo.length ? (
                 <p className="text-sm text-gray-300">
                   {card.facts.admittedTo.join(" · ")}
+                </p>
+              ) : null}
+              {/* At badge pickup only, not at every event door. */}
+              {card.facts?.cancollPin && toneOf(card.state) === "go" && !activeDoorEvent ? (
+                <p className="mt-2 rounded-lg bg-amber-400/20 px-3 py-2 text-base font-bold text-amber-200">
+                  Give a CANCOLL pin
                 </p>
               ) : null}
               {card.hotelName ? <p className="mt-1 text-xs text-gray-200">Room: {card.hotelName}</p> : null}
@@ -2353,7 +2497,25 @@ export default function CheckInDeskClient({
             {/* ⛔ The one print the desk keeps: a door's backup list, the moment
                 a phone fails (Stephen, 2026-10-22). Everything else that
                 prints — the print station, check-in cards, the map — is run
-                from the War Room's What's next, not from the desk. */}
+                from the War Room's What's next, not from the desk. Which
+                printer THIS device sends to is a desk setting, so it stays. */}
+            {printStations.length > 1 ? (
+              <ToolButton
+                size="lg"
+                showLabel
+                icon={<PrintIcon />}
+                label={`This desk prints to: ${
+                  printStations.find((s) => s.id === deskPrinterId)?.label ?? "any printer"
+                }`}
+                onClick={() => {
+                  setDeskMenuOpen(false);
+                  void listPrintStations(conferenceId).then((res) => {
+                    if (res.success) setPrintStations(res.data);
+                  });
+                  setPrinterPickerOpen(true);
+                }}
+              />
+            ) : null}
             {activeDoorEvent ? (
               <ToolButton
                 size="lg"
@@ -2461,6 +2623,133 @@ function wallTime(hhmm: string): string {
  * event's window is open; reopened from the toolkit, where every event is
  * listed (reconciling afterwards, or an uncapped one like an AGM).
  */
+/**
+ * The agreements an attendee owes, shown to them on the desk's device before
+ * they are checked in. Each one is read and accepted on its own; Continue
+ * records them (acceptAgreementsAtDesk) and checks them in. Rendered like the
+ * attendee welcome page's acceptance (AssigneeAcceptance): the same admin-
+ * authored HTML.
+ */
+function AgreementSheet({
+  personName,
+  owed,
+  onAccept,
+  onNotNow,
+}: {
+  personName: string | null;
+  owed: OwedAgreement[];
+  onAccept: (versionIds: string[]) => Promise<string | null>;
+  onNotNow: () => void;
+}) {
+  const [accepted, setAccepted] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const allAccepted = owed.every((doc) => accepted.has(doc.versionId));
+  return (
+    <div className="fixed inset-0 z-[95] overflow-y-auto bg-white px-5 py-8 text-gray-900">
+      <div className="mx-auto w-full max-w-2xl space-y-4">
+        <div>
+          <p className="text-2xl font-bold">{personName ? `${personName}, before your badge` : "Before your badge"}</p>
+          <p className="mt-1 text-base text-gray-600">
+            Please read and accept {owed.length === 1 ? "this agreement" : "these agreements"} for the conference.
+          </p>
+        </div>
+        {owed.map((doc) => {
+          const done = accepted.has(doc.versionId);
+          return (
+            <section key={doc.versionId} className="rounded-xl border border-gray-200 p-4">
+              <h2 className="text-lg font-semibold">
+                {LEGAL_DOCUMENT_LABELS[doc.documentType as LegalDocumentType] ?? doc.documentType}
+              </h2>
+              <div
+                className="prose prose-sm mt-2 max-h-72 max-w-none overflow-y-auto text-sm text-gray-700"
+                // Admin-authored agreement text, as the welcome page renders it.
+                dangerouslySetInnerHTML={{ __html: doc.content }}
+              />
+              <button
+                type="button"
+                disabled={done}
+                onClick={() => setAccepted((prev) => new Set([...prev, doc.versionId]))}
+                className={`mt-3 min-h-12 w-full rounded-lg px-4 text-base font-semibold ${
+                  done ? "bg-emerald-100 text-emerald-800" : "bg-gray-900 text-white"
+                }`}
+              >
+                {done ? "✓ Accepted" : "I accept"}
+              </button>
+            </section>
+          );
+        })}
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+        <button
+          type="button"
+          disabled={!allAccepted || busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            const problem = await onAccept([...accepted]);
+            if (problem) {
+              setError(problem);
+              setBusy(false);
+            }
+          }}
+          className="min-h-14 w-full rounded-xl bg-emerald-500 px-5 text-lg font-bold text-black disabled:opacity-40"
+        >
+          {busy ? "…" : allAccepted ? "Continue to my badge" : "Accept each agreement to continue"}
+        </button>
+        <button type="button" onClick={onNotNow} className="w-full text-center text-sm text-gray-500 underline">
+          Not now (hand the device back to staff)
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Which printer this desk device prints to. Kept on the device. */
+function PrinterPicker({
+  stations,
+  activeId,
+  onPick,
+  onClose,
+}: {
+  stations: PrintStationRow[];
+  activeId: string | null;
+  onPick: (stationId: string | null) => void;
+  onClose: () => void;
+}) {
+  const row = (id: string | null, label: string, detail: string) => (
+    <button
+      key={id ?? "any"}
+      type="button"
+      onClick={() => onPick(id)}
+      className={`flex min-h-14 w-full items-center justify-between gap-3 rounded-xl px-5 py-3 text-left text-base font-semibold ${
+        id === activeId ? "bg-emerald-400 text-black" : "bg-white text-black"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="shrink-0 text-sm font-normal text-gray-600">{detail}</span>
+    </button>
+  );
+  return (
+    <div className="fixed inset-0 z-[90] flex flex-col items-center overflow-y-auto bg-gray-950 px-5 py-10 text-white">
+      <div className="w-full max-w-lg space-y-4">
+        <p className="text-2xl font-bold">Which printer does this desk use?</p>
+        <p className="text-sm text-gray-300">Reprints from this device print there. Each desk picks its own.</p>
+        <div className="space-y-2">
+          {stations.map((station) => row(station.id, station.label, station.online ? "online" : "offline"))}
+          {row(null, "Any printer", "whichever is free")}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="min-h-12 w-full rounded-xl border border-white/40 px-5 text-base font-semibold text-white"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DoorPicker({
   events,
   openNow,

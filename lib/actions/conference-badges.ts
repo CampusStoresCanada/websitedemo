@@ -2,6 +2,7 @@
 
 import { requireAdmin, requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Json } from "@/lib/database.types";
 import {
   stickersFor,
   type BadgeStock,
@@ -621,7 +622,10 @@ async function insertBadgeEvent(params: {
   payload?: Record<string, unknown>;
 }): Promise<void> {
   const db = createAdminClient();
-  await db.from("badge_print_events").insert({
+  // ⛔ Read the error. The event_type check rejected every preflight_warning
+  // and nothing noticed, because this result was thrown away. An event is the
+  // job's history, not the job: log it loudly, never fail the job over it.
+  const { error } = await db.from("badge_print_events").insert({
     job_id: params.jobId,
     conference_id: params.conferenceId,
     person_id: params.personId,
@@ -631,6 +635,9 @@ async function insertBadgeEvent(params: {
     actor_id: params.actorId,
     payload: (params.payload ?? {}) as unknown as import("@/lib/database.types").Json,
   });
+  if (error) {
+    console.error(`[badges] ${params.eventType} event for job ${params.jobId} not saved: ${error.message}`);
+  }
 }
 
 export async function createPreprintedBadgeJob(params: {
@@ -1234,19 +1241,51 @@ async function deskReprintJob(conferenceId: string, jobId: string) {
   return { job };
 }
 
-/** "Send to print queue": the station beside the printer picks it up. */
+/**
+ * "Send to print queue": a print station picks it up.
+ *
+ * ⛔ Routed when the desk has picked its printer (`stationId`, chosen once per
+ * device): only that station prints it. Unrouted, the first station to claim
+ * it does, which with one printer is the same thing (Stephen, 2026-10-22: "one
+ * printer is today's reality", but desks must be able to keep their own).
+ * The target travels on the job's metadata, so no column was needed.
+ */
 export async function sendReprintToQueue(params: {
   conferenceId: string;
   jobId: string;
-}): Promise<QueueResult<{ stationOnline: boolean }>> {
+  /** The print station this desk prints to; omit for "any". */
+  stationId?: string | null;
+}): Promise<QueueResult<{ stationOnline: boolean; stationLabel: string | null }>> {
   const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
   const found = await deskReprintJob(params.conferenceId, params.jobId);
   if ("error" in found) return { success: false, error: found.error ?? "That print job was not found." };
+
+  const db = createAdminClient();
+  const { data: stations } = await db
+    .from("print_stations")
+    .select("id, label, last_seen_at")
+    .eq("conference_id", params.conferenceId)
+    .is("revoked_at", null);
+  const target = params.stationId ? (stations ?? []).find((s) => s.id === params.stationId) ?? null : null;
+  if (params.stationId && !target) {
+    return { success: false, error: "That printer was removed. Pick this desk's printer again." };
+  }
+
+  const metadata = { ...((found.job.metadata as Record<string, unknown> | null) ?? {}) };
+  if (target) metadata.print_station_id = target.id;
+  else delete metadata.print_station_id;
+
   const now = new Date().toISOString();
-  const { error } = await createAdminClient()
+  const { error } = await db
     .from("badge_print_jobs")
-    .update({ transport_method: "printer_bridge", status: "sent_to_printer", completed_at: null, updated_at: now })
+    .update({
+      transport_method: "printer_bridge",
+      status: "sent_to_printer",
+      completed_at: null,
+      updated_at: now,
+      metadata: metadata as Json,
+    })
     .eq("id", params.jobId);
   if (error) return { success: false, error: error.message };
   await insertBadgeEvent({
@@ -1255,10 +1294,19 @@ export async function sendReprintToQueue(params: {
     personId: found.job.person_id as string | null,
     eventType: "sent_to_printer",
     eventStatus: "success",
-    message: "Sent to the print station.",
+    message: target ? `Sent to the print station "${target.label as string}".` : "Sent to the print station.",
     actorId: auth.ctx.userId,
   });
-  return { success: true, data: { stationOnline: await anyStationOnline(params.conferenceId) } };
+  // Say so when nothing will pick it up: a queued sticker with no station
+  // online is a sticker nobody is printing.
+  const watching = target ? [target] : stations ?? [];
+  return {
+    success: true,
+    data: {
+      stationOnline: watching.some((row) => stationOnline(row.last_seen_at as string | null)),
+      stationLabel: target ? (target.label as string) : null,
+    },
+  };
 }
 
 /**

@@ -92,11 +92,14 @@ export async function claimNextJob(
     .eq("transport_method", "printer_bridge")
     .in("status", ["sent_to_printer", "rendering"])
     .order("updated_at", { ascending: true })
-    .limit(10);
+    .limit(50);
   if (error) throw new Error(error.message);
 
   for (const job of candidates ?? []) {
     if (job.status === "rendering" && !claimExpired(job.updated_at as string)) continue;
+    // ⛔ A job routed to another desk's printer is not ours (sendReprintToQueue).
+    const target = (job.metadata as { print_station_id?: string } | null)?.print_station_id;
+    if (target && target !== station.id) continue;
     const isDocument = job.pipeline_type === "document";
     const stickers = isDocument
       ? []
@@ -232,7 +235,7 @@ export async function finishJob(
     })
     .eq("id", jobId)
     .eq("conference_id", station.conferenceId);
-  await db.from("badge_print_events").insert({
+  const { error: eventError } = await db.from("badge_print_events").insert({
     job_id: jobId,
     conference_id: station.conferenceId,
     person_id: personId,
@@ -244,4 +247,8 @@ export async function finishJob(
     actor_id: station.createdBy,
     payload: { stationId: station.id },
   });
+  // The failure reason exists nowhere else, so losing this insert loses it.
+  if (eventError) {
+    console.error(`[print-station] event for job ${jobId} not saved: ${eventError.message}`);
+  }
 }

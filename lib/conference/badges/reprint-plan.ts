@@ -166,6 +166,13 @@ export function planReprint(params: {
    * between printing and printing-plus-writing.
    */
   personIsSeated: boolean;
+  /**
+   * Do they hold something their registration type does not include (an
+   * event bought on its own, a presentation slot)? A company blank's back
+   * was printed with the TYPE's schedule, so theirs would be missing it: the
+   * reprint then adds their own schedule, as a spare's does (Stephen, 2026-10-22).
+   */
+  holdsExtras?: boolean;
   /** Override for a conference on different hardware. */
   stockSpec?: ReprintStock;
 }): ReprintPlan {
@@ -186,7 +193,10 @@ export function planReprint(params: {
     };
   }
 
-  const delta = DELTA_BY_STOCK[stock];
+  const delta =
+    stock === "company_blank" && params.holdsExtras
+      ? [...DELTA_BY_STOCK.company_blank, "schedule" as const]
+      : DELTA_BY_STOCK[stock];
   return {
     stock,
     delta,

@@ -8908,31 +8908,75 @@ export type Database = {
       legal_acceptances: {
         Row: {
           accepted_at: string
+          accepted_via: string
+          contact_id: string | null
           id: string
           ip_address: string | null
           legal_version_id: string
-          user_id: string
+          recorded_by: string | null
+          user_id: string | null
         }
         Insert: {
           accepted_at?: string
+          accepted_via?: string
+          contact_id?: string | null
           id?: string
           ip_address?: string | null
           legal_version_id: string
-          user_id: string
+          recorded_by?: string | null
+          user_id?: string | null
         }
         Update: {
           accepted_at?: string
+          accepted_via?: string
+          contact_id?: string | null
           id?: string
           ip_address?: string | null
           legal_version_id?: string
-          user_id?: string
+          recorded_by?: string | null
+          user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "legal_acceptances_legal_version_id_fkey"
             columns: ["legal_version_id"]
             isOneToOne: false
             referencedRelation: "conference_legal_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "legal_acceptances_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {

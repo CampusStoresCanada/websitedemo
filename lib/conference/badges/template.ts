@@ -312,11 +312,39 @@ export type BadgePersonRecord = {
   city: string | null;
   province: string | null;
   organizationType: string | null;
+  /** Where the logo's content sits inside its file — see logo-fit.ts. Null or
+   *  absent when unmeasured; the renderer then uses a box that cannot clip. */
+  logoFit?: LogoContentBox | null;
   /** What this badge's registration type admits the holder to. Null when the
    *  record was built outside a run and no catalogue graph was available. */
   access: AccessSummary | null;
   /** That same entitlement as a timed, day-ordered list, for the printed back. */
   agenda: AgendaItem[];
+};
+
+/**
+ * Where a logo actually is inside its image file, as fractions of the file.
+ *
+ * Organisations upload whatever they have: a tall crest, a wordmark with a
+ * white margin baked in, a square file with lettering to the very edge. Fitting
+ * the FILE into the badge's circle clips the corners of anything that is not
+ * itself round, and shrinks anything padded. Fitting the CONTENT lets each logo
+ * be as large as the circle allows without losing an edge.
+ */
+export type LogoContentBox = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** Width over height of the content, in pixels. */
+  aspect: number;
+  /** Width over height of the whole file. */
+  imageAspect: number;
+  /** Farthest content pixel from the content's centre, as a share of the
+   *  file's width. What decides how large the logo can be in a circle. */
+  reach: number;
+  /** A full-bleed, roughly square picture: fills the circle like a photo. */
+  photo: boolean;
 };
 
 export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {
@@ -1009,6 +1037,33 @@ export function resolveBadgeVariant(
     theme,
     resolvedKey: key,
   };
+}
+
+/**
+ * A layout for every variant the template has, seeded from the base where one
+ * is missing. Four separate places used to hand-build `{delegate, exhibitor}`
+ * here; each of them silently dropped every registration-type layout.
+ *
+ * ⛔ Every STORED layout is kept, not only the variants with a colour theme.
+ * Keying this on `variants` alone dropped every type designed without its own
+ * colours the moment the editor opened, and the next save wrote Default over
+ * them. CANCOLL's corner text vanished that way (2026-10-27).
+ */
+export function seedLayoutsFor(
+  config: BadgeTemplateConfigV1,
+  extraKeys: string[] = []
+): NonNullable<BadgeTemplateConfigV1["variantLayouts"]> {
+  const out: NonNullable<BadgeTemplateConfigV1["variantLayouts"]> = {};
+  const keys = [DEFAULT_VARIANT, ...Object.keys(config.variants), ...Object.keys(config.variantLayouts ?? {}), ...extraKeys];
+  for (const key of new Set(keys)) {
+    out[key] = structuredClone(
+      config.variantLayouts?.[key] ?? {
+        front: config.front,
+        back: config.back,
+      }
+    );
+  }
+  return out;
 }
 
 /**

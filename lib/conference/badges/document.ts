@@ -1,4 +1,5 @@
 import { ORG_TYPE } from "@/lib/constants/org-types";
+import { measureLogos } from "@/lib/conference/badges/logo-fit";
 import {
   DEFAULT_BADGE_TEMPLATE_CONFIG_V1,
   badgeLookKey,
@@ -218,7 +219,9 @@ const SITE_LOGO_URL = "/logos/csc-logo.svg";
 function orgLogoUrl(org: Record<string, unknown> | undefined): string | null {
   const declared = typeof org?.logo_url === "string" && org.logo_url.trim() ? org.logo_url : null;
   if (declared) return declared;
-  return org?.organization_type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
+  // ⛔ `type`, not `organization_type`: the latter is an empty legacy column, so
+  // this fallback never fired and every staff badge printed an empty circle.
+  return org?.type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
 }
 
 // The name rule lives with the sort rules (arrangement.ts, no server imports)
@@ -294,7 +297,7 @@ function toBadgePerson(
     null;
   const organizationType =
     (typeof row.organization_type === "string" && row.organization_type.trim()) ||
-    (typeof org?.organization_type === "string" && org.organization_type.trim()) ||
+    (typeof org?.type === "string" && org.type.trim()) ||
     null;
   const roomNumber =
     (typeof row.room_number === "string" && row.room_number.trim()) ||
@@ -435,7 +438,7 @@ function blankBadgeRecord(params: {
       seat.organizationProvince ||
       null,
     organizationType:
-      typeof org?.organization_type === "string" ? org.organization_type : null,
+      typeof org?.type === "string" ? org.type : null,
     roomNumber: null,
     access: type.accessSummary,
     agenda: type.agenda,
@@ -525,7 +528,10 @@ export async function buildBadgeJobDocument(params: {
   // decide which organisations this document needs: a blank badge is printed for
   // a company nobody from that company has been named at, so its organisation
   // would not appear in the roster query at all.
-  const run = await resolveBadgeRun(conferenceId);
+  // A desk reprint can be for a rehearsal person at a test organisation; the
+  // pre-print package never is.
+  const isReprint = job.pipeline_type === "onsite_reprint";
+  const run = await resolveBadgeRun(conferenceId, { includeTestOrganizations: isReprint });
 
   // ⛔ Snapshotted onto the job alongside the arrangement, and read from the job
   // rather than from the operator's current setting. Re-rendering an old job has
@@ -612,7 +618,7 @@ export async function buildBadgeJobDocument(params: {
       db
         .from("organizations")
         .select(
-          "id, name, slug, logo_url, latitude, longitude, city, province, organization_type"
+          "id, name, slug, logo_url, latitude, longitude, city, province, type, is_test"
         )
         .in("id", orgIds),
       db
@@ -812,6 +818,15 @@ export async function buildBadgeJobDocument(params: {
   }
 
   const hydrated = peopleRows
+    // The same exclusion the run applies, for the roster rows it does not see.
+    .filter((row) => {
+      if (isReprint) return true;
+      const orgId =
+        (typeof row.organization_id === "string" && row.organization_id) ||
+        (typeof row.badge_organization_id === "string" && row.badge_organization_id) ||
+        null;
+      return !(orgId && orgById.get(orgId)?.is_test === true);
+    })
     .map((row) =>
       toBadgePerson(row, tokenMap, orgById, contactsByOrgEmail, canonicalPersonById)
     )
@@ -939,10 +954,19 @@ export async function buildBadgeJobDocument(params: {
     if (phone) onsiteContact = { name, phone };
   }
 
+  // Each distinct logo measured once, so it can be sized to the circle.
+  const logoFits = await measureLogos(
+    ordered.map((p) => p.logoUrl).filter((u): u is string => Boolean(u))
+  );
+  const fitted = ordered.map((p) => ({
+    ...p,
+    logoFit: p.logoUrl ? logoFits.get(p.logoUrl) ?? null : null,
+  }));
+
   const html = renderJobDocumentHtml({
     title: `Badge Job ${job.id}`,
     template: templateConfig,
-    people: ordered,
+    people: fitted,
     includeBack: true,
     venueAddress: run.venueAddress,
     onsiteContact,
