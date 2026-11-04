@@ -15,6 +15,7 @@ import {
   requireConferenceOpsAccess,
 } from "@/lib/auth/guards";
 import { conferenceToday } from "@/lib/conference/desk-staff";
+import { notifyShipmentBooked } from "@/lib/conference/shipping-notify";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { PurolatorError } from "@/lib/purolator/client";
@@ -176,6 +177,8 @@ export async function bookConferenceShipment(params: {
       actorType: "user",
       details: { conferenceId: params.conferenceId, reference: booked.reference, payer: params.payer },
     });
+    // The shipper and their org admins: email and Circle. Never fails the booking.
+    await notifyShipmentBooked(booked.shipmentId);
     return { success: true, data: booked };
   } catch (e) {
     return { success: false, error: purolatorMessage(e) };
@@ -211,7 +214,7 @@ export async function listMyShipments(params: { conferenceId: string; personId: 
   const auth = await authorizeShipping(params.conferenceId, params.personId);
   if (!auth.ok) return { success: false, error: auth.error };
   try {
-    return { success: true, data: await loadDeskShipments(params.conferenceId, params.personId) };
+    return { success: true, data: await loadDeskShipments(params.conferenceId, { personId: params.personId }) };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }

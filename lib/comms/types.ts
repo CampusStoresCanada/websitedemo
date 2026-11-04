@@ -95,6 +95,8 @@ export type TemplateKey =
   | "conference_checklist_reminder"
   /** A walk-up named at the check-in desk without an email: no login. Tells their org admins. */
   | "conference_walkup_without_email"
+  /** A Purolator shipment booked at the shipping desk or on /me: to the shipper and their org admins. Transactional. */
+  | "conference_shipment_booked"
   // Travel bursary (lib/actions/conference-bursary.ts): the school's own request,
   // told to the people who filled it in. Transactional.
   | "bursary_request_received"

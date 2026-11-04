@@ -12,6 +12,8 @@ import MeetingBlackoutEditor from "@/components/org/MeetingBlackoutEditor";
 import OrgAgreements from "@/components/org/OrgAgreements";
 import OrgPayments from "@/components/org/OrgPayments";
 import PrintReadiness from "@/components/org/PrintReadiness";
+import { ShipmentList } from "@/components/conference/ShipmentForm";
+import { loadDeskShipments } from "@/lib/conference/shipping";
 
 /**
  * Everything this organisation owes for the conference, on the page they were
@@ -46,13 +48,16 @@ export default async function ConferenceChecklistSection({
   if (!auth.ok || !canManageOrganization(auth.ctx, orgId)) return null;
 
   const db = createAdminClient();
-  const [allOrgTasks, payments, legalStatus, exhibitor] = await Promise.all([
+  const [allOrgTasks, payments, legalStatus, exhibitor, shipments] = await Promise.all([
     loadOrgTasks(db, conferenceId, orgId),
     loadOrgPayments(db, conferenceId, orgId),
     loadOrgLegalStatus(db, conferenceId, orgId, auth.ctx.userId),
     // Booth numbers go on a shipping label, so they belong beside the supplier
     // order — not two screens away on the storefront.
     getExhibitorStatusForOrg(orgId),
+    // Boxes shipped home from the conference: what was booked, by whom, and
+    // the estimate the invoice will follow. ⚠️ A failure costs the card only.
+    loadDeskShipments(conferenceId, { organizationId: orgId }).catch(() => []),
   ]);
   const boothNumbers = exhibitor?.boothNumbers ?? [];
 
@@ -75,7 +80,8 @@ export default async function ConferenceChecklistSection({
 
   const nothingToShow =
     orgTasks.length === 0 && payments.orders.length === 0 &&
-    legalStatus.mine.length === 0 && legalStatus.theirsTitles.length === 0;
+    legalStatus.mine.length === 0 && legalStatus.theirsTitles.length === 0 &&
+    shipments.length === 0;
   if (nothingToShow) return null;
 
   /*
@@ -155,6 +161,17 @@ export default async function ConferenceChecklistSection({
 
       <OrgPayments summary={payments} />
       <OrgAgreements status={legalStatus} />
+
+      {shipments.length > 0 ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <h3 className="text-base font-semibold text-gray-900">Shipments home</h3>
+          <p className="mt-0.5 mb-3 text-sm text-gray-500">
+            Boxes your team shipped from the conference with Purolator. Amounts are Purolator&apos;s estimates;
+            the invoice follows what Purolator actually charges.
+          </p>
+          <ShipmentList conferenceId={conferenceId} shipments={shipments} showPerson />
+        </div>
+      ) : null}
 
       {/* Replaces a bare "see your listing" link. A link tells you where to
           look; this tells you what is wrong and how to change it. */}

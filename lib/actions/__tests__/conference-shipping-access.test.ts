@@ -21,6 +21,7 @@ vi.mock("@/lib/auth/guards", () => ({
 }));
 vi.mock("@/lib/conference/desk-staff", () => ({ conferenceToday: async () => state.today }));
 vi.mock("@/lib/ops/audit", () => ({ logAuditEventSafe: async () => undefined }));
+vi.mock("@/lib/conference/shipping-notify", () => ({ notifyShipmentBooked: async () => undefined }));
 vi.mock("@/lib/purolator/shipping", () => ({ estimateShipment: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({

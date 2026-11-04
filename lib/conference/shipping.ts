@@ -253,8 +253,11 @@ type ShipmentRow = {
   conference_shipment_packages: Array<{ piece_number: number; package_pin: string }>;
 };
 
-/** Every shipment booked at this conference (or only one person's), newest first. */
-export async function loadDeskShipments(conferenceId: string, personId?: string): Promise<DeskShipment[]> {
+/** Every shipment booked at this conference (or one person's, or one institution's), newest first. */
+export async function loadDeskShipments(
+  conferenceId: string,
+  only: { personId?: string; organizationId?: string } = {}
+): Promise<DeskShipment[]> {
   const db = createAdminClient();
   let query = db
     .from("conference_shipments")
@@ -263,7 +266,8 @@ export async function loadDeskShipments(conferenceId: string, personId?: string)
     )
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: false });
-  if (personId) query = query.eq("conference_person_id", personId);
+  if (only.personId) query = query.eq("conference_person_id", only.personId);
+  if (only.organizationId) query = query.eq("organization_id", only.organizationId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as unknown as ShipmentRow[];

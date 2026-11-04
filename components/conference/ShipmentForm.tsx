@@ -24,24 +24,16 @@ import { serviceName } from "@/lib/purolator/services";
 
 const PROVINCES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"];
 
-// Sizes the desk keeps on hand. "Custom" takes any size.
-const BOX_PRESETS = [
-  { key: "small", label: "Small 12×12×8", l: 12, w: 12, h: 8 },
-  { key: "medium", label: "Medium 18×14×12", l: 18, w: 14, h: 12 },
-  { key: "large", label: "Large 24×18×18", l: 24, w: 18, h: 18 },
-] as const;
+// ⛔ One box: CSC standardizes them, every one 12 × 12 × 24 in (Steve,
+// 2026-11-04). The desk weighs it; nobody measures anything.
+const STANDARD_BOX = { lengthIn: 24, widthIn: 12, heightIn: 12 };
 
-type BoxDraft = { preset: string; weight: string; l: string; w: string; h: string };
+type BoxDraft = { weight: string };
 
-const newBox = (): BoxDraft => ({ preset: "medium", weight: "", l: "18", w: "14", h: "12" });
+const newBox = (): BoxDraft => ({ weight: "" });
 
 function toBoxes(drafts: BoxDraft[]): PurolatorBox[] {
-  return drafts.map((b) => ({
-    weightLb: Number(b.weight),
-    lengthIn: Number(b.l),
-    widthIn: Number(b.w),
-    heightIn: Number(b.h),
-  }));
+  return drafts.map((b) => ({ weightLb: Number(b.weight), ...STANDARD_BOX }));
 }
 
 function arrives(q: PurolatorQuote): string {
@@ -252,33 +244,9 @@ export default function ShipmentForm({
                   </button>
                 ) : null}
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-3">
+              <div className="mt-2 grid grid-cols-2 items-end gap-3">
                 <Field label="Weight (lb)" inputMode="decimal" value={b.weight} onChange={(v) => editBox(i, { weight: v })} />
-                <label className="block">
-                  <span className="text-sm font-medium text-gray-700">Size</span>
-                  <select
-                    value={b.preset}
-                    onChange={(e) => {
-                      const p = BOX_PRESETS.find((x) => x.key === e.target.value);
-                      editBox(i, p ? { preset: p.key, l: String(p.l), w: String(p.w), h: String(p.h) } : { preset: "custom" });
-                    }}
-                    className="mt-1 min-h-12 w-full rounded-lg border border-gray-300 px-3 text-base"
-                  >
-                    {BOX_PRESETS.map((p) => (
-                      <option key={p.key} value={p.key}>
-                        {p.label}
-                      </option>
-                    ))}
-                    <option value="custom">Custom size</option>
-                  </select>
-                </label>
-                {b.preset === "custom" ? (
-                  <div className="col-span-2 grid grid-cols-3 gap-3">
-                    <Field label="Length (in)" inputMode="decimal" value={b.l} onChange={(v) => editBox(i, { l: v })} />
-                    <Field label="Width (in)" inputMode="decimal" value={b.w} onChange={(v) => editBox(i, { w: v })} />
-                    <Field label="Height (in)" inputMode="decimal" value={b.h} onChange={(v) => editBox(i, { h: v })} />
-                  </div>
-                ) : null}
+                <p className="pb-3 text-sm text-gray-600">Standard box, 12 × 12 × 24 in</p>
               </div>
             </div>
           ))}
@@ -370,7 +338,11 @@ export default function ShipmentForm({
   );
 }
 
-/** Shipments with their tracking numbers, and Cancel (and Labels, at the desk). */
+/**
+ * Shipments with their tracking numbers, and Cancel (and Labels, at the desk).
+ * Without `onChanged` the list only shows: an org admin sees their
+ * institution's shipments but cancels nothing they did not book.
+ */
 export function ShipmentList({
   conferenceId,
   shipments,
@@ -382,7 +354,7 @@ export function ShipmentList({
   shipments: DeskShipment[];
   showPerson: boolean;
   labelsHref?: (shipmentId: string) => string;
-  onChanged: () => Promise<void>;
+  onChanged?: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -395,7 +367,7 @@ export function ShipmentList({
     setBusy(null);
     setConfirming(null);
     if (!res.success) setError(res.error);
-    await onChanged();
+    await onChanged?.();
   };
 
   return (
@@ -424,7 +396,7 @@ export function ShipmentList({
                 </div>
                 <span className="shrink-0 text-sm font-semibold">{voided ? "Cancelled" : "Booked"}</span>
               </div>
-              {!voided ? (
+              {!voided && (labelsHref || onChanged) ? (
                 <div className="mt-3 flex gap-2">
                   {labelsHref ? (
                     <a
@@ -436,7 +408,7 @@ export function ShipmentList({
                       Labels
                     </a>
                   ) : null}
-                  {confirming === s.id ? (
+                  {!onChanged ? null : confirming === s.id ? (
                     <button
                       type="button"
                       disabled={busy === s.id}

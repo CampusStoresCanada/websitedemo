@@ -118,7 +118,7 @@ export default async function MyConferenceSection() {
       ? await Promise.all([
           loadShippingOrigin(person.conference_id),
           loadShipper(person.conference_id, person.id),
-          loadDeskShipments(person.conference_id, person.id),
+          loadDeskShipments(person.conference_id, { personId: person.id }),
         ])
           .then(([origin, shipper, shipments]) => (origin && shipper ? { shipper, shipments } : null))
           .catch(() => null)
