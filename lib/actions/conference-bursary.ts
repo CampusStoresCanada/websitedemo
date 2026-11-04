@@ -431,7 +431,12 @@ export async function getBursaryRequest(params: {
     termsAccepted = (count ?? 0) > 0;
   }
   const answers = answersOf(row);
-  const open = bursaryRequestOpen(closesAt);
+  // The request deadline is the date we SAY (November 27), not the date the
+  // page stops taking requests: those keep coming until the designation
+  // deadline, quietly, so a school late to its date is never turned away
+  // (Steve, 2026-11-04). Once the stated date passes, the page stops naming it
+  // rather than announcing a new one.
+  const open = bursaryRequestOpen(settings.designationClosesAt);
   const designationOpen = bursaryRequestOpen(settings.designationClosesAt);
   const hotelNights = row?.hotel_nights ?? defaultHotelNights(params.organizationId, settings.fourNightOrgIds);
   const pickedSeat = seats.find((s) => s.seatId === answers.delegate_seat_id);
@@ -455,7 +460,7 @@ export async function getBursaryRequest(params: {
       termsAccepted,
       open,
       closesAt,
-      closesOnLabel: formatDeadline(closesAt),
+      closesOnLabel: bursaryRequestOpen(closesAt) ? formatDeadline(closesAt) : null,
       canEdit: open && !row?.requested_at,
       gaps: bursaryRequestGaps(answers, termsAccepted),
     },
@@ -489,11 +494,12 @@ export async function saveBursaryAnswer(params: {
     if (!bursaryRequestOpen(settings.designationClosesAt)) {
       return { success: false, error: "The date to change who the support is for has passed. Please contact Campus Stores Canada." };
     }
-    if (!row?.requested_at && !bursaryRequestOpen(settings.closesAt)) {
+    if (!row?.requested_at && !bursaryRequestOpen(settings.designationClosesAt)) {
       return { success: false, error: "Travel support requests have closed." };
     }
   } else {
-    if (!bursaryRequestOpen(settings.closesAt)) return { success: false, error: "Travel support requests have closed." };
+    // Accepted past the stated date, to the designation deadline (see getBursaryRequest).
+    if (!bursaryRequestOpen(settings.designationClosesAt)) return { success: false, error: "Travel support requests have closed." };
     if (row?.requested_at) return { success: false, error: "This request has been submitted and can't be changed." };
   }
 
