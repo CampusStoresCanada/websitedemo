@@ -10,6 +10,8 @@ import { cancollReportCsv, dayInZone, registrationsToInvoice, type CancollRegist
 const row = (over: Partial<CancollRegistration>): CancollRegistration => ({
   seatId: "s1",
   organizationId: "o1",
+  holderPersonId: "p1",
+  entityId: "offer-1",
   institution: "Keyano College",
   delegateName: "Pat Buyer",
   positionTitle: "Store Manager",

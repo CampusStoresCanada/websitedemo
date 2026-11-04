@@ -32,6 +32,7 @@ import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 import { formatCents } from "@/lib/utils";
 import {
   cancollReportCsv,
+  cancollAttendanceCsv,
   loadCancollBilling,
   registrationsToInvoice,
 } from "@/lib/conference/cancoll-report";
@@ -69,6 +70,37 @@ export async function exportCancollRegistrationReport(
     data: {
       filename: `cancoll-registration-report-${new Date().toISOString().slice(0, 10)}.csv`,
       csv: cancollReportCsv(billing.rows, billing),
+      rows: billing.rows.length,
+    },
+  };
+}
+
+/**
+ * Staff: the attendance report as CSV. The same delegates as the registration
+ * report; this one says whether each came to their partner meetings and the AGM.
+ */
+export async function exportCancollAttendanceReport(
+  conferenceId: string
+): Promise<Result<{ filename: string; csv: string; rows: number }>> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const db = createAdminClient();
+  const billing = await loadCancollBilling(db, conferenceId);
+  if (!billing) return { success: false, error: "This conference has no CANCOLL-funded registration." };
+
+  await logAuditEventSafe({
+    action: "cancoll_attendance_report_exported",
+    entityType: "conference",
+    entityId: conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { rows: billing.rows.length },
+  });
+  return {
+    success: true,
+    data: {
+      filename: `cancoll-attendance-report-${new Date().toISOString().slice(0, 10)}.csv`,
+      csv: await cancollAttendanceCsv(db, billing),
       rows: billing.rows.length,
     },
   };

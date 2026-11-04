@@ -19,6 +19,10 @@ import { isFundedOffer } from "@/lib/conference/entity-pricing";
 export type CancollRegistration = {
   seatId: string;
   organizationId: string;
+  /** The delegate named to the seat, once there is one. */
+  holderPersonId: string | null;
+  /** The funded offer the seat is on. */
+  entityId: string;
   institution: string;
   delegateName: string | null;
   positionTitle: string | null;
@@ -197,6 +201,8 @@ export async function loadCancollBilling(db: Db, conferenceId: string): Promise<
     rows.push({
       seatId: seat.seatId,
       organizationId: seat.organizationId,
+      holderPersonId: seat.holderPersonId,
+      entityId: seat.entityId,
       institution: org.name,
       delegateName: seat.holderName ?? contact?.name ?? null,
       positionTitle: contact?.role_title ?? null,
@@ -229,4 +235,142 @@ export async function loadCancollBilling(db: Db, conferenceId: string): Promise<
       count: inv.count,
     })),
   };
+}
+
+const ATTENDANCE_HEADER = [
+  "Institution",
+  "Delegate name",
+  "Position title",
+  "Assigned elements",
+  "Attended",
+  "Excused",
+  "Not attended",
+  "Upcoming",
+  "CANCOLL AGM",
+  "Status",
+];
+
+type Outcome = "attended" | "excused" | "absent" | "upcoming";
+
+/**
+ * The attendance report (MOU Schedule C): for every Supported Registration in
+ * the registration report, the delegate's Assigned Schedule and what happened
+ * at each part of it. The same rows as the registration report, so the two
+ * never list different delegates. Registration proves who CANCOLL paid for;
+ * this proves they came to what the funding asked of them.
+ *
+ * The Assigned Schedule is the delegate's live partner meetings plus what the
+ * funded registration adds over the ordinary one (the CANCOLL AGM). Attended:
+ * a scan, or a staff ruling of attended. Excused: a staff ruling of excused (a
+ * cancelled meeting is not on the schedule at all). Anything past with neither
+ * is not attended; anything ahead is upcoming (MOU 8).
+ */
+export async function cancollAttendanceCsv(db: Db, billing: CancollBilling): Promise<string> {
+  const [{ getConferenceScheduleTimeline }, { loadMeetingConfirmations }] = await Promise.all([
+    import("@/lib/conference/schedule-service"),
+    import("@/lib/conference/schedule-ops"),
+  ]);
+  const { entitiesById } = await loadSeatHoldings(db, { conferenceId: billing.conferenceId });
+
+  // What the funded offer adds over the registration it stands in for.
+  const offer = entitiesById.get(billing.offerId);
+  const base = entitiesById.get(String(offer?.attributes.funds_offer_id ?? ""));
+  const baseTargets = new Set((base?.refs ?? []).map((r) => r.toEntityId));
+  const extraIds = [
+    ...new Set(
+      (offer?.refs ?? [])
+        .filter((r) => (r.role === "involved_in" || r.role === "includes") && !baseTargets.has(r.toEntityId))
+        .map((r) => r.toEntityId)
+        .filter((id) => {
+          const target = entitiesById.get(id);
+          return target != null && target.kind !== "day";
+        })
+    ),
+  ];
+
+  const timeline = await getConferenceScheduleTimeline(billing.conferenceId, { viewerRole: "admin" });
+  const startsAt = new Map(timeline.programItems.map((item) => [item.id, item.startsAt] as const));
+  const meetings = timeline.meetingAssignmentItems.filter((m) => m.meetingAssignment);
+  const [confirmations, { data: eventRows }] = await Promise.all([
+    loadMeetingConfirmations(db, meetings.map((m) => m.meetingAssignment!.scheduleId)),
+    extraIds.length
+      ? db
+          .from("conference_check_in_events")
+          .select("person_id, entity_id, confirmed_by, ruling, result_state")
+          .eq("conference_id", billing.conferenceId)
+          .eq("is_test", false)
+          .in("entity_id", extraIds)
+          .order("checked_in_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  // Per person and event: scanned in, then the newest staff ruling wins.
+  const eventOutcome = new Map<string, Exclude<Outcome, "upcoming">>();
+  for (const row of (eventRows ?? []) as Array<{
+    person_id: string | null;
+    entity_id: string | null;
+    confirmed_by: string | null;
+    ruling: string | null;
+    result_state: string;
+  }>) {
+    if (!row.person_id || !row.entity_id) continue;
+    const key = `${row.person_id}|${row.entity_id}`;
+    if (row.confirmed_by === "staff" && row.ruling) eventOutcome.set(key, row.ruling as Exclude<Outcome, "upcoming">);
+    else if (["valid", "not_on_ticket"].includes(row.result_state)) eventOutcome.set(key, "attended");
+  }
+
+  const now = Date.now();
+  const isPast = (iso: string | null | undefined) => Boolean(iso) && Date.parse(iso!) <= now;
+  const word = (o: Outcome) =>
+    o === "attended" ? "Attended" : o === "excused" ? "Excused" : o === "upcoming" ? "Upcoming" : "Not attended";
+
+  const lines = [...billing.rows]
+    .sort((a, b) => a.institution.localeCompare(b.institution) || (a.delegateName ?? "").localeCompare(b.delegateName ?? ""))
+    .map((r) => {
+      const personId = r.holderPersonId;
+      if (!personId) {
+        return [r.institution, "", "", "0", "0", "0", "0", "0", "", "No delegate named"];
+      }
+      const outcomes: Outcome[] = [];
+      for (const m of meetings) {
+        if (!m.meetingAssignment!.delegateSeatIds.includes(r.seatId)) continue;
+        const confirmation = confirmations.get(m.meetingAssignment!.scheduleId);
+        const ruling = confirmation?.rulings[personId]?.ruling;
+        outcomes.push(
+          confirmation?.confirmedPersonIds.includes(personId)
+            ? "attended"
+            : ruling === "excused"
+              ? "excused"
+              : isPast(m.startsAt)
+                ? "absent"
+                : "upcoming"
+        );
+      }
+      const agm: string[] = [];
+      for (const id of extraIds) {
+        const outcome = eventOutcome.get(`${personId}|${id}`) ?? (isPast(startsAt.get(id)) ? "absent" : "upcoming");
+        outcomes.push(outcome);
+        agm.push(word(outcome));
+      }
+      const count = (o: Outcome) => String(outcomes.filter((x) => x === o).length);
+      const status = outcomes.includes("absent")
+        ? "Non-attendance recorded"
+        : outcomes.includes("upcoming")
+          ? "Not yet held"
+          : "Full compliance";
+      return [
+        r.institution,
+        r.delegateName ?? "",
+        r.positionTitle ?? "",
+        String(outcomes.length),
+        count("attended"),
+        count("excused"),
+        count("absent"),
+        count("upcoming"),
+        agm.join("; ") || "Not assigned",
+        status,
+      ];
+    })
+    .map((row) => row.map(cell).join(","));
+  return [ATTENDANCE_HEADER.map(cell).join(","), ...lines].join("\n");
 }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/actions/conference-funded-conversion";
 import {
   exportCancollRegistrationReport,
+  exportCancollAttendanceReport,
   issueCancollInvoice,
   type CancollBillingSummary,
 } from "@/lib/actions/cancoll-billing";
@@ -50,9 +51,12 @@ export default function FundedConversionPanel({
   // November 30; the second, to January 17.
   const [throughDate, setThroughDate] = useState("2026-11-30");
 
-  const downloadReport = () => {
+  const downloadReport = (report: "registration" | "attendance") => {
     startTransition(async () => {
-      const result = await exportCancollRegistrationReport(conferenceId);
+      const result =
+        report === "registration"
+          ? await exportCancollRegistrationReport(conferenceId)
+          : await exportCancollAttendanceReport(conferenceId);
       if (!result.success) {
         setMessage({ tone: "error", text: result.error });
         return;
@@ -181,11 +185,19 @@ export default function FundedConversionPanel({
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={downloadReport}
+              onClick={() => downloadReport("registration")}
               disabled={isPending}
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Download registration report (CSV)
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadReport("attendance")}
+              disabled={isPending}
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Download attendance report (CSV)
             </button>
             <label className="ml-2 text-xs text-gray-600" htmlFor="cancoll-through">
               Confirmed on or before
