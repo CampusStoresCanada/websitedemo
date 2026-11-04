@@ -1,0 +1,75 @@
+{
+ "status": 200,
+ "response": {
+  "requestReference": "dc1eab40-cc6e-475d-a959-b2d5865410fe",
+  "bannerMessages": [
+   "Quote is subject to change based on actual shipment characteristics and service provided. Declared or captured dimensions with decimal values are rounded up to the next whole inch or centimetre for billing purposes. This may impact the resulting dimensional weight and your final transportation charges."
+  ],
+  "validShipment": true,
+  "shipmentDetails": {
+   "shipmentPIN": {
+    "value": 460000128336
+   },
+   "packagePINs": [
+    {
+     "PIN": {
+      "value": 460000128336
+     }
+    },
+    {
+     "PIN": {
+      "value": 460000128344
+     }
+    }
+   ]
+  },
+  "outboundShipmentEstimates": [
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorGround",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-09",
+     "estimatedTransitDays": 4,
+     "basePrice": 135.1,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 74.31,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 209.41,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 10.48,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 219.89
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "status": 400,
+ "response": {
+  "requestReference": "62dd715d-82cf-43b4-90a6-73baa89066a4",
+  "bannerMessages": [
+   "Quote is subject to change based on actual shipment characteristics and service provided. Declared or captured dimensions with decimal values are rounded up to the next whole inch or centimetre for billing purposes. This may impact the resulting dimensional weight and your final transportation charges."
+  ],
+  "errors": [
+   {
+    "error": {
+     "code": "9001-13",
+     "description": "Outbound: Billing account number '9999999' is invalid."
+    }
+   }
+  ]
+ }
+}

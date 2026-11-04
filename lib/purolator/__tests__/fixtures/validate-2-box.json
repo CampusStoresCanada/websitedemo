@@ -1,0 +1,10 @@
+{
+ "status": 200,
+ "response": {
+  "requestReference": "992a7402-677e-49ee-8787-c9b3afe19923",
+  "bannerMessages": [
+   "Quote is subject to change based on actual shipment characteristics and service provided. Declared or captured dimensions with decimal values are rounded up to the next whole inch or centimetre for billing purposes. This may impact the resulting dimensional weight and your final transportation charges."
+  ],
+  "validShipment": true
+ }
+}

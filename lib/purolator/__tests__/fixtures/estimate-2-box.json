@@ -1,0 +1,424 @@
+{
+ "status": 200,
+ "response": {
+  "bannerMessages": [
+   "Quote is subject to change based on actual shipment characteristics and service provided. Declared or captured dimensions with decimal values are rounded up to the next whole inch or centimetre for billing purposes. This may impact the resulting dimensional weight and your final transportation charges."
+  ],
+  "outboundShipmentEstimates": [
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorExpress9AM",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-04",
+     "estimatedTransitDays": 1,
+     "basePrice": 449,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 246.95,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 695.95,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 34.8,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 730.75
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorExpress10:30AM",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-04",
+     "estimatedTransitDays": 1,
+     "basePrice": 390.87,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 214.98,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 605.85,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 30.29,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 636.14
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorExpress12PM",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-04",
+     "estimatedTransitDays": 1,
+     "basePrice": 359.98,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 198,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 557.98,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 27.9,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 585.88
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorExpress",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-04",
+     "estimatedTransitDays": 1,
+     "basePrice": 313.52,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 172.44,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 485.96,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 24.3,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 510.26
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorExpressEvening",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-04",
+     "estimatedTransitDays": 1,
+     "basePrice": 417.32,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 229.53,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 646.85,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 32.35,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 679.2
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorGround9AM",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-09",
+     "estimatedTransitDays": 4,
+     "basePrice": 169.17,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 93.04,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 262.21,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 13.11,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 275.32
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorGround10:30AM",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-09",
+     "estimatedTransitDays": 4,
+     "basePrice": 146.29,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 80.46,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 226.75,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 11.33,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 238.08
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorGround",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-09",
+     "estimatedTransitDays": 4,
+     "basePrice": 135.1,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 74.31,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 209.41,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 10.48,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 219.89
+    }
+   },
+   {
+    "shipmentEstimate": {
+     "lineOfBusiness": "Courier",
+     "serviceId": "PurolatorGroundEvening",
+     "unitOfMeasurement": "IMPERIAL",
+     "shipmentDate": "2026-11-03",
+     "expectedDeliveryDate": "2026-11-09",
+     "estimatedTransitDays": 4,
+     "basePrice": 156.71,
+     "surcharges": [
+      {
+       "surcharge": {
+        "amount": 86.19,
+        "type": "Fuel",
+        "description": "Fuel Surcharge"
+       }
+      }
+     ],
+     "optionPrices": [],
+     "subTotal": 242.9,
+     "taxes": [
+      {
+       "tax": {
+        "amount": 0,
+        "type": "PSTQST",
+        "description": "PST/QST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 0,
+        "type": "HST",
+        "description": "HST"
+       }
+      },
+      {
+       "tax": {
+        "amount": 12.15,
+        "type": "GST",
+        "description": "GST"
+       }
+      }
+     ],
+     "totalPrice": 255.05
+    }
+   }
+  ]
+ }
+}

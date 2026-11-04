@@ -1,0 +1,8 @@
+{
+ "status": 200,
+ "response": {
+  "requestReference": "7a7ab93f-a357-43d6-a248-e37f701e0b7f",
+  "shipmentVoided": "true",
+  "bannerMessage": "Thanks for your Shipment cancellation request. Your request has been acknowledged and be assured you won't be billed if shipment is not inducted in the Purolator network."
+ }
+}
