@@ -46,6 +46,7 @@ import {
   boxesProblem,
   destinationProblem,
   makeShipmentReference,
+  shippingOpen,
   toPurolatorAddress,
   type ShippingDestination,
 } from "../shipping";
@@ -79,6 +80,9 @@ describe("destinationProblem", () => {
 
   it("names the first thing missing, in desk words", () => {
     expect(destinationProblem({ ...destination, street: " " })).toBe("Add the street address.");
+    expect(destinationProblem({ ...destination, street: "PO Box 71157 Silver Springs" })).toMatch(/PO box/);
+    expect(destinationProblem({ ...destination, street2: "P.O. Box 12" })).toMatch(/PO box/);
+    expect(destinationProblem({ ...destination, street: "100 Boxwood Cres" })).toBeNull();
     expect(destinationProblem({ ...destination, province: "" })).toBe("Pick the province.");
     expect(destinationProblem({ ...destination, postalCode: "90210" })).toMatch(/postal code/);
     expect(destinationProblem({ ...destination, phone: "220-1111" })).toMatch(/area code/);
@@ -110,6 +114,16 @@ describe("makeShipmentReference", () => {
     expect(ref).toBe("CSC27-23456");
     expect(`${ref} box 12 of 12`.length).toBeLessThanOrEqual(30);
     expect(makeShipmentReference(2027)).toMatch(/^CSC27-[2-9A-HJKMNP-Z]{5}$/);
+  });
+});
+
+describe("shippingOpen", () => {
+  it("opens /me shipping from the first day of the conference through the last", () => {
+    expect(shippingOpen("2027-01-31", "2027-02-01", "2027-02-04")).toBe(false);
+    expect(shippingOpen("2027-02-01", "2027-02-01", "2027-02-04")).toBe(true);
+    expect(shippingOpen("2027-02-04", "2027-02-01", "2027-02-04")).toBe(true);
+    expect(shippingOpen("2027-02-05", "2027-02-01", "2027-02-04")).toBe(false);
+    expect(shippingOpen("2027-02-02", null, "2027-02-04")).toBe(false);
   });
 });
 

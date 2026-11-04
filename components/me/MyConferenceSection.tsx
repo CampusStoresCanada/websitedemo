@@ -10,6 +10,9 @@ import { isConferenceOnSale, type ConferenceStatus } from "@/lib/constants/confe
 import { selfBuyableOffers, unassignedByEntity } from "@/lib/conference/self-purchase";
 import OfferCard from "@/components/conference/OfferCard";
 import AskCscBox from "@/components/me/AskCscBox";
+import MyShippingCard from "@/components/me/MyShippingCard";
+import { conferenceToday } from "@/lib/conference/desk-staff";
+import { loadDeskShipments, loadShipper, loadShippingOrigin, shippingOpen } from "@/lib/conference/shipping";
 
 /**
  * The attendee's own conference to-dos, on the page they already use.
@@ -36,7 +39,7 @@ export default async function MyConferenceSection() {
   const { data: people } = await db
     .from("conference_people")
     .select(
-      "id, conference_id, organization_id, conference_instances!inner(name, year, edition_code, status)"
+      "id, conference_id, organization_id, conference_instances!inner(name, year, edition_code, status, start_date, end_date)"
     )
     .eq("user_id", auth.ctx.userId)
     .neq("assignment_status", "canceled")
@@ -56,6 +59,8 @@ export default async function MyConferenceSection() {
       year: number;
       edition_code: string;
       status: string;
+      start_date: string | null;
+      end_date: string | null;
     } | null;
   } | undefined;
   if (!person) return null;
@@ -105,6 +110,19 @@ export default async function MyConferenceSection() {
       freeSeatsByEntity = unassignedByEntity(seats);
     }
   }
+
+  // Shipping boxes home: only while the conference is on, and only once it has
+  // somewhere to ship from. ⚠️ A failure here costs the card, never the page.
+  const shipping =
+    conference && shippingOpen(await conferenceToday(person.conference_id), conference.start_date, conference.end_date)
+      ? await Promise.all([
+          loadShippingOrigin(person.conference_id),
+          loadShipper(person.conference_id, person.id),
+          loadDeskShipments(person.conference_id, person.id),
+        ])
+          .then(([origin, shipper, shipments]) => (origin && shipper ? { shipper, shipments } : null))
+          .catch(() => null)
+      : null;
 
   // Nothing to show and nothing to link to is not a section, it is a heading.
   if (!agenda?.items.length && !agenda?.deadlines.length && !conference && !buyable.length) {
@@ -171,6 +189,14 @@ export default async function MyConferenceSection() {
             ))}
           </dl>
         </div>
+      ) : null}
+
+      {shipping ? (
+        <MyShippingCard
+          conferenceId={person.conference_id}
+          shipper={shipping.shipper}
+          initialShipments={shipping.shipments}
+        />
       ) : null}
 
       {conference && buyable.length > 0 ? (

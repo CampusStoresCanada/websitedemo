@@ -64,8 +64,9 @@ scans its barcode.
 ## Building the app
 
 On a Mac with Homebrew: `brew install python-tk@3.14 libusb`, then
-`./build_app.sh`. The app lands in `dist/` (about 40 MB, Apple Silicon). Zip it
-to move it: `ditto -c -k --keepParent "dist/CSC Print Station.app" "dist/CSC Print Station.zip"`.
+`./build_app.sh`. The app lands in `~/csc-print-station-build/dist/`, outside the
+repo on purpose: an app bundle inside the website's folder breaks `next build`.
+Zip it to move it: `ditto -c -k --keepParent ~/csc-print-station-build/dist/"CSC Print Station.app" ~/csc-print-station-build/dist/"CSC Print Station.zip"`.
 
 **Publish it** so the print station page's "Download CSC Print Station for Mac"
 link serves the new build (private storage, a link made per visit):

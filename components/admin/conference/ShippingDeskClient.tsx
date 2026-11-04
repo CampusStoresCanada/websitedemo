@@ -12,55 +12,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatCents } from "@/lib/utils";
 import { getDeskPinState } from "@/lib/actions/desk-pin";
 import { DeskPinCheck, DeskPinSetup } from "@/components/admin/conference/DeskPinPad";
-import {
-  bookConferenceShipment,
-  listConferenceShipments,
-  loadShippingPerson,
-  quoteConferenceShipment,
-  voidConferenceShipment,
-} from "@/lib/actions/conference-shipping";
-import type { DeskShipment, Shipper, ShippingDestination, ShippingRosterRow } from "@/lib/conference/shipping";
-import type { PurolatorBox, PurolatorQuote } from "@/lib/purolator/types";
-import { serviceName } from "@/lib/purolator/services";
-
-const PROVINCES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"];
-
-// Sizes the desk keeps on hand. "Custom" takes any size.
-const BOX_PRESETS = [
-  { key: "small", label: "Small 12×12×8", l: 12, w: 12, h: 8 },
-  { key: "medium", label: "Medium 18×14×12", l: 18, w: 14, h: 12 },
-  { key: "large", label: "Large 24×18×18", l: 24, w: 18, h: 18 },
-] as const;
-
-type BoxDraft = { preset: string; weight: string; l: string; w: string; h: string };
-
-const newBox = (): BoxDraft => ({ preset: "medium", weight: "", l: "18", w: "14", h: "12" });
-
-function toBoxes(drafts: BoxDraft[]): PurolatorBox[] {
-  return drafts.map((b) => ({
-    weightLb: Number(b.weight),
-    lengthIn: Number(b.l),
-    widthIn: Number(b.w),
-    heightIn: Number(b.h),
-  }));
-}
-
-function arrives(q: PurolatorQuote): string {
-  if (q.expectedDeliveryDate) {
-    const d = new Date(`${q.expectedDeliveryDate}T12:00:00`);
-    return `arrives ${d.toLocaleDateString("en-CA", { weekday: "short", month: "short", day: "numeric" })}`;
-  }
-  return q.transitDays ? `${q.transitDays} business day${q.transitDays === 1 ? "" : "s"}` : "";
-}
-
-type Stage =
-  | { step: "form" }
-  | { step: "approve" }
-  | { step: "booking" }
-  | { step: "done"; shipmentId: string; reference: string; labelsQueued: boolean };
+import { listConferenceShipments, loadShippingPerson } from "@/lib/actions/conference-shipping";
+import type { DeskShipment, Shipper, ShippingRosterRow } from "@/lib/conference/shipping";
+import ShipmentForm, { ShipmentList } from "@/components/conference/ShipmentForm";
 
 export default function ShippingDeskClient({
   conferenceId,
@@ -108,25 +64,8 @@ export default function ShippingDeskClient({
   const [listOpen, setListOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  // ── The shipment being built
-  const [destination, setDestination] = useState<ShippingDestination | null>(null);
-  const [boxes, setBoxes] = useState<BoxDraft[]>([newBox()]);
-  const [quotes, setQuotes] = useState<PurolatorQuote[] | null>(null);
-  const [serviceId, setServiceId] = useState<string | null>(null);
-  const [payer, setPayer] = useState<"csc" | "institution">("csc");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [stage, setStage] = useState<Stage>({ step: "form" });
-
   const startWith = useCallback((s: Shipper) => {
     setShipper(s);
-    setDestination(s.destination);
-    setBoxes([newBox()]);
-    setQuotes(null);
-    setServiceId(null);
-    setPayer(s.institutionAccount ? "institution" : "csc");
-    setError(null);
-    setStage({ step: "form" });
     setFindOpen(false);
     setQuery("");
     setLookupError(null);
@@ -141,61 +80,7 @@ export default function ShippingDeskClient({
     [conferenceId, startWith]
   );
 
-  const finish = () => {
-    setShipper(null);
-    setDestination(null);
-    setStage({ step: "form" });
-  };
-
-  // Any change to where or what invalidates the prices shown.
-  const editDestination = (patch: Partial<ShippingDestination>) => {
-    setDestination((d) => (d ? { ...d, ...patch } : d));
-    setQuotes(null);
-    setServiceId(null);
-  };
-  const editBox = (i: number, patch: Partial<BoxDraft>) => {
-    setBoxes((bs) => bs.map((b, j) => (j === i ? { ...b, ...patch } : b)));
-    setQuotes(null);
-    setServiceId(null);
-  };
-
-  const getPrices = async () => {
-    if (!destination) return;
-    setBusy(true);
-    setError(null);
-    const res = await quoteConferenceShipment({ conferenceId, destination, boxes: toBoxes(boxes) });
-    setBusy(false);
-    if (!res.success) {
-      setError(res.error);
-      return;
-    }
-    setQuotes(res.data);
-    setServiceId(res.data.find((q) => q.serviceId === "PurolatorGround")?.serviceId ?? res.data[0].serviceId);
-  };
-
-  const chosen = quotes?.find((q) => q.serviceId === serviceId) ?? null;
-
-  const book = async () => {
-    if (!shipper || !destination || !serviceId) return;
-    setStage({ step: "booking" });
-    setError(null);
-    const res = await bookConferenceShipment({
-      conferenceId,
-      personId: shipper.personId,
-      destination,
-      boxes: toBoxes(boxes),
-      serviceId,
-      payer,
-      shownQuote: chosen,
-    });
-    if (!res.success) {
-      setError(res.error);
-      setStage({ step: "form" });
-      return;
-    }
-    setStage({ step: "done", ...res.data });
-    void refreshShipments();
-  };
+  const labelsHref = (shipmentId: string) => `/api/admin/conference/${conferenceId}/shipping/${shipmentId}/labels`;
 
   // ── Camera: the check-in desk's scanner, idle while a panel is open.
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -348,227 +233,42 @@ export default function ShippingDeskClient({
       ) : null}
 
       {listOpen ? (
-        <ShipmentList
-          conferenceId={conferenceId}
-          shipments={shipments}
-          onClose={() => setListOpen(false)}
-          onChanged={refreshShipments}
-        />
-      ) : null}
-
-      {shipper && destination && stage.step === "approve" ? (
-        <DeskPinCheck
-          conferenceId={conferenceId}
-          title="Approve the shipment"
-          subtitle={`Staff PIN: CSC pays Purolator and invoices ${shipper.organizationName ?? "their institution"}${
-            chosen ? `, about ${formatCents(chosen.totalCents)}` : ""
-          }.`}
-          onCancel={() => setStage({ step: "form" })}
-          onPassed={() => void book()}
-        />
-      ) : null}
-
-      {shipper && destination && stage.step === "done" ? (
-        <Sheet title="Booked" onClose={finish}>
-          <p className="text-xl font-semibold">{shipper.name}</p>
-          <p className="text-base text-gray-600">
-            {serviceName(serviceId ?? "")} to {destination.city}, {destination.province}
-          </p>
-          <p className="mt-4 text-sm font-semibold uppercase tracking-wide text-gray-500">Reference</p>
-          <p className="text-2xl font-bold tracking-wide">{stage.reference}</p>
-          {stage.labelsQueued ? (
-            <p className="mt-6 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-900">
-              {boxes.length} label{boxes.length === 1 ? " is" : "s are"} waiting on the print queue. They print when the
-              die-cut shipping roll is in and someone presses &ldquo;Print the shipping labels&rdquo; in the War Room.
-            </p>
-          ) : (
-            <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-base text-amber-900">
-              The labels didn&apos;t reach the print queue. Open them below and print them another way.
-            </p>
-          )}
-          <a
-            href={`/api/admin/conference/${conferenceId}/shipping/${stage.shipmentId}/labels`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-4 flex min-h-14 items-center justify-center rounded-xl border border-gray-300 px-6 text-lg font-semibold"
-          >
-            Open the labels ({boxes.length} page{boxes.length === 1 ? "" : "s"})
-          </a>
-          <p className="mt-2 text-sm text-gray-600">One 4×6 label per box. Stick each on its own box.</p>
-          <button
-            type="button"
-            onClick={finish}
-            className="mt-6 min-h-14 w-full rounded-xl border border-gray-300 text-lg font-semibold"
-          >
-            Next person
-          </button>
+        <Sheet title="Shipments" onClose={() => setListOpen(false)}>
+          <ShipmentList
+            conferenceId={conferenceId}
+            shipments={shipments}
+            showPerson
+            labelsHref={labelsHref}
+            onChanged={refreshShipments}
+          />
         </Sheet>
       ) : null}
 
-      {shipper && destination && (stage.step === "form" || stage.step === "booking") ? (
-        <Sheet title={`Ship for ${shipper.name}`} onClose={finish}>
+      {shipper ? (
+        <Sheet title={`Ship for ${shipper.name}`} onClose={() => setShipper(null)}>
           <p className="-mt-2 mb-4 text-base text-gray-600">{shipper.organizationName ?? "No institution on file"}</p>
-
-          <Section title="Ship to">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Institution" className="col-span-2" value={destination.company} onChange={(v) => editDestination({ company: v })} />
-              <Field label="Attention" className="col-span-2" value={destination.attention} onChange={(v) => editDestination({ attention: v })} />
-              <Field label="Street" className="col-span-2" value={destination.street} onChange={(v) => editDestination({ street: v })} />
-              <Field label="Suite, building (optional)" className="col-span-2" value={destination.street2} onChange={(v) => editDestination({ street2: v })} />
-              <Field label="City" value={destination.city} onChange={(v) => editDestination({ city: v })} />
-              <label className="block">
-                <span className="text-sm font-medium text-gray-700">Province</span>
-                <select
-                  value={destination.province}
-                  onChange={(e) => editDestination({ province: e.target.value })}
-                  className="mt-1 min-h-12 w-full rounded-lg border border-gray-300 px-3 text-base"
-                >
-                  <option value="">Pick…</option>
-                  {PROVINCES.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-              </label>
-              <Field label="Postal code" value={destination.postalCode} onChange={(v) => editDestination({ postalCode: v })} />
-              <Field label="Phone" value={destination.phone} onChange={(v) => editDestination({ phone: v })} />
-            </div>
-          </Section>
-
-          <Section title="Boxes">
-            <div className="space-y-3">
-              {boxes.map((b, i) => (
-                <div key={i} className="rounded-xl border border-gray-200 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-base font-semibold">Box {i + 1}</span>
-                    {boxes.length > 1 ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBoxes((bs) => bs.filter((_, j) => j !== i));
-                          setQuotes(null);
-                          setServiceId(null);
-                        }}
-                        className="min-h-10 px-3 text-sm text-red-700"
-                      >
-                        Remove
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    <Field label="Weight (lb)" inputMode="decimal" value={b.weight} onChange={(v) => editBox(i, { weight: v })} />
-                    <label className="block">
-                      <span className="text-sm font-medium text-gray-700">Size</span>
-                      <select
-                        value={b.preset}
-                        onChange={(e) => {
-                          const p = BOX_PRESETS.find((x) => x.key === e.target.value);
-                          editBox(i, p ? { preset: p.key, l: String(p.l), w: String(p.w), h: String(p.h) } : { preset: "custom" });
-                        }}
-                        className="mt-1 min-h-12 w-full rounded-lg border border-gray-300 px-3 text-base"
-                      >
-                        {BOX_PRESETS.map((p) => (
-                          <option key={p.key} value={p.key}>
-                            {p.label}
-                          </option>
-                        ))}
-                        <option value="custom">Custom size</option>
-                      </select>
-                    </label>
-                    {b.preset === "custom" ? (
-                      <div className="col-span-2 grid grid-cols-3 gap-3">
-                        <Field label="Length (in)" inputMode="decimal" value={b.l} onChange={(v) => editBox(i, { l: v })} />
-                        <Field label="Width (in)" inputMode="decimal" value={b.w} onChange={(v) => editBox(i, { w: v })} />
-                        <Field label="Height (in)" inputMode="decimal" value={b.h} onChange={(v) => editBox(i, { h: v })} />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setBoxes((bs) => [...bs, newBox()]);
-                  setQuotes(null);
-                  setServiceId(null);
-                }}
-                className="min-h-12 w-full rounded-xl border border-dashed border-gray-400 text-base font-medium text-gray-700"
-              >
-                Add another box
-              </button>
-            </div>
-          </Section>
-
-          {error ? <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-base text-red-800">{error}</div> : null}
-
-          {!quotes ? (
-            <button
-              type="button"
-              disabled={busy || !originLabel}
-              onClick={() => void getPrices()}
-              className="min-h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white disabled:opacity-60"
-            >
-              {busy ? "Asking Purolator…" : "Get prices"}
-            </button>
-          ) : (
-            <>
-              <Section title="Service">
-                <div className="space-y-2">
-                  {quotes.map((q) => (
-                    <button
-                      type="button"
-                      key={q.serviceId}
-                      onClick={() => setServiceId(q.serviceId)}
-                      className={`flex min-h-14 w-full items-center justify-between rounded-xl border px-4 text-left ${
-                        q.serviceId === serviceId ? "border-accent bg-accent/10 ring-2 ring-accent" : "border-gray-200"
-                      }`}
-                    >
-                      <span>
-                        <span className="block text-base font-semibold">{serviceName(q.serviceId)}</span>
-                        <span className="block text-sm text-gray-600">{arrives(q)}</span>
-                      </span>
-                      <span className="text-base font-semibold">about {formatCents(q.totalCents)}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 text-sm text-gray-600">
-                  These are Purolator&apos;s estimates, tax included. The institution is billed what Purolator actually charges.
-                </p>
-              </Section>
-
-              <Section title="Who pays">
-                {shipper.institutionAccount ? (
-                  <div className="space-y-2">
-                    <PayerOption
-                      checked={payer === "institution"}
-                      onSelect={() => setPayer("institution")}
-                      title={`${shipper.organizationName}'s own Purolator account`}
-                      detail={`Account ending ${shipper.institutionAccount.slice(-4)}. Purolator bills them directly; CSC invoices nothing.`}
-                    />
-                    <PayerOption
-                      checked={payer === "csc"}
-                      onSelect={() => setPayer("csc")}
-                      title="CSC pays, then invoices them"
-                      detail="CSC invoices the institution Purolator's actual charge after the conference."
-                    />
-                  </div>
-                ) : (
-                  <p className="text-base text-gray-700">
-                    CSC pays Purolator and invoices {shipper.organizationName ?? "their institution"} the actual charge after the
-                    conference.
-                  </p>
-                )}
-              </Section>
-
-              <button
-                type="button"
-                disabled={!serviceId || stage.step === "booking"}
-                onClick={() => (payer === "csc" ? setStage({ step: "approve" }) : void book())}
-                className="min-h-14 w-full rounded-xl bg-accent text-lg font-semibold text-white disabled:opacity-60"
-              >
-                {stage.step === "booking" ? "Booking with Purolator…" : `Book ${serviceName(serviceId ?? "")}`}
-              </button>
-            </>
-          )}
+          <ShipmentForm
+            key={shipper.personId}
+            conferenceId={conferenceId}
+            shipper={shipper}
+            canQuote={Boolean(originLabel)}
+            approveCscPayer={({ subtitle, onPassed, onCancel }) => (
+              <DeskPinCheck
+                conferenceId={conferenceId}
+                title="Approve the shipment"
+                subtitle={subtitle}
+                onCancel={onCancel}
+                onPassed={onPassed}
+              />
+            )}
+            labelsHref={labelsHref}
+            labelsNote={(n) =>
+              `${n} label${n === 1 ? " is" : "s are"} waiting on the print queue. They print when the die-cut shipping roll is in and someone presses “Print the shipping labels” in the War Room.`
+            }
+            finishLabel="Next person"
+            onBooked={() => void refreshShipments()}
+            onFinish={() => setShipper(null)}
+          />
         </Sheet>
       ) : null}
     </div>
@@ -588,151 +288,5 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
         <div className="mx-auto max-w-xl px-5 py-5">{children}</div>
       </div>
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-6">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  className,
-  inputMode,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  className?: string;
-  inputMode?: "decimal" | "text";
-}) {
-  return (
-    <label className={`block ${className ?? ""}`}>
-      <span className="text-sm font-medium text-gray-700">{label}</span>
-      <input
-        value={value}
-        inputMode={inputMode}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 min-h-12 w-full rounded-lg border border-gray-300 px-3 text-base"
-      />
-    </label>
-  );
-}
-
-function PayerOption({
-  checked,
-  onSelect,
-  title,
-  detail,
-}: {
-  checked: boolean;
-  onSelect: () => void;
-  title: string;
-  detail: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full rounded-xl border px-4 py-3 text-left ${checked ? "border-accent bg-accent/10 ring-2 ring-accent" : "border-gray-200"}`}
-    >
-      <span className="block text-base font-semibold">{title}</span>
-      <span className="block text-sm text-gray-600">{detail}</span>
-    </button>
-  );
-}
-
-function ShipmentList({
-  conferenceId,
-  shipments,
-  onClose,
-  onChanged,
-}: {
-  conferenceId: string;
-  shipments: DeskShipment[];
-  onClose: () => void;
-  onChanged: () => Promise<void>;
-}) {
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const cancel = async (id: string) => {
-    setBusy(id);
-    setError(null);
-    const res = await voidConferenceShipment({ conferenceId, shipmentId: id });
-    setBusy(null);
-    setConfirming(null);
-    if (!res.success) setError(res.error);
-    await onChanged();
-  };
-
-  return (
-    <Sheet title="Shipments" onClose={onClose}>
-      {error ? <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-base text-red-800">{error}</div> : null}
-      {shipments.length === 0 ? <p className="text-base text-gray-600">Nothing booked yet.</p> : null}
-      <ul className="space-y-3">
-        {shipments.map((s) => {
-          const voided = s.status === "voided";
-          return (
-            <li key={s.id} className={`rounded-xl border border-gray-200 p-4 ${voided ? "opacity-50" : ""}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-base font-semibold">{s.personName ?? "Unknown"}</p>
-                  <p className="text-sm text-gray-600">
-                    {s.organizationName ?? ""} · {serviceName(s.serviceId)} to {s.destination}
-                  </p>
-                  <p className="mt-1 text-sm text-gray-600">
-                    {s.reference} · {s.packagePins.length} box{s.packagePins.length === 1 ? "" : "es"} ·{" "}
-                    {s.billingMode === "institution_account" ? "their account" : "CSC invoices"}
-                    {s.estimateCents != null ? ` · est. ${formatCents(s.estimateCents)}` : ""}
-                    {s.environment === "sandbox" ? " · sandbox" : ""}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-gray-500">Tracking {s.packagePins.join(", ")}</p>
-                </div>
-                <span className="shrink-0 text-sm font-semibold">{voided ? "Cancelled" : "Booked"}</span>
-              </div>
-              {!voided ? (
-                <div className="mt-3 flex gap-2">
-                  <a
-                    href={`/api/admin/conference/${conferenceId}/shipping/${s.id}/labels`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex min-h-12 flex-1 items-center justify-center rounded-lg border border-gray-300 text-base font-medium"
-                  >
-                    Labels
-                  </a>
-                  {confirming === s.id ? (
-                    <button
-                      type="button"
-                      disabled={busy === s.id}
-                      onClick={() => void cancel(s.id)}
-                      className="min-h-12 flex-1 rounded-lg bg-red-600 text-base font-semibold text-white disabled:opacity-60"
-                    >
-                      {busy === s.id ? "Cancelling…" : "Yes, cancel it"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirming(s.id)}
-                      className="min-h-12 flex-1 rounded-lg border border-red-300 text-base font-medium text-red-700"
-                    >
-                      Cancel shipment
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </Sheet>
   );
 }

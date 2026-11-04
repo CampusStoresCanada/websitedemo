@@ -1,12 +1,20 @@
 "use server";
 
 /**
- * The conference shipping desk's actions. Desk staff only, as the check-in
- * desk is. See lib/conference/shipping.ts for the rules; Purolator is called
- * only through lib/purolator/.
+ * Shipping boxes home: the desk's actions, and the attendee's own on /me.
+ * Desk staff ship for anyone on the roster; anyone else only for themselves,
+ * and only while the conference is on (authorizeShipping). See
+ * lib/conference/shipping.ts for the rules; Purolator is called only through
+ * lib/purolator/.
  */
 
-import { requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
+import {
+  isConferenceDeskStaff,
+  requireAuthenticated,
+  requireConferenceDeskAccess,
+  requireConferenceOpsAccess,
+} from "@/lib/auth/guards";
+import { conferenceToday } from "@/lib/conference/desk-staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { PurolatorError } from "@/lib/purolator/client";
@@ -21,6 +29,8 @@ import {
   loadShippingLabelQueue,
   releaseShippingLabels,
   loadShippingOrigin,
+  shipmentPersonId,
+  shippingOpen,
   personForBadge,
   toPurolatorAddress,
   voidRecordedShipment,
@@ -38,6 +48,39 @@ function purolatorMessage(e: unknown): string {
     return e.requestReference ? `Purolator: ${e.message} (ref ${e.requestReference})` : `Purolator: ${e.message}`;
   }
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * May the signed-in person ship for this person? Desk staff: anyone on the
+ * roster. Anyone else: only themselves (their own conference_people row), and
+ * only during the conference.
+ */
+async function authorizeShipping(
+  conferenceId: string,
+  personId: string
+): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  if (await isConferenceDeskStaff(auth.ctx, conferenceId)) return { ok: true, userId: auth.ctx.userId };
+
+  const db = createAdminClient();
+  const [{ data: own }, { data: conference }, today] = await Promise.all([
+    db
+      .from("conference_people")
+      .select("id")
+      .eq("id", personId)
+      .eq("conference_id", conferenceId)
+      .eq("user_id", auth.ctx.userId)
+      .neq("assignment_status", "canceled")
+      .maybeSingle(),
+    db.from("conference_instances").select("start_date, end_date").eq("id", conferenceId).maybeSingle(),
+    conferenceToday(conferenceId),
+  ]);
+  if (!own) return { ok: false, error: "You can only ship your own boxes." };
+  if (!shippingOpen(today, conference?.start_date ?? null, conference?.end_date ?? null)) {
+    return { ok: false, error: "Shipping opens on the first day of the conference." };
+  }
+  return { ok: true, userId: auth.ctx.userId };
 }
 
 /** A scanned badge, or a picked name → who is shipping. Never checks anyone in. */
@@ -59,10 +102,11 @@ export async function loadShippingPerson(params: {
 /** Every Purolator service for these boxes to this address, cheapest first. */
 export async function quoteConferenceShipment(params: {
   conferenceId: string;
+  personId: string;
   destination: ShippingDestination;
   boxes: PurolatorBox[];
 }): Promise<Result<PurolatorQuote[]>> {
-  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  const auth = await authorizeShipping(params.conferenceId, params.personId);
   if (!auth.ok) return { success: false, error: auth.error };
   const problem = destinationProblem(params.destination) ?? boxesProblem(params.boxes);
   if (problem) return { success: false, error: problem };
@@ -91,7 +135,7 @@ export async function bookConferenceShipment(params: {
   payer: "csc" | "institution";
   shownQuote: PurolatorQuote | null;
 }): Promise<Result<{ shipmentId: string; reference: string; labelsQueued: boolean }>> {
-  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  const auth = await authorizeShipping(params.conferenceId, params.personId);
   if (!auth.ok) return { success: false, error: auth.error };
   const problem = destinationProblem(params.destination) ?? boxesProblem(params.boxes);
   if (problem) return { success: false, error: problem };
@@ -113,7 +157,7 @@ export async function bookConferenceShipment(params: {
       conferenceYear: (conference.data?.year as number | undefined) ?? new Date().getFullYear(),
       personId: shipper.personId,
       organizationId: shipper.organizationId,
-      bookedBy: auth.ctx.userId,
+      bookedBy: auth.userId,
       origin,
       destination: params.destination,
       boxes: params.boxes,
@@ -128,7 +172,7 @@ export async function bookConferenceShipment(params: {
       action: "conference_shipment_booked",
       entityType: "conference_shipment",
       entityId: booked.shipmentId,
-      actorId: auth.ctx.userId,
+      actorId: auth.userId,
       actorType: "user",
       details: { conferenceId: params.conferenceId, reference: booked.reference, payer: params.payer },
     });
@@ -142,21 +186,34 @@ export async function voidConferenceShipment(params: {
   conferenceId: string;
   shipmentId: string;
 }): Promise<Result<null>> {
-  const auth = await requireConferenceDeskAccess(params.conferenceId);
+  const personId = await shipmentPersonId(params.conferenceId, params.shipmentId);
+  if (!personId) return { success: false, error: "That shipment was not found." };
+  const auth = await authorizeShipping(params.conferenceId, personId);
   if (!auth.ok) return { success: false, error: auth.error };
   try {
-    await voidRecordedShipment({ ...params, voidedBy: auth.ctx.userId });
+    await voidRecordedShipment({ ...params, voidedBy: auth.userId });
     await logAuditEventSafe({
       action: "conference_shipment_voided",
       entityType: "conference_shipment",
       entityId: params.shipmentId,
-      actorId: auth.ctx.userId,
+      actorId: auth.userId,
       actorType: "user",
       details: { conferenceId: params.conferenceId },
     });
     return { success: true, data: null };
   } catch (e) {
     return { success: false, error: purolatorMessage(e) };
+  }
+}
+
+/** The attendee's own shipments, for /me. */
+export async function listMyShipments(params: { conferenceId: string; personId: string }): Promise<Result<DeskShipment[]>> {
+  const auth = await authorizeShipping(params.conferenceId, params.personId);
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    return { success: true, data: await loadDeskShipments(params.conferenceId, params.personId) };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 

@@ -73,6 +73,10 @@ const PROVINCE_CODES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "P
 /** What's wrong with an address, in desk words, or null. */
 export function destinationProblem(d: ShippingDestination): string | null {
   if (!d.street.trim()) return "Add the street address.";
+  // CSC's own address on file is one (2026-11-04); Purolator delivers to doors.
+  if (/\b(p\.?\s*o\.?\s*box|post office box|c\.?p\.?\s+\d|case postale)\b/i.test(`${d.street} ${d.street2}`)) {
+    return "Purolator can't deliver to a PO box. Use the street address.";
+  }
   if (!d.city.trim()) return "Add the city.";
   if (!PROVINCE_CODES.includes(d.province.trim().toUpperCase())) return "Pick the province.";
   if (!CANADIAN_POSTAL.test(d.postalCode.replace(/\s+/g, "").toUpperCase())) {
@@ -111,6 +115,15 @@ export function makeShipmentReference(year: number, bytes: Buffer = randomBytes(
   const alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O, 1/I/L
   const code = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
   return `CSC${String(year).slice(-2)}-${code}`;
+}
+
+/**
+ * Attendees ship from /me only while the conference is on: from its first day
+ * through its last, in its own time zone. The desk is not limited by this.
+ */
+export function shippingOpen(today: string, startDate: string | null, endDate: string | null): boolean {
+  if (!startDate || !endDate) return false;
+  return today >= startDate && today <= endDate;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -240,16 +253,18 @@ type ShipmentRow = {
   conference_shipment_packages: Array<{ piece_number: number; package_pin: string }>;
 };
 
-/** Every shipment booked at this conference, newest first. */
-export async function loadDeskShipments(conferenceId: string): Promise<DeskShipment[]> {
+/** Every shipment booked at this conference (or only one person's), newest first. */
+export async function loadDeskShipments(conferenceId: string, personId?: string): Promise<DeskShipment[]> {
   const db = createAdminClient();
-  const { data, error } = await db
+  let query = db
     .from("conference_shipments")
     .select(
       "id, reference, created_at, status, conference_person_id, organization_id, service_id, billing_mode, purolator_environment, shipment_pin, receiver_city, receiver_province, quote, conference_shipment_packages(piece_number, package_pin)"
     )
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: false });
+  if (personId) query = query.eq("conference_person_id", personId);
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as unknown as ShipmentRow[];
 
@@ -470,6 +485,17 @@ export async function voidRecordedShipment(params: {
     .update({ status: "voided", voided_at: new Date().toISOString(), voided_by: params.voidedBy, updated_at: new Date().toISOString() })
     .eq("id", row.id);
   if (error) throw new Error(`Cancelled with Purolator, but not marked here: ${error.message}`);
+}
+
+/** Who a shipment is for, to let them cancel their own. */
+export async function shipmentPersonId(conferenceId: string, shipmentId: string): Promise<string | null> {
+  const { data } = await createAdminClient()
+    .from("conference_shipments")
+    .select("conference_person_id")
+    .eq("id", shipmentId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  return (data?.conference_person_id as string | null | undefined) ?? null;
 }
 
 export async function shipmentPinFor(conferenceId: string, shipmentId: string): Promise<string | null> {
