@@ -60,7 +60,7 @@ type Stage =
   | { step: "form" }
   | { step: "approve" }
   | { step: "booking" }
-  | { step: "done"; shipmentId: string; reference: string };
+  | { step: "done"; shipmentId: string; reference: string; labelsQueued: boolean };
 
 export default function ShippingDeskClient({
   conferenceId,
@@ -376,11 +376,21 @@ export default function ShippingDeskClient({
           </p>
           <p className="mt-4 text-sm font-semibold uppercase tracking-wide text-gray-500">Reference</p>
           <p className="text-2xl font-bold tracking-wide">{stage.reference}</p>
+          {stage.labelsQueued ? (
+            <p className="mt-6 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-900">
+              {boxes.length} label{boxes.length === 1 ? " is" : "s are"} waiting on the print queue. They print when the
+              die-cut shipping roll is in and someone presses &ldquo;Print the shipping labels&rdquo; in the War Room.
+            </p>
+          ) : (
+            <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-base text-amber-900">
+              The labels didn&apos;t reach the print queue. Open them below and print them another way.
+            </p>
+          )}
           <a
             href={`/api/admin/conference/${conferenceId}/shipping/${stage.shipmentId}/labels`}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-6 flex min-h-14 items-center justify-center rounded-xl bg-accent px-6 text-lg font-semibold text-white"
+            className="mt-4 flex min-h-14 items-center justify-center rounded-xl border border-gray-300 px-6 text-lg font-semibold"
           >
             Open the labels ({boxes.length} page{boxes.length === 1 ? "" : "s"})
           </a>

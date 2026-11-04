@@ -6,7 +6,7 @@
  * only through lib/purolator/.
  */
 
-import { requireConferenceDeskAccess } from "@/lib/auth/guards";
+import { requireConferenceDeskAccess, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { PurolatorError } from "@/lib/purolator/client";
@@ -18,11 +18,14 @@ import {
   destinationProblem,
   loadDeskShipments,
   loadShipper,
+  loadShippingLabelQueue,
+  releaseShippingLabels,
   loadShippingOrigin,
   personForBadge,
   toPurolatorAddress,
   voidRecordedShipment,
   type DeskShipment,
+  type ShippingLabelQueue,
   type Shipper,
   type ShippingDestination,
 } from "@/lib/conference/shipping";
@@ -87,7 +90,7 @@ export async function bookConferenceShipment(params: {
   /** "institution" ships on the org's own Purolator account, read here, never from the client. */
   payer: "csc" | "institution";
   shownQuote: PurolatorQuote | null;
-}): Promise<Result<{ shipmentId: string; reference: string }>> {
+}): Promise<Result<{ shipmentId: string; reference: string; labelsQueued: boolean }>> {
   const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
   const problem = destinationProblem(params.destination) ?? boxesProblem(params.boxes);
@@ -162,6 +165,37 @@ export async function listConferenceShipments(conferenceId: string): Promise<Res
   if (!auth.ok) return { success: false, error: auth.error };
   try {
     return { success: true, data: await loadDeskShipments(conferenceId) };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** War Room → Print: how many shipping labels are waiting for the roll swap. */
+export async function getShippingLabelQueue(conferenceId: string): Promise<Result<ShippingLabelQueue>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    return { success: true, data: await loadShippingLabelQueue(conferenceId) };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** War Room → "Print the shipping labels": release every waiting label to the station. */
+export async function printShippingLabels(conferenceId: string): Promise<Result<{ released: number }>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    const released = await releaseShippingLabels(conferenceId);
+    await logAuditEventSafe({
+      action: "shipping_labels_released",
+      entityType: "conference",
+      entityId: conferenceId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { released },
+    });
+    return { success: true, data: { released } };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
-import { advanceBadgePrintJob, createPreprintedBadgeJob, deleteBadgePrintJob, loadPrintOverview, loadReprintPreview, type PrintOverview, type ReprintPreview } from "@/lib/actions/conference-badges";
+import { advanceBadgePrintJob, createPreprintedBadgeJob, deleteBadgePrintJob, listPrintStations, loadPrintOverview, loadReprintPreview, type PrintOverview, type ReprintPreview } from "@/lib/actions/conference-badges";
+import { getShippingLabelQueue, printShippingLabels } from "@/lib/actions/conference-shipping";
+import type { ShippingLabelQueue } from "@/lib/conference/shipping";
 import { printBadge } from "@/lib/actions/conference-people";
 import { updateField } from "@/lib/actions/update-field";
 import { cardChoices, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
@@ -46,6 +48,9 @@ export function PrintView({
   const [includeBlanks, setIncludeBlanks] = useState(false);
   const [reprintOpen, setReprintOpen] = useState(false);
   const [doorEntity, setDoorEntity] = useState("");
+  const [shipping, setShipping] = useState<ShippingLabelQueue | null>(null);
+  // What the QL last said it had loaded, e.g. "Die-cut labels 102 mm".
+  const [loadedMedia, setLoadedMedia] = useState<string | null>(null);
 
   const apply = (res: Awaited<ReturnType<typeof loadPrintOverview>>) => {
     if (res.success) {
@@ -55,7 +60,19 @@ export function PrintView({
       setError(res.error);
     }
   };
-  const load = async () => apply(await loadPrintOverview(conferenceId));
+  const fetchShipping = useCallback(
+    () => Promise.all([getShippingLabelQueue(conferenceId), listPrintStations(conferenceId)]),
+    [conferenceId]
+  );
+  const applyShipping = ([queue, stations]: Awaited<ReturnType<typeof fetchShipping>>) => {
+    if (queue.success) setShipping(queue.data);
+    if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+  };
+  const loadShipping = async () => applyShipping(await fetchShipping());
+  const load = async () => {
+    apply(await loadPrintOverview(conferenceId));
+    await loadShipping();
+  };
 
   // Jobs move while you watch (a sticker leaving the station), so the list
   // refreshes while the tab is open.
@@ -71,13 +88,23 @@ export function PrintView({
           setError(res.error);
         }
       });
+    const tickShipping = () =>
+      void fetchShipping().then(([queue, stations]) => {
+        if (!live) return;
+        if (queue.success) setShipping(queue.data);
+        if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+      });
     tick();
-    const id = window.setInterval(tick, 15_000);
+    tickShipping();
+    const id = window.setInterval(() => {
+      tick();
+      tickShipping();
+    }, 15_000);
     return () => {
       live = false;
       window.clearInterval(id);
     };
-  }, [conferenceId]);
+  }, [conferenceId, fetchShipping]);
 
   const base = `/admin/conference/${conferenceId}`;
   const sheet = (path: string) => `${base}${path}${path.includes("?") ? "&" : "?"}embed=1`;
@@ -291,6 +318,46 @@ export function PrintView({
           />
         </div>
       </section>
+
+      {shipping && (shipping.waiting > 0 || shipping.released > 0) ? (
+        <section className="rounded-xl border border-gray-200 bg-white px-4">
+          <h3 className="pt-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Shipping</h3>
+          <div className="divide-y divide-gray-100">
+            {/* One printer, two rolls (Steve, 2026-11-04): shipping labels wait
+                here until someone loads the DK-1247 die-cut roll. */}
+            <OperateRow
+              title="Shipping labels"
+              tone={shipping.waiting > 0 ? "attention" : "neutral"}
+              state={[
+                shipping.waiting > 0
+                  ? `${shipping.waiting} shipment${shipping.waiting === 1 ? "" : "s"} waiting, ${shipping.waitingBoxes} label${
+                      shipping.waitingBoxes === 1 ? "" : "s"
+                    }. Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back.`
+                  : null,
+                shipping.released > 0 ? `${shipping.released} at the print station now.` : null,
+                loadedMedia ? `The printer last reported: ${loadedMedia}.` : null,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              action={
+                shipping.waiting > 0
+                  ? {
+                      label: "Print the shipping labels",
+                      consequence: `Sends ${shipping.waitingBoxes} label${
+                        shipping.waitingBoxes === 1 ? "" : "s"
+                      } to the print station. If the badge roll is still in, they come back here to wait.`,
+                      onConfirm: async () => {
+                        const res = await printShippingLabels(conferenceId);
+                        await loadShipping();
+                        return res.success ? { success: true } : { success: false, error: res.error };
+                      },
+                    }
+                  : null
+              }
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-gray-200 bg-white px-4 pb-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2 pt-3">

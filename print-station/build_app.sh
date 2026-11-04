@@ -16,5 +16,6 @@ LIBUSB="$(brew --prefix libusb)/lib/libusb-1.0.0.dylib"
   --add-binary "$LIBUSB:." \
   --collect-submodules brother_ql \
   --collect-submodules usb \
+  --collect-all pymupdf \
   print_station_app.py
 echo "Built: dist/CSC Print Station.app"

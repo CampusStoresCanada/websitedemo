@@ -307,7 +307,9 @@ export type BookInput = {
  * booked, void it there so nothing ships unrecorded; if that fails too, an ops
  * alert names the tracking number.
  */
-export async function bookAndRecordShipment(input: BookInput): Promise<{ shipmentId: string; reference: string }> {
+export async function bookAndRecordShipment(
+  input: BookInput
+): Promise<{ shipmentId: string; reference: string; labelsQueued: boolean }> {
   const db = createAdminClient();
   const { billingAccount, environment } = getPurolatorConfig();
   const reference = makeShipmentReference(input.conferenceYear);
@@ -379,7 +381,63 @@ export async function bookAndRecordShipment(input: BookInput): Promise<{ shipmen
     throw new Error(`The shipment could not be saved, so it was cancelled with Purolator. (${why})`);
   }
 
-  return { shipmentId: shipment.id as string, reference };
+  // The labels wait on the print queue for the roll swap (releaseShippingLabels).
+  // A failure here costs the queued print, not the booking: the desk can still
+  // open the labels.
+  const { error: jobError } = await db.from("badge_print_jobs").insert({
+    conference_id: input.conferenceId,
+    person_id: input.personId,
+    pipeline_type: "shipping_label",
+    status: "queued",
+    transport_method: "printer_bridge",
+    initiated_by: input.bookedBy,
+    metadata: {
+      shipment_id: shipment.id,
+      reference,
+      boxes: input.boxes.length,
+      label: `${reference} · ${input.destination.attention || input.destination.company} · ${input.boxes.length} box${input.boxes.length === 1 ? "" : "es"}`,
+    },
+  });
+  if (jobError) console.error(`[shipping] labels for ${reference} not queued: ${jobError.message}`);
+
+  return { shipmentId: shipment.id as string, reference, labelsQueued: !jobError };
+}
+
+/** Labels that will print once the shipping roll is in: waiting, or released and not printed yet. */
+export type ShippingLabelQueue = { waiting: number; waitingBoxes: number; released: number };
+
+export async function loadShippingLabelQueue(conferenceId: string): Promise<ShippingLabelQueue> {
+  const { data, error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .select("status, metadata")
+    .eq("conference_id", conferenceId)
+    .eq("pipeline_type", "shipping_label")
+    .in("status", ["queued", "sent_to_printer", "rendering"]);
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  const waiting = rows.filter((r) => r.status === "queued");
+  return {
+    waiting: waiting.length,
+    waitingBoxes: waiting.reduce((n, r) => n + ((r.metadata as { boxes?: number } | null)?.boxes ?? 1), 0),
+    released: rows.length - waiting.length,
+  };
+}
+
+/**
+ * "Print the shipping labels": every waiting label goes to the print station.
+ * Pressed once the QL has the die-cut 103 x 164 mm roll in; anything the
+ * printer refuses comes back to waiting (finishJob).
+ */
+export async function releaseShippingLabels(conferenceId: string): Promise<number> {
+  const { data, error } = await createAdminClient()
+    .from("badge_print_jobs")
+    .update({ status: "sent_to_printer", updated_at: new Date().toISOString() })
+    .eq("conference_id", conferenceId)
+    .eq("pipeline_type", "shipping_label")
+    .eq("status", "queued")
+    .select("id");
+  if (error) throw new Error(error.message);
+  return (data ?? []).length;
 }
 
 export async function voidRecordedShipment(params: {
@@ -399,6 +457,14 @@ export async function voidRecordedShipment(params: {
   if (row.status === "billed") throw new Error("That shipment has already been invoiced.");
 
   await voidShipment(row.shipment_pin as string);
+  // Its labels must not print: a cancelled shipment's barcode ships nothing.
+  await db
+    .from("badge_print_jobs")
+    .update({ status: "canceled", updated_at: new Date().toISOString() })
+    .eq("conference_id", params.conferenceId)
+    .eq("pipeline_type", "shipping_label")
+    .in("status", ["queued", "sent_to_printer"])
+    .contains("metadata", { shipment_id: row.id });
   const { error } = await db
     .from("conference_shipments")
     .update({ status: "voided", voided_at: new Date().toISOString(), voided_by: params.voidedBy, updated_at: new Date().toISOString() })

@@ -169,6 +169,10 @@ describe("bookAndRecordShipment", () => {
       [1, "460000128336"],
       [2, "460000128344"],
     ]);
+    // The labels wait on the print queue for the roll swap.
+    const job = db.inserts.find((i) => i.table === "badge_print_jobs")!.values as Record<string, unknown>;
+    expect(job).toMatchObject({ pipeline_type: "shipping_label", status: "queued", transport_method: "printer_bridge" });
+    expect(job.metadata).toMatchObject({ shipment_id: "ship-1", boxes: 2 });
   });
 
   it("marks an institution-account shipment as nothing to invoice", async () => {

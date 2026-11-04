@@ -16,6 +16,11 @@ It also prints DOCUMENTS sent from the War Room ("Send to printer" on a task's
 speech or run-sheet): the website hands over a PDF, and this sends it to the
 laptop's ordinary paper printer with the system's own `lp`.
 
+And SHIPPING LABELS from the shipping desk: Purolator's 4x6 PDF, one page per
+box, on the same QL loaded with the DK-1247 die-cut roll (103 x 164 mm). They
+wait on the website until someone swaps the roll and presses "Print the
+shipping labels" in the War Room.
+
 Setup: run it once and paste the print station key (War Room → What's next →
 Open the print station → Get a key).
 """
@@ -38,6 +43,7 @@ from PIL import Image
 if not hasattr(Image, "ANTIALIAS"):
     Image.ANTIALIAS = Image.LANCZOS
 
+import pymupdf  # noqa: E402
 from brother_ql.backends.helpers import send  # noqa: E402
 from brother_ql.conversion import convert  # noqa: E402
 from brother_ql.raster import BrotherQLRaster  # noqa: E402
@@ -52,6 +58,12 @@ PRINTER_MODEL = "QL-1060N"
 BROTHER_USB_VENDOR = 0x04F9
 LABEL = "62"           # 62 mm continuous roll (DK-2113 clear / DK-22205 paper)
 PRINTABLE_DOTS = 696   # the QL prints 696 dots across 62 mm tape
+# Shipping labels: the DK-1247 die-cut roll. brother_ql_next (not the old
+# brother_ql 0.9.4) knows it: exactly 1200 x 1822 dots. The wide roll needs
+# the wide model's raster, so these go as the QL-1110NWB itself.
+SHIPPING_LABEL = "103x164"
+SHIPPING_DOTS = (1200, 1822)
+SHIPPING_MODEL = "QL-1110NWB"
 DPI = 300
 POLL_SECONDS = 3
 
@@ -154,11 +166,11 @@ def backend_for(printer: str) -> str:
     return "network" if printer.startswith("tcp://") else "pyusb"
 
 
-def print_images(printer: str, images: list) -> dict:
-    """Send stickers in one job, cut after each. Returns brother_ql's status."""
-    qlr = BrotherQLRaster(PRINTER_MODEL)
+def print_images(printer: str, images: list, label: str = LABEL, model: str = PRINTER_MODEL) -> dict:
+    """Send labels in one job, cut after each. Returns brother_ql's status."""
+    qlr = BrotherQLRaster(model)
     instructions = convert(
-        qlr=qlr, images=images, label=LABEL, rotate="0", threshold=70.0, dither=False,
+        qlr=qlr, images=images, label=label, rotate="0", threshold=70.0, dither=False,
         compress=False, red=False, dpi_600=False, hq=True, cut=True,
     )
     return send(instructions=instructions, printer_identifier=printer,
@@ -197,6 +209,28 @@ def describe_printer(result: dict) -> tuple:
     media_text = f"{media} {width} mm" if media else None
     errors = state.get("errors") or []
     return ("; ".join(errors) if errors else "ready"), media_text
+
+
+def shipping_label_images(pdf: bytes) -> list:
+    """Purolator's 4x6 pages as die-cut label images: 300 dpi, centred on 103 x 164.
+
+    A 4x6 page is 1200 x 1800 dots at 300 dpi; the label is 1200 x 1822, so
+    each page gets 11 blank rows above and below. ⛔ Never scaled: the barcode
+    has to scan.
+    """
+    images = []
+    document = pymupdf.open(stream=pdf, filetype="pdf")
+    for page in document:
+        pixmap = page.get_pixmap(dpi=DPI, colorspace=pymupdf.csGRAY)
+        image = Image.frombytes("L", (pixmap.width, pixmap.height), pixmap.samples)
+        if image.width > image.height:  # a landscape page: stand it up
+            image = image.rotate(90, expand=True)
+        width, height = SHIPPING_DOTS
+        image = image.crop((0, 0, min(image.width, width), min(image.height, height)))
+        label = Image.new("L", SHIPPING_DOTS, 255)
+        label.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
+        images.append(label.convert("RGB"))
+    return images
 
 
 # ── Picturing a sticker ───────────────────────────────────────────────────────
@@ -280,7 +314,7 @@ class Station:
         # Saying we print documents is what gets us handed them; an older
         # station that doesn't say so only ever gets stickers.
         r = self.session.post(self.url("/api/print-station/claim"),
-                              json={"accepts": ["stickers", "document"]}, timeout=15)
+                              json={"accepts": ["stickers", "document", "shipping_label"]}, timeout=15)
         r.raise_for_status()
         return r.json().get("job")
 
@@ -288,6 +322,13 @@ class Station:
         r = self.session.get(self.url(f"/api/print-station/jobs/{job_id}/document"), timeout=120)
         if r.status_code == 422:
             raise DocumentError(r.json().get("error", "This document cannot be printed."))
+        r.raise_for_status()
+        return r.content
+
+    def shipping_label(self, job_id: str) -> bytes:
+        r = self.session.get(self.url(f"/api/print-station/jobs/{job_id}/shipping-label"), timeout=120)
+        if r.status_code == 422:
+            raise DocumentError(r.json().get("error", "These labels cannot be printed."))
         r.raise_for_status()
         return r.content
 
@@ -331,6 +372,45 @@ def run_document_job(station: "Station", config: dict, job: dict) -> None:
         return
     log(f"  Sent to {config.get('document_printer') or 'the default printer'}.")
     station.report(job["jobId"], ok=True)
+
+
+def run_shipping_label_job(station: "Station", printer: str, job: dict) -> None:
+    title = job.get("title") or "Shipping labels"
+    log(f"Printing shipping labels: {title}")
+    try:
+        images = shipping_label_images(station.shipping_label(job["jobId"]))
+    except DocumentError as error:
+        log(f"  Cannot print these labels: {error}")
+        station.report(job["jobId"], ok=False, retry=False, error=str(error))
+        return
+    except requests.RequestException as error:
+        log(f"  Could not fetch them ({error}). They wait for the next Print the shipping labels.")
+        station.report(job["jobId"], ok=False, retry=True, error=f"Fetching failed: {error}")
+        return
+    except Exception as error:  # not a readable PDF
+        log(f"  Could not read Purolator's labels: {error}")
+        station.report(job["jobId"], ok=False, retry=False, error=f"Unreadable labels: {error}")
+        return
+
+    try:
+        result = print_images(printer, images, label=SHIPPING_LABEL, model=SHIPPING_MODEL)
+    except Exception as error:  # cable out, printer off
+        station.printer_status = f"Not reachable: {error}"
+        log(f"  Printer not reachable: {error}. They wait for the next Print the shipping labels.")
+        station.report(job["jobId"], ok=False, retry=True, error=f"Printer not reachable: {error}")
+        return
+
+    station.printer_status, station.printer_media = describe_printer(result)
+    if result.get("did_print"):
+        log(f"  Printed {len(images)} label(s). ({station.printer_media})")
+        station.report(job["jobId"], ok=True)
+    else:
+        # Almost always the badge roll still loaded. Back to waiting on the
+        # website: swap to DK-1247, then press Print the shipping labels again.
+        log(f"  The printer refused them: {station.printer_status}. Loaded: {station.printer_media}. "
+            "Load the 103 x 164 die-cut roll and press Print the shipping labels again.")
+        station.report(job["jobId"], ok=False, retry=True,
+                       error=f"{station.printer_status} (loaded: {station.printer_media or 'unknown'})")
 
 
 def run_job(station: Station, browser: str, printer: str, job: dict) -> None:
@@ -388,6 +468,8 @@ def run(config: dict, stop=None) -> None:
             if job:
                 if job.get("kind") == "document":
                     run_document_job(station, config, job)
+                elif job.get("kind") == "shipping_label":
+                    run_shipping_label_job(station, printer, job)
                 else:
                     run_job(station, browser, printer, job)
                 continue  # straight on to the next one

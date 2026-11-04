@@ -5,8 +5,8 @@ import "server-only";
  *
  * ⛔ Authenticated by its OWN key (print-station.ts), never a session: a laptop
  * left at a desk for four days must not hold somebody's login. The key reaches
- * exactly one conference's queued print jobs — reprint stickers, and documents
- * an admin sent from the War Room — and nothing else.
+ * exactly one conference's queued print jobs — reprint stickers, documents
+ * an admin sent from the War Room, and shipping labels — and nothing else.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -63,10 +63,15 @@ export async function recordHeartbeat(
  */
 export type ClaimedJob =
   | { jobId: string; kind: "stickers"; personName: string; stickers: StickerSide[] }
-  | { jobId: string; kind: "document"; title: string };
+  | { jobId: string; kind: "document"; title: string }
+  | { jobId: string; kind: "shipping_label"; title: string; boxes: number };
 
-/** The queue's two kinds of job: a reprint's stickers, and a document to print on paper. */
-const STATION_PIPELINES = ["onsite_reprint", "document"] as const;
+/**
+ * The queue's kinds of job: a reprint's stickers, a document to print on
+ * paper, and a shipment's Purolator labels (one 4x6 page per box) for the QL's
+ * die-cut 103 x 164 mm roll.
+ */
+const STATION_PIPELINES = ["onsite_reprint", "document", "shipping_label"] as const;
 
 /**
  * Take the oldest queued job for this station's conference.
@@ -81,14 +86,19 @@ const STATION_PIPELINES = ["onsite_reprint", "document"] as const;
  */
 export async function claimNextJob(
   station: PrintStation,
-  options: { acceptsDocuments?: boolean } = {}
+  options: { acceptsDocuments?: boolean; acceptsShippingLabels?: boolean } = {}
 ): Promise<ClaimedJob | null> {
   const db = createAdminClient();
+  // ⛔ Each kind goes only to a station that says it can print it: an older
+  // app reads anything unknown as a sticker job with no stickers.
+  const pipelines: string[] = ["onsite_reprint"];
+  if (options.acceptsDocuments) pipelines.push("document");
+  if (options.acceptsShippingLabels) pipelines.push("shipping_label");
   const { data: candidates, error } = await db
     .from("badge_print_jobs")
     .select("id, person_id, status, updated_at, metadata, pipeline_type")
     .eq("conference_id", station.conferenceId)
-    .in("pipeline_type", options.acceptsDocuments ? [...STATION_PIPELINES] : ["onsite_reprint"])
+    .in("pipeline_type", pipelines)
     .eq("transport_method", "printer_bridge")
     .in("status", ["sent_to_printer", "rendering"])
     .order("updated_at", { ascending: true })
@@ -101,7 +111,8 @@ export async function claimNextJob(
     const target = (job.metadata as { print_station_id?: string } | null)?.print_station_id;
     if (target && target !== station.id) continue;
     const isDocument = job.pipeline_type === "document";
-    const stickers = isDocument
+    const isShippingLabel = job.pipeline_type === "shipping_label";
+    const stickers = isDocument || isShippingLabel
       ? []
       : stickersFor((job.metadata as { reprint_plan?: ReprintPlan } | null)?.reprint_plan);
     const { data: claimed } = await db
@@ -117,6 +128,16 @@ export async function claimNextJob(
     if (isDocument) {
       const title = (job.metadata as { label?: string } | null)?.label ?? "Document";
       return { jobId: job.id as string, kind: "document", title };
+    }
+
+    if (isShippingLabel) {
+      const meta = (job.metadata ?? {}) as { label?: string; boxes?: number };
+      return {
+        jobId: job.id as string,
+        kind: "shipping_label",
+        title: meta.label ?? "Shipping labels",
+        boxes: meta.boxes ?? 1,
+      };
     }
 
     if (stickers.length === 0) {
@@ -153,6 +174,29 @@ export async function stationMayReadJob(station: PrintStation, jobId: string): P
     .in("pipeline_type", [...STATION_PIPELINES])
     .maybeSingle();
   return Boolean(data);
+}
+
+/**
+ * A shipping-label job's labels, as Purolator's PDF (one 4x6 page per box),
+ * fetched from Purolator by the shipment's tracking number. A cancelled
+ * shipment has no labels to print.
+ */
+export async function shippingLabelPdfForJob(station: PrintStation, jobId: string): Promise<Buffer> {
+  const db = createAdminClient();
+  const { data: job } = await db
+    .from("badge_print_jobs")
+    .select("metadata")
+    .eq("id", jobId)
+    .eq("conference_id", station.conferenceId)
+    .eq("pipeline_type", "shipping_label")
+    .maybeSingle();
+  const shipmentId = (job?.metadata as { shipment_id?: string } | null)?.shipment_id;
+  if (!shipmentId) throw new DocumentNotPrintable("This print job names no shipment.");
+  const { shipmentPinFor } = await import("@/lib/conference/shipping");
+  const pin = await shipmentPinFor(station.conferenceId, shipmentId);
+  if (!pin) throw new DocumentNotPrintable("That shipment was cancelled.");
+  const { fetchLabels } = await import("@/lib/purolator/shipping");
+  return fetchLabels(pin);
 }
 
 /** A document job's file could not become a PDF — retrying will not help. */
@@ -214,6 +258,11 @@ export async function documentPdfForJob(station: PrintStation, jobId: string): P
  * The station's report. Printed → done. A PRINTER problem (wrong roll, out of
  * film, lid open) → back to the queue to print when it is fixed (`retry`).
  * A STICKER problem (cannot be drawn) → failed, so it does not loop forever.
+ *
+ * ⛔ A shipping label that has to retry goes back to WAITING, not the queue:
+ * the usual reason is that the badge roll is still loaded, and retrying every
+ * few seconds would only make the printer refuse it again until someone swaps
+ * the roll and presses "Print the shipping labels" again.
  */
 export async function finishJob(
   station: PrintStation,
@@ -223,7 +272,14 @@ export async function finishJob(
 ): Promise<void> {
   const db = createAdminClient();
   const now = new Date().toISOString();
-  const status = result.ok ? "printed" : result.retry ? "sent_to_printer" : "failed";
+  const { data: job } = await db
+    .from("badge_print_jobs")
+    .select("pipeline_type")
+    .eq("id", jobId)
+    .eq("conference_id", station.conferenceId)
+    .maybeSingle();
+  const waitsForRelease = job?.pipeline_type === "shipping_label";
+  const status = result.ok ? "printed" : result.retry ? (waitsForRelease ? "queued" : "sent_to_printer") : "failed";
   await db
     .from("badge_print_jobs")
     .update({
@@ -243,7 +299,9 @@ export async function finishJob(
     event_status: result.ok ? "success" : "error",
     message: result.ok
       ? `Printed at print station "${station.label}".`
-      : `Print station "${station.label}": ${result.error ?? "printing failed"}${result.retry ? " (will retry)" : ""}`,
+      : `Print station "${station.label}": ${result.error ?? "printing failed"}${
+          result.retry ? (waitsForRelease ? " (waiting for Print the shipping labels)" : " (will retry)") : ""
+        }`,
     actor_id: station.createdBy,
     payload: { stationId: station.id },
   });

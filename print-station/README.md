@@ -42,6 +42,25 @@ default printer; the terminal version asks at `--setup`, blank meaning the defau
 - An older copy of this app never receives documents; update it to print them.
 - Mac and Linux only for now.
 
+## Shipping labels (the shipping desk)
+
+Shipments booked at the shipping desk queue their Purolator labels here, one 4×6
+label per box. They print on the **same QL**, on the **DK-1247 die-cut roll
+(103 × 164 mm)**, so they wait until you are ready:
+
+1. Swap the QL to the DK-1247 roll.
+2. War Room → Print → Shipping labels → **Print the shipping labels**.
+3. When they're out, swap the 62 mm badge roll back.
+
+If the badge roll is still in, the printer refuses them and they go back to
+waiting (the War Room says how many); swap the roll and press the button again.
+Badge stickers sent while the die-cut roll is in wait the same way until the 62 mm
+roll is back. An older copy of this app never receives shipping labels; rebuild it
+(it needs `brother_ql_next` and `pymupdf`, both in requirements.txt).
+
+To prove at the dry run: the label sits square on the die-cut label, and a phone
+scans its barcode.
+
 ## Building the app
 
 On a Mac with Homebrew: `brew install python-tk@3.14 libusb`, then

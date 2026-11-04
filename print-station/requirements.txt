@@ -1,4 +1,7 @@
-brother-ql>=0.9.4
+# brother_ql_next, not brother-ql 0.9.4: only it knows the DK-1247 die-cut roll (103x164).
+brother_ql_next>=0.12.0
+# Turns Purolator's label PDF into printer images.
+pymupdf>=1.24
 pyusb>=1.2.1
 Pillow>=10.1.0
 requests>=2.31.0
