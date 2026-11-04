@@ -3934,10 +3934,6 @@ export type Database = {
       }
       conference_bursary_applications: {
         Row: {
-          delegate_seat_id: string | null
-          hotel_nights: number | null
-          prepay_booked_at: string | null
-          prepay_booked_by: string | null
           conference_id: string
           contact_email: string
           contact_name: string
@@ -3945,11 +3941,15 @@ export type Database = {
           covers_travel: boolean | null
           created_at: string
           delegate_contact_id: string | null
+          delegate_seat_id: string | null
           gm_buyer_confirmed: boolean | null
+          hotel_nights: number | null
           id: string
           notes: string | null
           organization_id: string
           payment_preference: string | null
+          prepay_booked_at: string | null
+          prepay_booked_by: string | null
           requested_at: string | null
           requested_by_user_id: string | null
           status: string
@@ -3957,10 +3957,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          delegate_seat_id?: string | null
-          hotel_nights?: number | null
-          prepay_booked_at?: string | null
-          prepay_booked_by?: string | null
           conference_id: string
           contact_email: string
           contact_name: string
@@ -3968,11 +3964,15 @@ export type Database = {
           covers_travel?: boolean | null
           created_at?: string
           delegate_contact_id?: string | null
+          delegate_seat_id?: string | null
           gm_buyer_confirmed?: boolean | null
+          hotel_nights?: number | null
           id?: string
           notes?: string | null
           organization_id: string
           payment_preference?: string | null
+          prepay_booked_at?: string | null
+          prepay_booked_by?: string | null
           requested_at?: string | null
           requested_by_user_id?: string | null
           status?: string
@@ -3980,10 +3980,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          delegate_seat_id?: string | null
-          hotel_nights?: number | null
-          prepay_booked_at?: string | null
-          prepay_booked_by?: string | null
           conference_id?: string
           contact_email?: string
           contact_name?: string
@@ -3991,11 +3987,15 @@ export type Database = {
           covers_travel?: boolean | null
           created_at?: string
           delegate_contact_id?: string | null
+          delegate_seat_id?: string | null
           gm_buyer_confirmed?: boolean | null
+          hotel_nights?: number | null
           id?: string
           notes?: string | null
           organization_id?: string
           payment_preference?: string | null
+          prepay_booked_at?: string | null
+          prepay_booked_by?: string | null
           requested_at?: string | null
           requested_by_user_id?: string | null
           status?: string
@@ -4036,6 +4036,13 @@ export type Database = {
             columns: ["delegate_contact_id"]
             isOneToOne: false
             referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_bursary_applications_delegate_seat_id_fkey"
+            columns: ["delegate_seat_id"]
+            isOneToOne: false
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -4238,7 +4245,6 @@ export type Database = {
       }
       conference_checklist_tasks: {
         Row: {
-          scope_designation: string | null
           active: boolean
           ask_from: string | null
           audience: string
@@ -4252,6 +4258,7 @@ export type Database = {
           hardens_because: string | null
           id: string
           name: string
+          scope_designation: string | null
           scope_entity_id: string | null
           scope_entity_kind: string | null
           sort_order: number
@@ -4259,7 +4266,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          scope_designation?: string | null
           active?: boolean
           ask_from?: string | null
           audience?: string
@@ -4273,6 +4279,7 @@ export type Database = {
           hardens_because?: string | null
           id?: string
           name: string
+          scope_designation?: string | null
           scope_entity_id?: string | null
           scope_entity_kind?: string | null
           sort_order?: number
@@ -4280,7 +4287,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          scope_designation?: string | null
           active?: boolean
           ask_from?: string | null
           audience?: string
@@ -4294,6 +4300,7 @@ export type Database = {
           hardens_because?: string | null
           id?: string
           name?: string
+          scope_designation?: string | null
           scope_entity_id?: string | null
           scope_entity_kind?: string | null
           sort_order?: number
@@ -4732,17 +4739,17 @@ export type Database = {
       }
       conference_instances: {
         Row: {
-          bursary_designation_closes_at: string | null
-          bursary_four_night_org_ids: string[]
-          bursary_hotel_night_cents: number | null
-          bursary_hotel_tax_bps: number | null
           badge_preprint_at: string | null
           badge_print_stock: Json | null
           badge_scan_rules: Json | null
           board_decision_at: string | null
           booth_sales_general_open_at: string | null
           booth_sales_sponsor_open_at: string | null
+          bursary_designation_closes_at: string | null
+          bursary_four_night_org_ids: string[]
           bursary_goal_cents: number | null
+          bursary_hotel_night_cents: number | null
+          bursary_hotel_tax_bps: number | null
           bursary_request_closes_at: string | null
           cart_reservation_minutes: number
           catering_cutoff: string | null
@@ -4770,6 +4777,7 @@ export type Database = {
           registration_close_at: string | null
           registration_open_at: string | null
           schedule_freeze_at: string | null
+          shipping_origin: Json | null
           start_date: string | null
           status: string
           stripe_tax_rate_id: string | null
@@ -4780,17 +4788,17 @@ export type Database = {
           year: number
         }
         Insert: {
-          bursary_designation_closes_at?: string | null
-          bursary_four_night_org_ids?: string[]
-          bursary_hotel_night_cents?: number | null
-          bursary_hotel_tax_bps?: number | null
           badge_preprint_at?: string | null
           badge_print_stock?: Json | null
           badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
+          bursary_designation_closes_at?: string | null
+          bursary_four_night_org_ids?: string[]
           bursary_goal_cents?: number | null
+          bursary_hotel_night_cents?: number | null
+          bursary_hotel_tax_bps?: number | null
           bursary_request_closes_at?: string | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
@@ -4818,6 +4826,7 @@ export type Database = {
           registration_close_at?: string | null
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
+          shipping_origin?: Json | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -4828,17 +4837,17 @@ export type Database = {
           year: number
         }
         Update: {
-          bursary_designation_closes_at?: string | null
-          bursary_four_night_org_ids?: string[]
-          bursary_hotel_night_cents?: number | null
-          bursary_hotel_tax_bps?: number | null
           badge_preprint_at?: string | null
           badge_print_stock?: Json | null
           badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
+          bursary_designation_closes_at?: string | null
+          bursary_four_night_org_ids?: string[]
           bursary_goal_cents?: number | null
+          bursary_hotel_night_cents?: number | null
+          bursary_hotel_tax_bps?: number | null
           bursary_request_closes_at?: string | null
           cart_reservation_minutes?: number
           catering_cutoff?: string | null
@@ -4866,6 +4875,7 @@ export type Database = {
           registration_close_at?: string | null
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
+          shipping_origin?: Json | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -5802,6 +5812,182 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_shipment_packages: {
+        Row: {
+          created_at: string
+          height_in: number
+          id: string
+          length_in: number
+          package_pin: string
+          piece_number: number
+          shipment_id: string
+          weight_lb: number
+          width_in: number
+        }
+        Insert: {
+          created_at?: string
+          height_in: number
+          id?: string
+          length_in: number
+          package_pin: string
+          piece_number: number
+          shipment_id: string
+          weight_lb: number
+          width_in: number
+        }
+        Update: {
+          created_at?: string
+          height_in?: number
+          id?: string
+          length_in?: number
+          package_pin?: string
+          piece_number?: number
+          shipment_id?: string
+          weight_lb?: number
+          width_in?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_shipment_packages_shipment_id_fkey"
+            columns: ["shipment_id"]
+            isOneToOne: false
+            referencedRelation: "conference_shipments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_shipments: {
+        Row: {
+          actual: Json | null
+          actual_entered_at: string | null
+          actual_entered_by: string | null
+          billing_mode: string
+          booked_by: string | null
+          conference_id: string
+          conference_person_id: string | null
+          created_at: string
+          id: string
+          invoice_id: string | null
+          organization_id: string | null
+          purolator_account: string
+          purolator_environment: string
+          purolator_request_reference: string | null
+          quote: Json | null
+          receiver_attention: string | null
+          receiver_city: string
+          receiver_company: string | null
+          receiver_phone: string | null
+          receiver_postal_code: string
+          receiver_province: string
+          receiver_street: string[]
+          reference: string
+          service_id: string
+          shipment_pin: string
+          status: string
+          updated_at: string
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          actual?: Json | null
+          actual_entered_at?: string | null
+          actual_entered_by?: string | null
+          billing_mode: string
+          booked_by?: string | null
+          conference_id: string
+          conference_person_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          organization_id?: string | null
+          purolator_account: string
+          purolator_environment: string
+          purolator_request_reference?: string | null
+          quote?: Json | null
+          receiver_attention?: string | null
+          receiver_city: string
+          receiver_company?: string | null
+          receiver_phone?: string | null
+          receiver_postal_code: string
+          receiver_province: string
+          receiver_street: string[]
+          reference: string
+          service_id: string
+          shipment_pin: string
+          status?: string
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          actual?: Json | null
+          actual_entered_at?: string | null
+          actual_entered_by?: string | null
+          billing_mode?: string
+          booked_by?: string | null
+          conference_id?: string
+          conference_person_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string | null
+          organization_id?: string | null
+          purolator_account?: string
+          purolator_environment?: string
+          purolator_request_reference?: string | null
+          quote?: Json | null
+          receiver_attention?: string | null
+          receiver_city?: string
+          receiver_company?: string | null
+          receiver_phone?: string | null
+          receiver_postal_code?: string
+          receiver_province?: string
+          receiver_street?: string[]
+          reference?: string
+          service_id?: string
+          shipment_pin?: string
+          status?: string
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_shipments_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_shipments_conference_person_id_fkey"
+            columns: ["conference_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_shipments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_shipments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_shipments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]

@@ -39,11 +39,13 @@ describe("isCheckInDeskPath", () => {
   it("frames nothing around the desk or the door's printed list", () => {
     expect(isCheckInDeskPath("/admin/conference/abc-123/check-in")).toBe(true);
     expect(isCheckInDeskPath("/admin/conference/abc-123/check-in/door-list")).toBe(true);
+    expect(isCheckInDeskPath("/admin/conference/abc-123/shipping")).toBe(true);
   });
 
   it("leaves every other page framed", () => {
     expect(isCheckInDeskPath("/admin/conference/abc-123/war-room")).toBe(false);
     expect(isCheckInDeskPath("/admin/conference/abc-123/check-in/anything-else")).toBe(false);
+    expect(isCheckInDeskPath("/admin/conference/abc-123/shipping/anything-else")).toBe(false);
   });
 });
 

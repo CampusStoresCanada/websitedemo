@@ -396,6 +396,14 @@ export default async function ConferenceWarRoomPage({
           >
             Check-in Desk ↗
           </Link>
+          <Link
+            href={`/admin/conference/${id}/shipping`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-accent px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10"
+          >
+            Shipping Desk ↗
+          </Link>
           {/* The one way back to Manage: the conference as it is defined. */}
           <Link
             href={`/admin/conference/${id}/overview`}

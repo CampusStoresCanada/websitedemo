@@ -131,6 +131,22 @@ describe("estimateShipment", () => {
     expect(out.shipmentInformation).not.toHaveProperty("descriptionOfGoods");
   });
 
+  it("prices on Purolator's test account in the sandbox, and CSC's own in production", async () => {
+    vi.stubEnv("PUROLATOR_BILLING_ACCOUNT", "1234567");
+    const sandbox = mockPurolator([respond("estimate-2-box")]);
+    await estimateShipment(shipment);
+    const sandboxBilling = (sandbox.calls[0].body.outboundShipment as Record<string, Record<string, unknown>>)
+      .billingInformation;
+    expect(sandboxBilling.billingAccountNumber).toBe("9999999999");
+
+    vi.stubEnv("PUROLATOR_ENV", "production");
+    resetPurolatorTokenCache();
+    const prod = mockPurolator([respond("estimate-2-box")]);
+    await estimateShipment(shipment);
+    const prodBilling = (prod.calls[0].body.outboundShipment as Record<string, Record<string, unknown>>).billingInformation;
+    expect(prodBilling.billingAccountNumber).toBe("1234567");
+  });
+
   it("uses the production host only when PUROLATOR_ENV says so", async () => {
     vi.stubEnv("PUROLATOR_ENV", "production");
     const { calls } = mockPurolator([respond("estimate-2-box")]);

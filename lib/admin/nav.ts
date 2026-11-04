@@ -296,7 +296,8 @@ export function visibleNavGroups(
 
 /**
  * The conference pages desk staff reach without being global admins: the
- * check-in desk and its printed sheets. Everything else is CSC staff's.
+ * check-in desk and its printed sheets, and the shipping desk. Everything else
+ * is CSC staff's.
  *
  * ⛔ The War Room is NOT here (Stephen, 2026-10-23): it is the administrators'
  * operations centre, and desk staff — temps, easy to appoint and easy to revoke —
@@ -308,7 +309,7 @@ export function visibleNavGroups(
  * requireConferenceDeskAccess itself — this list opens the door, it is not the
  * lock.
  */
-export const CONFERENCE_DESK_SEGMENTS = ["check-in"] as const;
+export const CONFERENCE_DESK_SEGMENTS = ["check-in", "shipping"] as const;
 
 /**
  * The War Room: CSC's operations centre, with its own slim header. The admin
@@ -343,8 +344,8 @@ export function conferenceDeskPathId(pathname: string): string | null {
  * admin sidebar, conference tabs or toolkit. Everything that frames a page
  * steps aside for it. Also the door's printed list (`check-in/door-list`) and
  * the check-in cards (`check-in/cards`): sheets of paper, which the admin frame
- * would only print over.
+ * would only print over. And the shipping desk, a kiosk of the same kind.
  */
 export function isCheckInDeskPath(pathname: string): boolean {
-  return /^\/admin\/conference\/[^/]+\/check-in(\/door-list|\/cards)?\/?$/.test(pathname);
+  return /^\/admin\/conference\/[^/]+\/(check-in(\/door-list|\/cards)?|shipping)\/?$/.test(pathname);
 }
