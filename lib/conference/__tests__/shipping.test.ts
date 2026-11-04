@@ -42,6 +42,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import {
+  addUpShipments,
   bookAndRecordShipment,
   boxesProblem,
   destinationProblem,
@@ -114,6 +115,18 @@ describe("makeShipmentReference", () => {
     expect(ref).toBe("CSC27-23456");
     expect(`${ref} box 12 of 12`.length).toBeLessThanOrEqual(30);
     expect(makeShipmentReference(2027)).toMatch(/^CSC27-[2-9A-HJKMNP-Z]{5}$/);
+  });
+});
+
+describe("addUpShipments", () => {
+  it("counts every box and its weight, Express by air and the rest by ground", () => {
+    expect(
+      addUpShipments([
+        { service_id: "PurolatorGround", conference_shipment_packages: [{ weight_lb: "22.50" }, { weight_lb: 30 }] },
+        { service_id: "PurolatorExpress9AM", conference_shipment_packages: [{ weight_lb: 18 }] },
+        { service_id: "PurolatorGroundEvening", conference_shipment_packages: [{ weight_lb: 10 }] },
+      ])
+    ).toEqual({ ground: { pieces: 3, weightLb: 62.5 }, air: { pieces: 1, weightLb: 18 } });
   });
 });
 

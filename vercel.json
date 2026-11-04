@@ -125,6 +125,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/shipping-tracking",
+      "schedule": "15 */3 * * *"
+    },
+    {
       "path": "/api/cron/conference-circle-access",
       "schedule": "20 * * * *"
     }

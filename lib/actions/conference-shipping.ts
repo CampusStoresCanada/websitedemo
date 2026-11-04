@@ -29,6 +29,9 @@ import {
   loadShipper,
   loadShippingLabelQueue,
   releaseShippingLabels,
+  bookOrUpdatePickup,
+  cancelPickup,
+  loadPickupPlan,
   loadShippingOrigin,
   shipmentPersonId,
   shippingOpen,
@@ -37,6 +40,7 @@ import {
   voidRecordedShipment,
   type DeskShipment,
   type ShippingLabelQueue,
+  type PickupPlan,
   type Shipper,
   type ShippingDestination,
 } from "@/lib/conference/shipping";
@@ -258,5 +262,55 @@ export async function printShippingLabels(conferenceId: string): Promise<Result<
     return { success: true, data: { released } };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** War Room → Print: the conference's one pickup, and what it should carry now. */
+export async function getPickupPlan(conferenceId: string): Promise<Result<PickupPlan>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    return { success: true, data: await loadPickupPlan(conferenceId) };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Book the pickup with every box added up, or update it to today's totals. */
+export async function bookShippingPickup(conferenceId: string): Promise<Result<PickupPlan["booked"]>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    const booked = await bookOrUpdatePickup(conferenceId, auth.ctx.userId);
+    await logAuditEventSafe({
+      action: "shipping_pickup_booked",
+      entityType: "conference",
+      entityId: conferenceId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { confirmationNumber: booked?.confirmationNumber, pieces: booked?.totalPieces },
+    });
+    return { success: true, data: booked };
+  } catch (e) {
+    return { success: false, error: purolatorMessage(e) };
+  }
+}
+
+export async function cancelShippingPickup(conferenceId: string): Promise<Result<null>> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+  try {
+    await cancelPickup(conferenceId, auth.ctx.userId);
+    await logAuditEventSafe({
+      action: "shipping_pickup_cancelled",
+      entityType: "conference",
+      entityId: conferenceId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: {},
+    });
+    return { success: true, data: null };
+  } catch (e) {
+    return { success: false, error: purolatorMessage(e) };
   }
 }

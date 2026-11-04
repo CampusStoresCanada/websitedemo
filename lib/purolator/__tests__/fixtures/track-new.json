@@ -1,0 +1,180 @@
+{
+  "status": 200,
+  "response": {
+    "searchResult": [
+      {
+        "sequenceId": 1,
+        "trackingId": "460000139606",
+        "status": "FOUND",
+        "shipmentIndex": 0,
+        "packageIndex": 0,
+        "type": "PIN"
+      }
+    ],
+    "shipment": [
+      {
+        "id": 0,
+        "status": {
+          "code": "OFD",
+          "description": "Out for Delivery"
+        },
+        "shipmentPin": "460000139606",
+        "shipmentCreated": "2024-02-08",
+        "pieceTotalCount": 1,
+        "details": {
+          "references": [
+            "Cost Center",
+            "EWS_SandBox_OFD"
+          ],
+          "returnShipment": false,
+          "product": {
+            "code": "000000000000000202",
+            "description": "Purolator Express"
+          },
+          "services": [
+            {
+              "name": "PCH_OSNR",
+              "value": "1",
+              "description": "OSNR-Signature Not Required"
+            },
+            {
+              "name": "PCH_LOW_DENSITY_DEST",
+              "value": "1"
+            }
+          ],
+          "shipper": {
+            "city": "OTTAWA",
+            "provinceState": "ON",
+            "countryCode": "CA"
+          },
+          "receiver": {
+            "city": "MISSISSAUGA",
+            "provinceState": "ON",
+            "countryCode": "CA"
+          },
+          "note": "Special Instructions",
+          "weight": {
+            "unit": "LB",
+            "value": 16
+          }
+        },
+        "package": [
+          {
+            "id": 0,
+            "pin": "460000139606",
+            "status": {
+              "code": "OFD",
+              "description": "Out for Delivery"
+            },
+            "packageCreated": "2024-02-08",
+            "packageReceived": "2024-02-08 16:47:08",
+            "lastEvent": {
+              "dateTime": "2024-02-08T16:49:03-05:00",
+              "code": "4200",
+              "reasonCode": "MANUAL",
+              "description": "On vehicle for delivery",
+              "location": {
+                "city": "MISSISSAUGA",
+                "provinceState": "ON",
+                "countryCode": "CA"
+              },
+              "x12": {
+                "AT701": "X6",
+                "AT702": "NS"
+              },
+              "terminal": "511",
+              "routeId": "566"
+            },
+            "details": {
+              "services": [
+                {
+                  "name": "PCH_SPECIAL_HANDLING",
+                  "value": "1",
+                  "description": "Special Handling"
+                },
+                {
+                  "name": "PCH_SPEC_HANDLING_TYPE",
+                  "value": "9",
+                  "description": "Oversized "
+                }
+              ],
+              "weight": {
+                "declaredUnit": "LB",
+                "declaredValue": 16
+              },
+              "deliveryDetails": {}
+            },
+            "events": [
+              {
+                "dateTime": "2024-02-08T16:49:03-05:00",
+                "code": "4200",
+                "reasonCode": "MANUAL",
+                "description": "On vehicle for delivery",
+                "location": {
+                  "city": "MISSISSAUGA",
+                  "provinceState": "ON",
+                  "countryCode": "CA"
+                },
+                "x12": {
+                  "AT701": "X6",
+                  "AT702": "NS"
+                },
+                "terminal": "511",
+                "routeId": "566"
+              },
+              {
+                "dateTime": "2024-02-08T16:48:25-05:00",
+                "code": "0300",
+                "reasonCode": "IN_TERMINAL",
+                "description": "Arrived at sort facility",
+                "location": {
+                  "city": "ETOBICOKE",
+                  "provinceState": "ON",
+                  "countryCode": "CA"
+                },
+                "x12": {
+                  "AT701": "X4",
+                  "AT702": "NS"
+                },
+                "terminal": "012",
+                "routeId": "011"
+              },
+              {
+                "dateTime": "2024-02-08T16:47:08-05:00",
+                "code": "2300",
+                "reasonCode": "ADHOC",
+                "description": "Picked up by Purolator",
+                "location": {
+                  "city": "BELLEVILLE",
+                  "provinceState": "ON",
+                  "countryCode": "CA"
+                },
+                "x12": {
+                  "AT701": "X3",
+                  "AT702": "NS"
+                },
+                "terminal": "511",
+                "routeId": "566"
+              },
+              {
+                "dateTime": "2024-02-08T15:43:37-05:00",
+                "code": "3010",
+                "description": "Shipment created - final manifest received",
+                "location": {
+                  "city": "MISSISSAUGA",
+                  "provinceState": "ON",
+                  "countryCode": "CA"
+                },
+                "x12": {
+                  "AT701": "XB",
+                  "AT702": "NS"
+                },
+                "terminal": "000"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

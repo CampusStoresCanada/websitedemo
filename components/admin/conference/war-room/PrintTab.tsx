@@ -3,8 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
 import { advanceBadgePrintJob, createPreprintedBadgeJob, deleteBadgePrintJob, listPrintStations, loadPrintOverview, loadReprintPreview, type PrintOverview, type ReprintPreview } from "@/lib/actions/conference-badges";
-import { getShippingLabelQueue, printShippingLabels } from "@/lib/actions/conference-shipping";
-import type { ShippingLabelQueue } from "@/lib/conference/shipping";
+import {
+  bookShippingPickup,
+  cancelShippingPickup,
+  getPickupPlan,
+  getShippingLabelQueue,
+  printShippingLabels,
+} from "@/lib/actions/conference-shipping";
+import type { PickupPlan, ShippingLabelQueue } from "@/lib/conference/shipping";
 import { printBadge } from "@/lib/actions/conference-people";
 import { updateField } from "@/lib/actions/update-field";
 import { cardChoices, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
@@ -51,6 +57,7 @@ export function PrintView({
   const [shipping, setShipping] = useState<ShippingLabelQueue | null>(null);
   // What the QL last said it had loaded, e.g. "Die-cut labels 102 mm".
   const [loadedMedia, setLoadedMedia] = useState<string | null>(null);
+  const [pickup, setPickup] = useState<PickupPlan | null>(null);
 
   const apply = (res: Awaited<ReturnType<typeof loadPrintOverview>>) => {
     if (res.success) {
@@ -61,12 +68,13 @@ export function PrintView({
     }
   };
   const fetchShipping = useCallback(
-    () => Promise.all([getShippingLabelQueue(conferenceId), listPrintStations(conferenceId)]),
+    () => Promise.all([getShippingLabelQueue(conferenceId), listPrintStations(conferenceId), getPickupPlan(conferenceId)]),
     [conferenceId]
   );
-  const applyShipping = ([queue, stations]: Awaited<ReturnType<typeof fetchShipping>>) => {
+  const applyShipping = ([queue, stations, plan]: Awaited<ReturnType<typeof fetchShipping>>) => {
     if (queue.success) setShipping(queue.data);
     if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+    if (plan.success) setPickup(plan.data);
   };
   const loadShipping = async () => applyShipping(await fetchShipping());
   const load = async () => {
@@ -89,10 +97,11 @@ export function PrintView({
         }
       });
     const tickShipping = () =>
-      void fetchShipping().then(([queue, stations]) => {
+      void fetchShipping().then(([queue, stations, plan]) => {
         if (!live) return;
         if (queue.success) setShipping(queue.data);
         if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+        if (plan.success) setPickup(plan.data);
       });
     tick();
     tickShipping();
@@ -319,13 +328,14 @@ export function PrintView({
         </div>
       </section>
 
-      {shipping && (shipping.waiting > 0 || shipping.released > 0) ? (
+      {(shipping && (shipping.waiting > 0 || shipping.released > 0)) ||
+      (pickup && (pickup.booked || pickup.totals.ground.pieces + pickup.totals.air.pieces > 0)) ? (
         <section className="rounded-xl border border-gray-200 bg-white px-4">
           <h3 className="pt-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Shipping</h3>
           <div className="divide-y divide-gray-100">
             {/* One printer, two rolls (Steve, 2026-11-04): shipping labels wait
                 here until someone loads the DK-1247 die-cut roll. */}
-            <OperateRow
+            {shipping ? <OperateRow
               title="Shipping labels"
               tone={shipping.waiting > 0 ? "attention" : "neutral"}
               state={[
@@ -354,7 +364,8 @@ export function PrintView({
                     }
                   : null
               }
-            />
+            /> : null}
+            {pickup ? <PickupRow conferenceId={conferenceId} plan={pickup} onChanged={loadShipping} /> : null}
           </div>
         </section>
       ) : null}
@@ -671,5 +682,75 @@ export function ReprintModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The conference's ONE Purolator pickup (Steve, 2026-11-04): the Friday
+ * morning after, from the hotel's loading dock. Booked once with every box
+ * added up; if boxes are added or cancelled after, the row says so and the
+ * same button updates it.
+ */
+function PickupRow({
+  conferenceId,
+  plan,
+  onChanged,
+}: {
+  conferenceId: string;
+  plan: PickupPlan;
+  onChanged: () => Promise<void>;
+}) {
+  const pieces = plan.totals.ground.pieces + plan.totals.air.pieces;
+  const weight = Math.ceil(plan.totals.ground.weightLb + plan.totals.air.weightLb);
+  const s = plan.settings;
+  const when = s
+    ? `${new Date(`${s.date}T12:00:00`).toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" })}, ${s.anyTimeAfter} to ${s.untilTime}`
+    : null;
+  const where = s ? `${s.location.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()}, ask for ${s.contact.name}` : null;
+  const stale = plan.booked && (plan.booked.totalPieces !== pieces || Math.ceil(plan.booked.totalWeightLb) !== weight);
+  const boxes = (n: number) => `${n} box${n === 1 ? "" : "es"}`;
+
+  const state = !s
+    ? "No pickup settings for this conference yet."
+    : plan.booked
+      ? `Booked: ${when}, ${where}. Confirmation ${plan.booked.confirmationNumber}, ${boxes(plan.booked.totalPieces)}, ${Math.ceil(
+          plan.booked.totalWeightLb
+        )} lb.${stale ? ` Now ${boxes(pieces)}, ${weight} lb: update it.` : ""}`
+      : `Not booked. ${when}, ${where}. ${boxes(pieces)}, ${weight} lb so far.`;
+
+  return (
+    <OperateRow
+      title="Purolator pickup"
+      tone={!s ? "blocked" : !plan.booked || stale ? "attention" : "done"}
+      state={state}
+      action={
+        s && pieces > 0 && (!plan.booked || stale)
+          ? {
+              label: plan.booked ? "Update the pickup" : "Book the pickup",
+              consequence: `${plan.booked ? "Changes" : "Books"} the one Purolator pickup for ${when}: ${boxes(pieces)}, ${weight} lb.`,
+              onConfirm: async () => {
+                const res = await bookShippingPickup(conferenceId);
+                await onChanged();
+                return res.success ? { success: true } : { success: false, error: res.error };
+              },
+            }
+          : null
+      }
+      extra={
+        plan.booked ? (
+          <ConfirmAction
+            label="Cancel pickup"
+            consequence={`Cancels Purolator pickup ${plan.booked.confirmationNumber}. Nothing collects the boxes until you book again.`}
+            size="sm"
+            tone="danger"
+            onConfirm={async () => {
+              const res = await cancelShippingPickup(conferenceId);
+              await onChanged();
+              return res.success ? { success: true } : { success: false, error: res.error };
+            }}
+          />
+        ) : null
+      }
+    />
   );
 }

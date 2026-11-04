@@ -4778,6 +4778,7 @@ export type Database = {
           registration_open_at: string | null
           schedule_freeze_at: string | null
           shipping_origin: Json | null
+          shipping_pickup: Json | null
           start_date: string | null
           status: string
           stripe_tax_rate_id: string | null
@@ -4827,6 +4828,7 @@ export type Database = {
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
           shipping_origin?: Json | null
+          shipping_pickup?: Json | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -4876,6 +4878,7 @@ export type Database = {
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
           shipping_origin?: Json | null
+          shipping_pickup?: Json | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -5870,6 +5873,8 @@ export type Database = {
           conference_id: string
           conference_person_id: string | null
           created_at: string
+          delivered_at: string | null
+          delivered_to: string | null
           id: string
           invoice_id: string | null
           organization_id: string | null
@@ -5888,6 +5893,10 @@ export type Database = {
           service_id: string
           shipment_pin: string
           status: string
+          tracking_checked_at: string | null
+          tracking_code: string | null
+          tracking_last_event: string | null
+          tracking_status: string | null
           updated_at: string
           voided_at: string | null
           voided_by: string | null
@@ -5901,6 +5910,8 @@ export type Database = {
           conference_id: string
           conference_person_id?: string | null
           created_at?: string
+          delivered_at?: string | null
+          delivered_to?: string | null
           id?: string
           invoice_id?: string | null
           organization_id?: string | null
@@ -5919,6 +5930,10 @@ export type Database = {
           service_id: string
           shipment_pin: string
           status?: string
+          tracking_checked_at?: string | null
+          tracking_code?: string | null
+          tracking_last_event?: string | null
+          tracking_status?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null
@@ -5932,6 +5947,8 @@ export type Database = {
           conference_id?: string
           conference_person_id?: string | null
           created_at?: string
+          delivered_at?: string | null
+          delivered_to?: string | null
           id?: string
           invoice_id?: string | null
           organization_id?: string | null
@@ -5950,6 +5967,10 @@ export type Database = {
           service_id?: string
           shipment_pin?: string
           status?: string
+          tracking_checked_at?: string | null
+          tracking_code?: string | null
+          tracking_last_event?: string | null
+          tracking_status?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null
@@ -5988,6 +6009,59 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_shipping_pickups: {
+        Row: {
+          booked_at: string
+          booked_by: string | null
+          conference_id: string
+          confirmation_number: string
+          id: string
+          pickup_date: string
+          purolator_environment: string
+          total_pieces: number
+          total_weight_lb: number
+          updated_at: string
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          booked_at?: string
+          booked_by?: string | null
+          conference_id: string
+          confirmation_number: string
+          id?: string
+          pickup_date: string
+          purolator_environment: string
+          total_pieces: number
+          total_weight_lb: number
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          booked_at?: string
+          booked_by?: string | null
+          conference_id?: string
+          confirmation_number?: string
+          id?: string
+          pickup_date?: string
+          purolator_environment?: string
+          total_pieces?: number
+          total_weight_lb?: number
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_shipping_pickups_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
         ]

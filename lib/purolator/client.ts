@@ -84,9 +84,12 @@ async function getToken(): Promise<string> {
   return cachedToken;
 }
 
+// Shipping nests each error ({error: {code, description}}); pickup does not
+// ({code, description}). Both seen in the sandbox, 2026-11-04.
+type ErrorDetail = { code?: string; description?: string };
 type ErrorBody = {
   requestReference?: string;
-  errors?: Array<{ error?: { code?: string; description?: string } }>;
+  errors?: Array<ErrorDetail & { error?: ErrorDetail }>;
   message?: string;
 };
 
@@ -120,7 +123,7 @@ export async function purolatorRequest<T>(
   if (!res.ok) {
     if (res.status === 401) resetPurolatorTokenCache();
     const err = (json ?? {}) as ErrorBody;
-    const details = (err.errors ?? []).map((e) => e.error).filter(Boolean);
+    const details = (err.errors ?? []).map((e) => e.error ?? e).filter((d) => d.code || d.description);
     const message =
       details.map((d) => d?.description).filter(Boolean).join("; ") ||
       err.message ||

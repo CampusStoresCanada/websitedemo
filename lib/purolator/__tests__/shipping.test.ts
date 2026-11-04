@@ -197,6 +197,8 @@ describe("bookShipment", () => {
     expect(boxes[1].packageWeight).toBe(30);
     expect(out.receiverInformation.phoneNumber).toBe("4032201111");
     expect(out.receiverInformation.attentionTo).toBe("Bookstore");
+    // One pre-scheduled pickup collects everything (lib/purolator/pickup.ts).
+    expect((calls[1].body.outboundShipment as Record<string, unknown>).pickupType).toBe("PRESCHEDULED");
   });
 
   it("stops at validation: a rejected shipment is never created", async () => {

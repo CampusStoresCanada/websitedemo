@@ -393,8 +393,17 @@ export function ShipmentList({
                     {s.environment === "sandbox" ? " · sandbox" : ""}
                   </p>
                   <p className="mt-1 break-all text-xs text-gray-500">Tracking {s.packagePins.join(", ")}</p>
+                  {s.deliveredAt || s.trackingStatus ? (
+                    <p className="mt-1 text-sm font-medium text-gray-800">
+                      {s.deliveredAt
+                        ? `Delivered ${new Date(s.deliveredAt).toLocaleDateString("en-CA", { month: "long", day: "numeric" })}`
+                        : [s.trackingStatus, s.trackingLastEvent].filter(Boolean).join(": ")}
+                    </p>
+                  ) : null}
                 </div>
-                <span className="shrink-0 text-sm font-semibold">{voided ? "Cancelled" : "Booked"}</span>
+                <span className="shrink-0 text-sm font-semibold">
+                  {voided ? "Cancelled" : s.deliveredAt ? "Delivered" : "Booked"}
+                </span>
               </div>
               {!voided && (labelsHref || onChanged) ? (
                 <div className="mt-3 flex gap-2">

@@ -20,6 +20,8 @@ import { abbreviateProvince } from "@/lib/constants/provinces";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { getPurolatorConfig } from "@/lib/purolator/client";
 import { bookShipment, voidShipment } from "@/lib/purolator/shipping";
+import { modifyPickup, schedulePickup, voidPickup, type PickupLocation, type PickupRequest } from "@/lib/purolator/pickup";
+import { trackShipments } from "@/lib/purolator/tracking";
 import type { PurolatorAddress, PurolatorBox, PurolatorPayer, PurolatorQuote } from "@/lib/purolator/types";
 
 export type ShippingDestination = {
@@ -65,6 +67,10 @@ export type DeskShipment = {
   packagePins: string[];
   destination: string;
   estimateCents: number | null;
+  /** What Purolator's tracking last said (refreshTracking), e.g. "Out for Delivery". */
+  trackingStatus: string | null;
+  trackingLastEvent: string | null;
+  deliveredAt: string | null;
 };
 
 const CANADIAN_POSTAL = /^[A-Z]\d[A-Z]\d[A-Z]\d$/;
@@ -250,6 +256,9 @@ type ShipmentRow = {
   receiver_city: string;
   receiver_province: string;
   quote: { totalCents?: number } | null;
+  tracking_status: string | null;
+  tracking_last_event: string | null;
+  delivered_at: string | null;
   conference_shipment_packages: Array<{ piece_number: number; package_pin: string }>;
 };
 
@@ -262,7 +271,7 @@ export async function loadDeskShipments(
   let query = db
     .from("conference_shipments")
     .select(
-      "id, reference, created_at, status, conference_person_id, organization_id, service_id, billing_mode, purolator_environment, shipment_pin, receiver_city, receiver_province, quote, conference_shipment_packages(piece_number, package_pin)"
+      "id, reference, created_at, status, conference_person_id, organization_id, service_id, billing_mode, purolator_environment, shipment_pin, receiver_city, receiver_province, quote, tracking_status, tracking_last_event, delivered_at, conference_shipment_packages(piece_number, package_pin)"
     )
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: false });
@@ -299,6 +308,9 @@ export async function loadDeskShipments(
       .map((p) => p.package_pin),
     destination: `${r.receiver_city}, ${r.receiver_province}`,
     estimateCents: r.quote?.totalCents ?? null,
+    trackingStatus: r.tracking_status,
+    trackingLastEvent: r.tracking_last_event,
+    deliveredAt: r.delivered_at,
   }));
 }
 
@@ -511,4 +523,202 @@ export async function shipmentPinFor(conferenceId: string, shipmentId: string): 
     .maybeSingle();
   if (!data || data.status === "voided") return null;
   return data.shipment_pin as string;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// The pickup: ONE for the whole conference (Steve, 2026-11-04)
+// ─────────────────────────────────────────────────────────────────
+
+export type PickupSettings = {
+  date: string;
+  anyTimeAfter: string;
+  untilTime: string;
+  location: PickupLocation;
+  contact: { name: string; company?: string; phone: string; email?: string };
+  instructions?: string;
+};
+
+export type PickupTotals = { ground: { pieces: number; weightLb: number }; air: { pieces: number; weightLb: number } };
+
+export type PickupPlan = {
+  settings: PickupSettings | null;
+  /** Every live shipment, added up: what the pickup should say now. */
+  totals: PickupTotals;
+  booked: {
+    confirmationNumber: string;
+    pickupDate: string;
+    totalPieces: number;
+    totalWeightLb: number;
+    bookedAt: string;
+    updatedAt: string;
+  } | null;
+};
+
+/** Purolator's Express services travel by air; everything else by ground. */
+export const travelsByAir = (serviceId: string) => /Express/i.test(serviceId);
+
+export function addUpShipments(
+  rows: Array<{ service_id: string; conference_shipment_packages: Array<{ weight_lb: number | string }> }>
+): PickupTotals {
+  const totals: PickupTotals = { ground: { pieces: 0, weightLb: 0 }, air: { pieces: 0, weightLb: 0 } };
+  for (const r of rows) {
+    const bucket = travelsByAir(r.service_id) ? totals.air : totals.ground;
+    for (const p of r.conference_shipment_packages) {
+      bucket.pieces += 1;
+      bucket.weightLb += Number(p.weight_lb);
+    }
+  }
+  return totals;
+}
+
+export async function loadPickupPlan(conferenceId: string): Promise<PickupPlan> {
+  const db = createAdminClient();
+  const { environment } = getPurolatorConfig();
+  const [{ data: conf }, { data: rows, error }, { data: pickup }] = await Promise.all([
+    db.from("conference_instances").select("shipping_pickup").eq("id", conferenceId).maybeSingle(),
+    db
+      .from("conference_shipments")
+      .select("service_id, conference_shipment_packages(weight_lb)")
+      .eq("conference_id", conferenceId)
+      .eq("purolator_environment", environment)
+      .neq("status", "voided"),
+    db
+      .from("conference_shipping_pickups")
+      .select("confirmation_number, pickup_date, total_pieces, total_weight_lb, booked_at, updated_at")
+      .eq("conference_id", conferenceId)
+      .eq("purolator_environment", environment)
+      .is("voided_at", null)
+      .maybeSingle(),
+  ]);
+  if (error) throw new Error(error.message);
+  return {
+    settings: (conf?.shipping_pickup as PickupSettings | null) ?? null,
+    totals: addUpShipments((rows ?? []) as unknown as Parameters<typeof addUpShipments>[0]),
+    booked: pickup
+      ? {
+          confirmationNumber: pickup.confirmation_number as string,
+          pickupDate: pickup.pickup_date as string,
+          totalPieces: pickup.total_pieces as number,
+          totalWeightLb: Number(pickup.total_weight_lb),
+          bookedAt: pickup.booked_at as string,
+          updatedAt: pickup.updated_at as string,
+        }
+      : null,
+  };
+}
+
+/**
+ * Book the pickup with everything added up, or update it to the current
+ * totals if it is already booked. Purolator issues a new confirmation number
+ * on every change; the row keeps the latest.
+ */
+export async function bookOrUpdatePickup(conferenceId: string, userId: string): Promise<PickupPlan["booked"]> {
+  const [plan, origin] = await Promise.all([loadPickupPlan(conferenceId), loadShippingOrigin(conferenceId)]);
+  if (!plan.settings) throw new Error("This conference has no pickup settings.");
+  if (!origin) throw new Error("This conference has no ship-from address.");
+  const pieces = plan.totals.ground.pieces + plan.totals.air.pieces;
+  if (pieces === 0) throw new Error("There are no boxes to pick up yet.");
+
+  const request: PickupRequest = {
+    date: plan.settings.date,
+    anyTimeAfter: plan.settings.anyTimeAfter,
+    untilTime: plan.settings.untilTime,
+    location: plan.settings.location,
+    instructions: plan.settings.instructions,
+    address: origin,
+    contact: plan.settings.contact,
+    ground: plan.totals.ground,
+    air: plan.totals.air,
+  };
+  const confirmationNumber = plan.booked
+    ? await modifyPickup(plan.booked.confirmationNumber, request)
+    : await schedulePickup(request);
+
+  const db = createAdminClient();
+  const { environment } = getPurolatorConfig();
+  const totalWeightLb = plan.totals.ground.weightLb + plan.totals.air.weightLb;
+  const now = new Date().toISOString();
+  const { error } = plan.booked
+    ? await db
+        .from("conference_shipping_pickups")
+        .update({ confirmation_number: confirmationNumber, total_pieces: pieces, total_weight_lb: totalWeightLb, updated_at: now })
+        .eq("conference_id", conferenceId)
+        .eq("purolator_environment", environment)
+        .is("voided_at", null)
+    : await db.from("conference_shipping_pickups").insert({
+        conference_id: conferenceId,
+        confirmation_number: confirmationNumber,
+        pickup_date: plan.settings.date,
+        total_pieces: pieces,
+        total_weight_lb: totalWeightLb,
+        purolator_environment: environment,
+        booked_by: userId,
+      });
+  if (error) {
+    await raiseAlertIfNotOpen({
+      ruleKey: `shipping_pickup_unrecorded:${confirmationNumber}`,
+      severity: "critical",
+      message: `Purolator pickup ${confirmationNumber} was booked but not saved here. Note the number before anyone books another.`,
+      details: { conferenceId, confirmationNumber, error: error.message },
+    });
+    throw new Error(`Purolator booked pickup ${confirmationNumber}, but it was not saved here: ${error.message}`);
+  }
+  return (await loadPickupPlan(conferenceId)).booked;
+}
+
+export async function cancelPickup(conferenceId: string, userId: string): Promise<void> {
+  const plan = await loadPickupPlan(conferenceId);
+  if (!plan.booked) return;
+  await voidPickup(plan.booked.confirmationNumber);
+  const { environment } = getPurolatorConfig();
+  await createAdminClient()
+    .from("conference_shipping_pickups")
+    .update({ voided_at: new Date().toISOString(), voided_by: userId })
+    .eq("conference_id", conferenceId)
+    .eq("purolator_environment", environment)
+    .is("voided_at", null);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tracking
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Ask Purolator where every undelivered shipment is, and record it. Run by
+ * /api/cron/shipping-tracking; a delivered shipment is never asked again.
+ */
+export async function refreshTracking(): Promise<{ checked: number; delivered: number }> {
+  const db = createAdminClient();
+  const { environment } = getPurolatorConfig();
+  const { data, error } = await db
+    .from("conference_shipments")
+    .select("id, shipment_pin")
+    .eq("purolator_environment", environment)
+    .in("status", ["booked", "no_charge", "billed"])
+    .is("delivered_at", null);
+  if (error) throw new Error(error.message);
+  const rows = data ?? [];
+  if (rows.length === 0) return { checked: 0, delivered: 0 };
+
+  const summaries = await trackShipments(rows.map((r) => r.shipment_pin as string));
+  const byPin = new Map(summaries.map((t) => [t.shipmentPin, t]));
+  const now = new Date().toISOString();
+  let delivered = 0;
+  for (const r of rows) {
+    const t = byPin.get(r.shipment_pin as string);
+    if (!t) continue;
+    if (t.deliveredAt) delivered += 1;
+    await db
+      .from("conference_shipments")
+      .update({
+        tracking_code: t.code,
+        tracking_status: t.status,
+        tracking_last_event: t.lastEvent,
+        tracking_checked_at: now,
+        delivered_at: t.deliveredAt,
+        delivered_to: t.deliveredTo,
+      })
+      .eq("id", r.id);
+  }
+  return { checked: rows.length, delivered };
 }

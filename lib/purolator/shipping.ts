@@ -174,7 +174,9 @@ function createBody(s: PurolatorShipment, serviceId: string, payer: PurolatorPay
     shipmentDocuments: { label: { outputType: "PDF", printerFormat: "Thermal", responseType: "BASE64" } },
     outboundShipment: {
       paymentInformation: paymentInformation(payer),
-      pickupType: "DROPOFF",
+      // One pickup collects everything (Steve, 2026-11-04): booked once from
+      // the War Room for the Friday after the conference (lib/purolator/pickup.ts).
+      pickupType: "PRESCHEDULED",
       senderInformation: shipAddress(s.sender),
       receiverInformation: shipAddress(s.receiver),
       shipmentInformation: shipmentInformation(s, serviceId, true),
