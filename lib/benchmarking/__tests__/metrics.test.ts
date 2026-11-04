@@ -338,3 +338,31 @@ describe("a category that has been split", () => {
     expect(strandedBySplit([{ ...split, splitBySubcategory: false }])).toEqual([]);
   });
 });
+
+describe("staff cost on the statement", () => {
+  // McGill's 2026 answers: the Staffing grid is a breakdown of expense_hr.
+  const formData = {
+    expense_hr: 1_548_272.24,
+    wages_full_time: 1_119_499.78,
+    wages_part_time: 35_000,
+    wages_student: 80_590.47,
+    benefits_full_time: 313_181.99,
+  };
+  const parts = {
+    gmCategories: [],
+    cmCategories: [],
+    otherIncome: [],
+    otherExpenses: [],
+    formData,
+  };
+
+  it("counts benefits once, inside salaries, wages and benefits", () => {
+    // 1,861,454.23 would be the benefits added a second time.
+    expect(deriveStatement(parts).operatingExpenses).toBe(1_548_272.24);
+  });
+
+  it("does not add a lone benefits figure on top either", () => {
+    const lone = { ...parts, formData: { expense_hr: 792_225, benefits_total: 184_729 } };
+    expect(deriveStatement(lone).operatingExpenses).toBe(792_225);
+  });
+});
