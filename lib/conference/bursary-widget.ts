@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatDayMonth, parseSupabaseTimestamp, isValidDate } from "@/lib/time/supabase-timestamp";
 import { abbreviateProvince } from "@/lib/constants/provinces";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 
 /**
  * The travel-bursary review queue, for the admin console widget.
@@ -59,6 +60,14 @@ export interface BursaryApplicationRow {
     payment: "reimburse" | "prepay" | null;
     /** "24 October", in Mountain time. */
     submittedOn: string | null;
+    /** When submitted (ISO). */
+    submittedAt: string;
+    /** Hotel nights covered: 3, or 4 when they can't get home Thursday night. */
+    hotelNights: number | null;
+    /** For a prepay request: when CSC booked it. Null while it waits on us. */
+    prepayBookedAt: string | null;
+    /** No registration picked yet: the school can still choose one. */
+    seatPicked: boolean;
   } | null;
 }
 
@@ -81,6 +90,9 @@ type JoinedRow = {
   covers_hotel: boolean | null;
   covers_travel: boolean | null;
   payment_preference: "reimburse" | "prepay" | null;
+  delegate_seat_id: string | null;
+  hotel_nights: number | null;
+  prepay_booked_at: string | null;
   delegate: { name: string | null; role_title: string | null } | null;
 };
 
@@ -112,15 +124,25 @@ export async function loadBursaryApplications(
     .from("conference_bursary_applications")
     .select(
       "id, organization_id, contact_name, contact_email, notes, status, created_at, " +
-        "requested_at, covers_hotel, covers_travel, payment_preference, " +
+        "requested_at, covers_hotel, covers_travel, payment_preference, delegate_seat_id, hotel_nights, prepay_booked_at, " +
         "organizations(name, slug, province), delegate:contacts!conference_bursary_applications_delegate_contact_id_fkey(name, role_title)"
     )
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: true });
 
   if (error) throw new Error(`Failed to load bursary applications: ${error.message}`);
+  const rows = (data ?? []) as unknown as JoinedRow[];
 
-  return ((data ?? []) as unknown as JoinedRow[]).map((r) => ({
+  // The delegate is whoever holds the picked registration, read now: a swap on
+  // the org page moves the support without touching this row.
+  const seatIds = rows.map((r) => r.delegate_seat_id).filter((id): id is string => !!id);
+  const holderBySeat = new Map<string, string | null>();
+  if (seatIds.length > 0) {
+    const { seats } = await loadSeatHoldings(db, { conferenceId, seatIds });
+    for (const seat of seats) holderBySeat.set(seat.seatId, seat.holderName);
+  }
+
+  return rows.map((r) => ({
     id: r.id,
     organizationId: r.organization_id,
     organizationName: r.organizations?.name ?? "Unknown institution",
@@ -135,12 +157,18 @@ export async function loadBursaryApplications(
     daysWaiting: daysSince(r.created_at),
     request: r.requested_at
       ? {
-          delegateName: r.delegate?.name ?? null,
-          delegateTitle: r.delegate?.role_title ?? null,
+          delegateName: r.delegate_seat_id
+            ? holderBySeat.get(r.delegate_seat_id) ?? "registration not yet named"
+            : r.delegate?.name ?? null,
+          delegateTitle: r.delegate_seat_id ? null : r.delegate?.role_title ?? null,
           hotel: r.covers_hotel === true,
           travel: r.covers_travel === true,
           payment: r.payment_preference,
           submittedOn: formatDayMonth(r.requested_at, "America/Edmonton"),
+          submittedAt: r.requested_at,
+          hotelNights: r.hotel_nights,
+          prepayBookedAt: r.prepay_booked_at,
+          seatPicked: !!r.delegate_seat_id || !!r.delegate,
         }
       : null,
   }));

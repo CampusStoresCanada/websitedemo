@@ -11,6 +11,7 @@ import {
   claimWindowOpen,
   distanceAmountCents,
   isPayeeField,
+  applyClaimCaps,
   lineProblem,
   validatePayeeAnswer,
   type ExpenseLine,
@@ -164,9 +165,10 @@ export async function saveExpenseLine(params: {
   const gate = await editableClaim(params.claimId);
   if (!gate.ok) return { success: false, error: gate.error };
   const program = await loadExpenseProgram(gate.db, gate.row.program_id);
-  const category = program?.categories.find((c) => c.key === params.categoryKey);
+  const source = await resolveClaimSource(gate.row.source_table, gate.row.source_id);
+  const category = applyClaimCaps(program?.categories ?? [], source?.caps).find((c) => c.key === params.categoryKey);
   if (!category) return { success: false, error: "That expense isn't part of this program." };
-  const allowed = (await resolveClaimSource(gate.row.source_table, gate.row.source_id))?.allowedKeys();
+  const allowed = source?.allowedKeys();
   if (allowed && !allowed.includes(category.key)) return { success: false, error: `${category.label} isn't part of this claim.` };
 
   const whole = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n) : NaN);

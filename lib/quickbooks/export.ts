@@ -73,7 +73,14 @@ async function resolveManualConferenceInvoiceItemId(
 
 /**
  * Idempotently enqueue an invoice for QB export.
- * Called from the Stripe webhook handler on invoice paid events.
+ * Called from the Stripe webhook handler on invoice paid events, and when the
+ * CANCOLL invoice is issued (lib/actions/cancoll-billing.ts), which goes to
+ * QuickBooks before it is paid.
+ *
+ * An invoice already posted unpaid is opened again when it is paid, so the
+ * worker posts its payment. Without that, the paid event's insert hits the
+ * unique invoice_id, is skipped as a duplicate, and the payment never reaches
+ * QuickBooks.
  */
 export async function enqueueQBExport(invoiceId: string): Promise<void> {
   const db = createAdminClient();
@@ -83,8 +90,17 @@ export async function enqueueQBExport(invoiceId: string): Promise<void> {
     .select()
     .single();
 
-  // Unique constraint on invoice_id means duplicate inserts are silently skipped
-  if (error && error.code !== "23505") {
+  if (error?.code === "23505") {
+    const { error: reopenError } = await db
+      .from("qbo_export_queue")
+      .update({ status: "pending", retry_count: 0, next_retry_at: null, error_message: null })
+      .eq("invoice_id", invoiceId)
+      .eq("status", "completed")
+      .is("qbo_payment_id", null);
+    if (reopenError) console.error("[qbo] enqueueQBExport reopen failed:", reopenError);
+    return;
+  }
+  if (error) {
     console.error("[qbo] enqueueQBExport failed:", error);
   }
 }
@@ -399,39 +415,41 @@ async function processExportRow(
       .eq("id", org.id);
   }
 
-  // Skip if already has a QB invoice (re-run safety)
-  if (row.qbo_invoice_id) {
-    await markComplete(db, row, row.qbo_invoice_id, row.qbo_payment_id);
-    return;
+  // Already posted? The stored id covers a retry after the write-back landed.
+  // If QBO created the invoice and we crashed before recording it, the row
+  // still looks unposted and a retry would post a second one, so ask QBO
+  // directly, by the DocNumber derived from this invoice's own id.
+  let qbInvoiceId =
+    row.qbo_invoice_id ?? (await findQBDocumentByDocNumber("Invoice", qboDocNumber(invoice.id)))?.Id ?? null;
+
+  if (!qbInvoiceId) {
+    // An invoice may name its own item and tax code (the CANCOLL invoice: the
+    // registration's item at the conference's HST). Otherwise the type's item
+    // and the buyer's province, as before.
+    const meta = (invoice.metadata as Record<string, unknown> | null) ?? {};
+    const itemId =
+      typeof meta.qbo_item_id === "string" && meta.qbo_item_id
+        ? meta.qbo_item_id
+        : await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents, invoice.description);
+    const taxCodeRef =
+      typeof meta.qbo_tax_code_ref === "string" && meta.qbo_tax_code_ref
+        ? meta.qbo_tax_code_ref
+        : await resolveMembershipTaxCode(db, org);
+    const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef);
+    qbInvoiceId = (await createQBInvoice(invoiceInput)).Id;
   }
 
-  // The stored id above only covers a retry after the write-back landed. If
-  // QBO created the invoice and we crashed before recording it, the row still
-  // looks unposted — and retrying would post a second one. Ask QBO directly,
-  // using the DocNumber we derive from this invoice's own id.
-  const alreadyPosted = await findQBDocumentByDocNumber("Invoice", qboDocNumber(invoice.id));
-  if (alreadyPosted) {
-    await markComplete(db, row, alreadyPosted.Id, row.qbo_payment_id);
-    return;
-  }
-
-  // Map and create QB invoice
-  const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents, invoice.description);
-  const taxCodeRef = await resolveMembershipTaxCode(db, org);
-  const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef);
-  const qbInvoice = await createQBInvoice(invoiceInput);
-
-  let qbPaymentId: string | null = null;
-
-  // If invoice is already paid, create the payment record in QB
-  if (invoice.status === "paid" && invoice.paid_at) {
+  // Posted earlier, unpaid at the time (the CANCOLL invoice goes to QuickBooks
+  // when it is issued): now the payment, once.
+  let qbPaymentId: string | null = row.qbo_payment_id;
+  if (!qbPaymentId && invoice.status === "paid" && invoice.paid_at) {
     const depositAccountId = await resolveStripeDepositAccountId(db);
     const payment = await createQBPayment({
       CustomerRef: { value: customer.Id },
       TotalAmt: invoice.total_cents / 100,
       Line: [{
         Amount: invoice.total_cents / 100,
-        LinkedTxn: [{ TxnId: qbInvoice.Id, TxnType: "Invoice" }],
+        LinkedTxn: [{ TxnId: qbInvoiceId, TxnType: "Invoice" }],
       }],
       TxnDate: invoice.paid_at.slice(0, 10),
       CurrencyRef: { value: invoice.currency ?? "CAD" },
@@ -440,7 +458,7 @@ async function processExportRow(
     qbPaymentId = payment.Id;
   }
 
-  await markComplete(db, row, qbInvoice.Id, qbPaymentId);
+  await markComplete(db, row, qbInvoiceId, qbPaymentId);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -448,6 +466,14 @@ async function processExportRow(
 // ─────────────────────────────────────────────────────────────────
 
 function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, taxCodeRef: string) {
+  // A quantity and unit price when the invoice carries them (CANCOLL: N
+  // registrations at $299.00), else one unit of the whole amount.
+  const meta = ((invoice as { metadata?: unknown }).metadata as Record<string, unknown> | null) ?? {};
+  const qty = typeof meta.qbo_qty === "number" && meta.qbo_qty > 0 ? meta.qbo_qty : 1;
+  const unitCents =
+    typeof meta.qbo_unit_cents === "number" && meta.qbo_unit_cents * qty === invoice.amount_cents
+      ? meta.qbo_unit_cents
+      : invoice.amount_cents;
   return {
     CustomerRef: { value: customerQBId },
     DocNumber: qboDocNumber(invoice.id),
@@ -461,8 +487,8 @@ function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, 
         DetailType: "SalesItemLineDetail" as const,
         SalesItemLineDetail: {
           ItemRef: { value: itemId },
-          UnitPrice: invoice.amount_cents / 100,
-          Qty: 1,
+          UnitPrice: unitCents / 100,
+          Qty: unitCents === invoice.amount_cents ? 1 : qty,
           TaxCodeRef: { value: taxCodeRef },
         },
       },

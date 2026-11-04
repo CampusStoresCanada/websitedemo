@@ -30,6 +30,8 @@ import { ORG_TYPE } from "@/lib/constants/org-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "../constants/conference";
 import { loadSeatHoldings, type SeatHolding } from "./seats";
+import { isFundedOffer } from "./entity-pricing";
+import { loadBursaryDesignatedSeatIds } from "./bursary-access";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -98,16 +100,31 @@ export type PersonalTask = {
  * tasks costs one seat read rather than one per task.
  */
 export function personIdsInTaskScope(
-  seats: ReadonlyArray<Pick<SeatHolding, "entityId" | "holderPersonId">>,
-  entitiesById: ReadonlyMap<string, { kind: string }>,
-  scope: { scope_entity_id?: string | null; scope_entity_kind?: string | null }
+  seats: ReadonlyArray<Pick<SeatHolding, "seatId" | "entityId" | "holderPersonId">>,
+  entitiesById: ReadonlyMap<string, { kind: string; attributes?: Record<string, unknown> | null }>,
+  scope: { scope_entity_id?: string | null; scope_entity_kind?: string | null; scope_designation?: string | null },
+  /**
+   * The seats travel bursary requests point at (loadBursaryDesignatedSeatIds).
+   * Needed only for a `bursary_delegate` task; without it nobody is asked.
+   */
+  designatedSeatIds?: ReadonlySet<string>
 ): Set<string> | null {
-  if (!scope.scope_entity_id && !scope.scope_entity_kind) return null;
+  if (!scope.scope_entity_id && !scope.scope_entity_kind && !scope.scope_designation) return null;
   const inScope = new Set<string>();
   for (const seat of seats) {
     if (!seat.holderPersonId) continue;
     if (scope.scope_entity_id && seat.entityId !== scope.scope_entity_id) continue;
     if (scope.scope_entity_kind && entitiesById.get(seat.entityId)?.kind !== scope.scope_entity_kind) continue;
+    if (scope.scope_designation === "bursary_delegate") {
+      /**
+       * The holder of the seat a school's bursary request names. Not when that
+       * seat is the CANCOLL-funded registration: that delegate agrees to the
+       * CANCOLL consent instead, on its own task (Steve, 2026-11-02: "CANCOLL
+       * consent, or bursary Terms for non-CANCOLL").
+       */
+      if (!designatedSeatIds?.has(seat.seatId)) continue;
+      if (isFundedOffer(entitiesById.get(seat.entityId)?.attributes)) continue;
+    }
     inScope.add(seat.holderPersonId);
   }
   return inScope;
@@ -235,7 +252,7 @@ export async function loadPersonalTasks(
   const [{ data: checklists }, { data: person }] = await Promise.all([
     db
       .from("conference_checklists")
-      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind, deadline_at, ask_from, hardens_because)")
+      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_id, scope_entity_kind, scope_designation, deadline_at, ask_from, hardens_because)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
     db
@@ -251,20 +268,23 @@ export async function loadPersonalTasks(
     ((person?.contact_id as string | null) || (person?.canonical_person_id as string | null)) ??
     null;
 
-  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; check_entity_id: string | null; scope_entity_id: string | null; scope_entity_kind: string | null; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
+  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; check_entity_id: string | null; scope_entity_id: string | null; scope_entity_kind: string | null; scope_designation?: string | null; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   const allTasks = (checklists ?? []).flatMap(
     (cl) => (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? []
   );
   // This person's own seats, read once, and only when some task is scoped.
-  const mySeats = allTasks.some((t) => t.audience === "person" && (t.scope_entity_id || t.scope_entity_kind))
+  const mySeats = allTasks.some((t) => t.audience === "person" && (t.scope_entity_id || t.scope_entity_kind || t.scope_designation))
     ? await loadSeatHoldings(db, { conferenceId, holderPersonId: personId })
     : null;
+  const designated = allTasks.some((t) => t.audience === "person" && t.active && t.scope_designation)
+    ? await loadBursaryDesignatedSeatIds(db, conferenceId)
+    : undefined;
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
     for (const task of tasks) {
       if (!task.active || task.audience !== "person") continue;
-      const inScope = mySeats ? personIdsInTaskScope(mySeats.seats, mySeats.entitiesById, task) : null;
+      const inScope = mySeats ? personIdsInTaskScope(mySeats.seats, mySeats.entitiesById, task, designated) : null;
       if (inScope && !inScope.has(personId)) continue;
       // A task's own date beats the list's. Stronco's pre-show pricing ends 10
       // January and Encore's advance rate 18 January, on one list that said 11

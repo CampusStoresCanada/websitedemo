@@ -1,6 +1,7 @@
 import RegistrationsTable from "@/components/admin/conference/RegistrationsTable";
 import FundedConversionPanel from "@/components/admin/conference/FundedConversionPanel";
 import { getFundedConversionBoard } from "@/lib/actions/conference-funded-conversion";
+import { getCancollBillingSummary } from "@/lib/actions/cancoll-billing";
 
 export const metadata = { title: "Conference Registrations | Admin" };
 
@@ -11,10 +12,10 @@ export default async function ConferenceRegistrationsPage({
 }) {
   const { id } = await params;
   // Only a conference with a CANCOLL-funded registration shows the panel.
-  const board = await getFundedConversionBoard(id);
+  const [board, billing] = await Promise.all([getFundedConversionBoard(id), getCancollBillingSummary(id)]);
   return (
     <>
-      {board.success && board.data && <FundedConversionPanel conferenceId={id} board={board.data} />}
+      {board.success && board.data && <FundedConversionPanel conferenceId={id} board={board.data} billing={billing.success ? billing.data : null} />}
       <RegistrationsTable conferenceId={id} />
     </>
   );

@@ -17,7 +17,8 @@ export type BursaryStatus = (typeof BURSARY_STATUSES)[number];
 
 /** Plain labels — what was recorded, never why. */
 export const BURSARY_STATUS_LABELS: Record<BursaryStatus, string> = {
-  submitted: "Awaiting review",
+  // No approval step since 2026-11-02: a submitted request is in.
+  submitted: "Received",
   approved: "Approved",
   denied: "Declined",
   fulfilled: "Fulfilled",

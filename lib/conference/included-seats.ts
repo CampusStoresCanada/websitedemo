@@ -20,6 +20,33 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * (somebody else's registration) are never taken.
  */
 
+/**
+ * A registration switched to the CANCOLL-funded one sits on the $0 purchase
+ * the switch made (convert_registration_to_funded), but its reception and
+ * offsite seats stay on the purchase the school paid for. Without following
+ * the switch back, naming a new delegate left both with the old one.
+ */
+async function convertedFromPurchaseIds(db: AdminClient, purchaseId: string): Promise<string[]> {
+  const { data: conversion } = await db
+    .from("conference_funded_conversions")
+    .select("source_order_id, from_entity_id")
+    .eq("funded_purchase_id", purchaseId)
+    .maybeSingle();
+  if (!conversion?.source_order_id) return [];
+  const { data: items } = await db
+    .from("conference_order_items")
+    .select("id")
+    .eq("order_id", conversion.source_order_id);
+  const itemIds = (items ?? []).map((i) => i.id as string);
+  if (itemIds.length === 0) return [];
+  const { data: purchases } = await db
+    .from("entity_purchases")
+    .select("id")
+    .in("order_item_id", itemIds)
+    .eq("offer_entity_id", conversion.from_entity_id);
+  return (purchases ?? []).map((p) => p.id as string);
+}
+
 async function siblingEventSeats(
   db: AdminClient,
   conferenceId: string,
@@ -34,10 +61,11 @@ async function siblingEventSeats(
     .eq("id", registration.balanceId)
     .maybeSingle();
   if (!balance?.purchase_id) return [];
+  const purchaseIds = [balance.purchase_id as string, ...(await convertedFromPurchaseIds(db, balance.purchase_id as string))];
   const { data: balances } = await db
     .from("entity_balances")
     .select("id")
-    .eq("purchase_id", balance.purchase_id as string);
+    .in("purchase_id", purchaseIds);
   const balanceIds = (balances ?? []).map((b) => b.id as string);
   if (balanceIds.length === 0) return [];
   // Same org as the registration too: a comp purchase (the board's) spans

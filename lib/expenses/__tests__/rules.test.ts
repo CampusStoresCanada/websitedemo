@@ -171,3 +171,19 @@ describe("the claim window", () => {
     expect(claimWindowOpen(opens, closes, new Date("2027-03-07T08:00:00Z"))).toBe(false);
   });
 });
+
+describe("applyClaimCaps", async () => {
+  const { applyClaimCaps } = await import("../rules");
+  it("takes the lower of the program cap and the claim's own", () => {
+    const [capped] = applyClaimCaps([{ ...hotel, capCents: 88637 }], { hotel: 66478 });
+    expect(capped.capCents).toBe(66478);
+    const [kept] = applyClaimCaps([{ ...hotel, capCents: 50000 }], { hotel: 66477 });
+    expect(kept.capCents).toBe(50000);
+  });
+  it("caps a slot the program left open, and leaves others alone", () => {
+    const [a] = applyClaimCaps([airfare], { hotel: 66477 });
+    expect(a.capCents).toBeNull();
+    const [b] = applyClaimCaps([airfare], { airfare: 1000 });
+    expect(b.capCents).toBe(1000);
+  });
+});

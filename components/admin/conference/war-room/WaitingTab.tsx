@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { submitFlag } from "@/lib/actions/submit-flag";
 import { resolveFlag } from "@/lib/actions/flags";
 import { decideSwapCapIncreaseRequest } from "@/lib/actions/conference-swaps";
-import { setBursaryApplicationStatus } from "@/lib/actions/conference-bursary";
+import { markBursaryPrepayBooked, setBursaryApplicationStatus } from "@/lib/actions/conference-bursary";
 import type { WaitingItem, WaitingOnUs } from "@/lib/conference/waiting-on-us";
 import ConfirmAction from "@/components/ui/ConfirmAction";
 
@@ -97,6 +97,7 @@ const KIND_LABEL: Record<WaitingItem["kind"], string> = {
   ask: "Ask",
   swap_cap: "Meeting swaps",
   bursary: "Travel bursary",
+  bursary_prepay: "Travel bursary: pay in advance",
 };
 
 /** One person waiting, and the actions that answer them. */
@@ -129,20 +130,21 @@ function WaitingRow({ item }: { item: WaitingItem }) {
           onConfirm={async () => after(await decideSwapCapIncreaseRequest(item.id, "denied"))}
         />
       </>
+    ) : item.kind === "bursary_prepay" ? (
+      <ConfirmAction
+        label="Booked"
+        consequence={`Records that CSC has booked what ${item.org ?? name} asked us to pay for in advance. No email is sent.`}
+        onConfirm={async () => after(await markBursaryPrepayBooked({ applicationId: item.id }))}
+      />
     ) : (
-      <>
-        <ConfirmAction
-          label="Approve"
-          consequence={`Records the travel bursary for ${item.org ?? name} as approved. No email is sent.`}
-          onConfirm={async () => after(await setBursaryApplicationStatus({ applicationId: item.id, status: "approved" }))}
-        />
-        <ConfirmAction
-          label="Decline"
-          tone="danger"
-          consequence={`Records the travel bursary for ${item.org ?? name} as declined. No email is sent.`}
-          onConfirm={async () => after(await setBursaryApplicationStatus({ applicationId: item.id, status: "denied" }))}
-        />
-      </>
+      /* The board's answer to a request for more help. Their bursary stands
+         either way, so this never declines it: tell them the answer yourself.
+         To decline a school that isn't eligible, use the bursary widget. */
+      <ConfirmAction
+        label="Answered"
+        consequence={`Records that the board has answered ${item.org ?? name}'s request for more help. No email is sent: tell them what was decided.`}
+        onConfirm={async () => after(await setBursaryApplicationStatus({ applicationId: item.id, status: "approved" }))}
+      />
     );
 
   return (

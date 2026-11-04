@@ -114,15 +114,15 @@ describe("personIdsInTaskScope", async () => {
   const FUNDED = "funded-registration";
   const FULL = "full-registration";
   const entities = new Map([
-    [FUNDED, { kind: "registration" }],
+    [FUNDED, { kind: "registration", attributes: { funded_by: "cancoll", funds_offer_id: FULL } }],
     [FULL, { kind: "registration" }],
     ["booth-109", { kind: "booth" }],
   ]);
   const seats = [
-    { entityId: FUNDED, holderPersonId: "jackie" },
-    { entityId: FULL, holderPersonId: "colleague" },
-    { entityId: FULL, holderPersonId: null },
-    { entityId: "booth-109", holderPersonId: "vendor" },
+    { seatId: "s-funded", entityId: FUNDED, holderPersonId: "jackie" },
+    { seatId: "s-full", entityId: FULL, holderPersonId: "colleague" },
+    { seatId: "s-empty", entityId: FULL, holderPersonId: null },
+    { seatId: "s-booth", entityId: "booth-109", holderPersonId: "vendor" },
   ];
 
   it("returns null for a task with no scope, which is asked of everyone", () => {
@@ -134,8 +134,29 @@ describe("personIdsInTaskScope", async () => {
   });
 
   it("follows the seat when it is reassigned", () => {
-    const moved = [{ entityId: FUNDED, holderPersonId: "colleague" }];
+    const moved = [{ seatId: "s-funded", entityId: FUNDED, holderPersonId: "colleague" }];
     expect([...personIdsInTaskScope(moved, entities, { scope_entity_id: FUNDED })!]).toEqual(["colleague"]);
+  });
+
+  /**
+   * The travel bursary delegate: whoever holds the seat a school's request
+   * names. Not the holder of the CANCOLL-funded seat, who agrees to the CANCOLL
+   * consent instead (Steve, 2026-11-02).
+   */
+  it("asks the holder of a bursary-designated seat, and follows a swap", () => {
+    const scope = { scope_designation: "bursary_delegate" };
+    expect(personIdsInTaskScope(seats, entities, scope, new Set(["s-full"]))).toEqual(new Set(["colleague"]));
+    const swapped = [{ seatId: "s-full", entityId: FULL, holderPersonId: "new-buyer" }];
+    expect(personIdsInTaskScope(swapped, entities, scope, new Set(["s-full"]))).toEqual(new Set(["new-buyer"]));
+  });
+
+  it("leaves a designated CANCOLL-funded seat to the CANCOLL consent", () => {
+    const scope = { scope_designation: "bursary_delegate" };
+    expect(personIdsInTaskScope(seats, entities, scope, new Set(["s-funded"]))).toEqual(new Set());
+  });
+
+  it("asks nobody when the designated seats were not loaded", () => {
+    expect(personIdsInTaskScope(seats, entities, { scope_designation: "bursary_delegate" })).toEqual(new Set());
   });
 
   it("scopes by kind, and ANDs a kind with a named thing", () => {

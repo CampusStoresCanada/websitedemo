@@ -18,15 +18,19 @@ import { loadSeatHoldings } from "@/lib/conference/seats";
  *               (flags; loadConferenceAsks)
  *   swap_cap  — a delegate asking for more meeting swaps than the cap allows
  *               (swap_cap_increase_requests, status "requested")
- *   bursary   — a travel bursary application awaiting a decision
- *               (conference_bursary_applications, status "submitted")
+ *   bursary   — a travel bursary request that asked for more help, which the
+ *               board answers (conference_bursary_applications, status
+ *               "submitted", with notes). A plain request waits on nobody:
+ *               there is no approval step since 2026-11-02.
+ *   bursary_prepay — a request that asked CSC to pay in advance, until staff
+ *               mark the hotel and travel booked (prepay_booked_at).
  *
  * ⚠️ Travel-window exceptions are NOT here: they live in
  * conference_registrations, which nothing has written since registrations moved
  * to seats (0 rows, 2026-10-26). A queue item nobody can create is a dead row.
  */
 export type WaitingItem = {
-  kind: "ask" | "swap_cap" | "bursary";
+  kind: "ask" | "swap_cap" | "bursary" | "bursary_prepay";
   id: string;
   /** Who is waiting, and for whom they speak. */
   who: string | null;
@@ -109,17 +113,41 @@ export async function loadWaitingOnUs(conferenceId: string): Promise<WaitingOnUs
   }
 
   for (const app of bursaries) {
-    if (app.status !== "submitted") continue;
-    items.push({
-      kind: "bursary",
-      id: app.id,
-      who: app.contactName,
-      org: app.organizationName,
-      what: "Applied for a travel bursary",
-      details: [app.contactEmail, app.province, app.notes].filter(Boolean).join(" · ") || null,
-      since: app.createdAt,
-      urgent: false,
-    });
+    // Interest only, never submitted: that waits on the school, not on us.
+    if (!app.request) continue;
+    if (app.status === "submitted" && app.notes) {
+      items.push({
+        kind: "bursary",
+        id: app.id,
+        who: app.contactName,
+        org: app.organizationName,
+        what: "Asked for more travel help than the bursary covers",
+        details: [app.notes, app.contactEmail, app.province].filter(Boolean).join(" · ") || null,
+        since: app.request.submittedAt,
+        urgent: false,
+      });
+    }
+    // "Something clearly should tell us that they need us to pay in advance"
+    // (Steve, 2026-11-02).
+    if (app.request.payment === "prepay" && !app.request.prepayBookedAt && app.status !== "denied") {
+      items.push({
+        kind: "bursary_prepay",
+        id: app.id,
+        who: app.request.delegateName ?? app.contactName,
+        org: app.organizationName,
+        what: `Book ${[app.request.hotel && "hotel", app.request.travel && "travel"].filter(Boolean).join(" and ")} for ${app.organizationName}`,
+        details:
+          [
+            app.request.hotel && app.request.hotelNights ? `${app.request.hotelNights} hotel nights` : null,
+            app.contactEmail,
+            app.province,
+          ]
+            .filter(Boolean)
+            .join(" · ") || null,
+        since: app.request.submittedAt,
+        urgent: false,
+      });
+    }
   }
 
   // Urgent first, then whoever has waited longest.

@@ -46,12 +46,17 @@ export default async function BursaryRequestPage({
       <main className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="text-xl font-semibold text-gray-900">Travel support</h1>
         <p className="mt-2 text-sm text-gray-600">Travel support is for CSC member institutions.</p>
+        <p className="mt-2 text-sm">
+          <a href={`/conference/${year}/${edition}/terms#travel_bursary_terms`} className="text-[#163D6D] underline">
+            Read the Travel Bursary Terms
+          </a>
+        </p>
       </main>
     );
   }
 
   const request = await getBursaryRequest({ conferenceId: conference.id, organizationId: school.id });
-  // Once the request is approved, the expense claim follows it on this page.
+  // Once the request is submitted, the expense claim follows it on this page.
   const claimRef = await getBursaryClaim({ conferenceId: conference.id, organizationId: school.id });
   const claim =
     claimRef.success && claimRef.data ? await getExpenseClaim(claimRef.data.claimId) : null;
@@ -60,8 +65,18 @@ export default async function BursaryRequestPage({
     <main className="mx-auto max-w-3xl px-4 py-10">
       <p className="text-sm text-gray-500">{conference.name}</p>
       <h1 className="text-2xl font-semibold text-gray-900">Travel support for {school.name}</h1>
+      <p className="mt-1 text-sm">
+        <a href={`/conference/${year}/${edition}/terms#travel_bursary_terms`} className="text-[#163D6D] underline">
+          Read the full Travel Bursary Terms
+        </a>
+      </p>
       {request.success ? (
-        <BursaryRequestForm conferenceId={conference.id} organizationId={school.id} view={request.data} />
+        <BursaryRequestForm
+          conferenceId={conference.id}
+          organizationId={school.id}
+          view={request.data}
+          registerHref={`/conference/${year}/${edition}/register`}
+        />
       ) : (
         <p className="mt-4 text-sm text-gray-600">{request.error}</p>
       )}

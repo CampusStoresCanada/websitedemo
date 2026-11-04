@@ -1241,6 +1241,7 @@ export async function loadMeetingsOverview(
           orgName: first.orgName,
           meetingCount: first.meetingCount,
           dayCount: first.dayCount,
+          seatId: first.seatId,
         });
         if (variables) {
           const { subject, bodyHtml } = renderTemplateContent(template, {

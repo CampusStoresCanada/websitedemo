@@ -23,3 +23,26 @@ export async function canFillBursaryRequest(
   return (count ?? 0) > 0;
 }
 
+
+/**
+ * The registration seats this conference's travel bursary requests point at:
+ * one per school, whoever holds it is the supported delegate. Only submitted
+ * requests that were not declined.
+ *
+ * A seat id, never a person: a swap on the org page moves the support with the
+ * seat, as it moves the CANCOLL consent with the funded registration.
+ */
+export async function loadBursaryDesignatedSeatIds(
+  db: { from: (table: string) => { select: (columns: string) => any } }, // eslint-disable-line @typescript-eslint/no-explicit-any
+  conferenceId: string
+): Promise<Set<string>> {
+  const { data, error } = await db
+    .from("conference_bursary_applications")
+    .select("delegate_seat_id, status, requested_at")
+    .eq("conference_id", conferenceId)
+    .not("delegate_seat_id", "is", null)
+    .not("requested_at", "is", null)
+    .neq("status", "denied");
+  if (error) throw new Error(`Could not load travel bursary delegates: ${error.message}`);
+  return new Set(((data ?? []) as Array<{ delegate_seat_id: string }>).map((r) => r.delegate_seat_id));
+}

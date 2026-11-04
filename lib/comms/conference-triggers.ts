@@ -226,6 +226,8 @@ export async function triggerConferenceScheduleReady(params: {
   /** Counted from the run being announced — see sendSchedulesForRun. */
   meetingCount: number;
   dayCount: number;
+  /** The delegate seat being told, for the supported-delegate attendance terms. */
+  seatId?: string;
 }): Promise<void> {
   const { conferenceId, runId, personKey, attendeeName, attendeeEmail } = params;
   const variableValues = await scheduleReadyVariables(params);
@@ -256,6 +258,7 @@ export async function scheduleReadyVariables(params: {
   orgName: string;
   meetingCount: number;
   dayCount: number;
+  seatId?: string;
 }): Promise<Record<string, string> | null> {
   const { db, conferenceId, attendeeName, orgName, meetingCount, dayCount } = params;
 
@@ -302,5 +305,37 @@ export async function scheduleReadyVariables(params: {
     meeting_count: String(meetingCount),
     day_count: String(dayCount),
     schedule_url: `${appUrl}/me#my_schedule`,
+    attendance_terms: params.seatId ? await supportedDelegateTerms(db, conferenceId, params.seatId, orgName) : "",
   };
+}
+
+/**
+ * The attendance terms for the holder of this seat when it is a supported one:
+ * the CANCOLL-funded registration, or the seat a travel bursary request names.
+ * Read from the seat every time, so a swap moves them with it.
+ */
+async function supportedDelegateTerms(
+  db: AdminClient,
+  conferenceId: string,
+  seatId: string,
+  orgName: string
+): Promise<string> {
+  const [{ loadSeatHoldings }, { isFundedOffer }, { loadBursaryDesignatedSeatIds }, { attendanceTermsHtml }] =
+    await Promise.all([
+      import("@/lib/conference/seats"),
+      import("@/lib/conference/entity-pricing"),
+      import("@/lib/conference/bursary-access"),
+      import("@/lib/conference/bursary-request"),
+    ]);
+  const [{ seats, entitiesById }, designated] = await Promise.all([
+    loadSeatHoldings(db, { conferenceId, seatIds: [seatId] }),
+    loadBursaryDesignatedSeatIds(db, conferenceId),
+  ]);
+  const seat = seats[0];
+  if (!seat) return "";
+  return attendanceTermsHtml({
+    funded: isFundedOffer(entitiesById.get(seat.entityId)?.attributes),
+    designated: designated.has(seatId),
+    institution: orgName,
+  });
 }

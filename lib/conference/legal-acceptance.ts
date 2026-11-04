@@ -13,6 +13,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Database } from "@/lib/database.types";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import {
   isLegallyExempt,
@@ -22,6 +23,31 @@ import {
 } from "./legal-policies";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
+
+type LegalVersionRow = Database["public"]["Tables"]["conference_legal_versions"]["Row"];
+
+/**
+ * The version of each conference document in force now: the highest version of
+ * each document_type whose effective_at has passed. The one place that answers
+ * it, for the agreement flows and the public terms page alike.
+ */
+export async function loadCurrentLegalVersions(
+  db: AdminClient,
+  conferenceId: string
+): Promise<{ data: LegalVersionRow[]; error: string | null }> {
+  const { data, error } = await db
+    .from("conference_legal_versions")
+    .select("*")
+    .eq("conference_id", conferenceId)
+    .lte("effective_at", new Date().toISOString())
+    .order("version", { ascending: false });
+  if (error) return { data: [], error: error.message };
+  const latestByType = new Map<string, LegalVersionRow>();
+  for (const doc of data ?? []) {
+    if (!latestByType.has(doc.document_type)) latestByType.set(doc.document_type, doc);
+  }
+  return { data: [...latestByType.values()], error: null };
+}
 
 /**
  * Load the policy-targeting graph for a conference: for each `policy` entity,

@@ -3934,6 +3934,10 @@ export type Database = {
       }
       conference_bursary_applications: {
         Row: {
+          delegate_seat_id: string | null
+          hotel_nights: number | null
+          prepay_booked_at: string | null
+          prepay_booked_by: string | null
           conference_id: string
           contact_email: string
           contact_name: string
@@ -3953,6 +3957,10 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          delegate_seat_id?: string | null
+          hotel_nights?: number | null
+          prepay_booked_at?: string | null
+          prepay_booked_by?: string | null
           conference_id: string
           contact_email: string
           contact_name: string
@@ -3972,6 +3980,10 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          delegate_seat_id?: string | null
+          hotel_nights?: number | null
+          prepay_booked_at?: string | null
+          prepay_booked_by?: string | null
           conference_id?: string
           contact_email?: string
           contact_name?: string
@@ -4226,6 +4238,7 @@ export type Database = {
       }
       conference_checklist_tasks: {
         Row: {
+          scope_designation: string | null
           active: boolean
           ask_from: string | null
           audience: string
@@ -4246,6 +4259,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          scope_designation?: string | null
           active?: boolean
           ask_from?: string | null
           audience?: string
@@ -4266,6 +4280,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          scope_designation?: string | null
           active?: boolean
           ask_from?: string | null
           audience?: string
@@ -4717,6 +4732,10 @@ export type Database = {
       }
       conference_instances: {
         Row: {
+          bursary_designation_closes_at: string | null
+          bursary_four_night_org_ids: string[]
+          bursary_hotel_night_cents: number | null
+          bursary_hotel_tax_bps: number | null
           badge_preprint_at: string | null
           badge_print_stock: Json | null
           badge_scan_rules: Json | null
@@ -4761,6 +4780,10 @@ export type Database = {
           year: number
         }
         Insert: {
+          bursary_designation_closes_at?: string | null
+          bursary_four_night_org_ids?: string[]
+          bursary_hotel_night_cents?: number | null
+          bursary_hotel_tax_bps?: number | null
           badge_preprint_at?: string | null
           badge_print_stock?: Json | null
           badge_scan_rules?: Json | null
@@ -4805,6 +4828,10 @@ export type Database = {
           year: number
         }
         Update: {
+          bursary_designation_closes_at?: string | null
+          bursary_four_night_org_ids?: string[]
+          bursary_hotel_night_cents?: number | null
+          bursary_hotel_tax_bps?: number | null
           badge_preprint_at?: string | null
           badge_print_stock?: Json | null
           badge_scan_rules?: Json | null

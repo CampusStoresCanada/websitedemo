@@ -1,6 +1,7 @@
 import type { AuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canFillBursaryRequest } from "@/lib/conference/bursary-access";
+import { hotelCapCents } from "@/lib/conference/bursary-request";
 
 /**
  * What the record that entitled a claim has to say about it.
@@ -19,6 +20,8 @@ export type ClaimSource = {
   allowedKeys: () => readonly string[] | null;
   /** The page the claimant files this claim on, from the site root. Emails link to it. */
   path: string;
+  /** This claim's own caps by slot, below the program's (applyClaimCaps). */
+  caps?: Record<string, number>;
 };
 
 type SourceResolver = (sourceId: string) => Promise<ClaimSource | null>;
@@ -32,7 +35,9 @@ const SOURCES: Record<string, SourceResolver> = {
   conference_bursary_applications: async (sourceId) => {
     const { data } = await createAdminClient()
       .from("conference_bursary_applications")
-      .select("conference_id, organization_id, covers_hotel, covers_travel, conference:conference_instances(year, edition_code)")
+      .select(
+        "conference_id, organization_id, covers_hotel, covers_travel, hotel_nights, conference:conference_instances(year, edition_code, bursary_hotel_night_cents, bursary_hotel_tax_bps)"
+      )
       .eq("id", sourceId)
       .maybeSingle();
     if (!data) return null;
@@ -41,6 +46,17 @@ const SOURCES: Record<string, SourceResolver> = {
       canEdit: (ctx) => canFillBursaryRequest(ctx, data.conference_id, data.organization_id),
       allowedKeys: () => keys,
       path: data.conference ? `/conference/${data.conference.year}/${data.conference.edition_code}/bursary` : "/",
+      // Hotel: the school's nights at the nightly rate (Steve, 2026-11-02:
+      // three, or four when the delegate can't get home Thursday night).
+      caps: (() => {
+        const cap = data.hotel_nights
+          ? hotelCapCents(data.hotel_nights, {
+              nightCents: data.conference?.bursary_hotel_night_cents ?? null,
+              taxBps: data.conference?.bursary_hotel_tax_bps ?? null,
+            })
+          : null;
+        return cap === null ? undefined : { hotel: cap };
+      })(),
     };
   },
 };
