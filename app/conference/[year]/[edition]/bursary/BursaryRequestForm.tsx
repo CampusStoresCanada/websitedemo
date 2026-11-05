@@ -19,6 +19,7 @@ import {
   type BursaryRequestField,
 } from "@/lib/conference/bursary-request";
 import ContactEditModal from "@/components/org/ContactEditModal";
+import Modal from "@/components/ui/Modal";
 
 /**
  * The request itself. Each answer saves as it is given, the way the
@@ -53,26 +54,33 @@ export default function BursaryRequestForm({
 
   const [addingPerson, setAddingPerson] = useState(false);
 
-  const chooseRecipient = (contactId: string, newName?: string) => {
-    if (!contactId) return;
+  /* Someone else holds the CANCOLL-covered registration: say who loses it, in
+     the site's modal, before anything moves. */
+  const [replacing, setReplacing] = useState<{ contactId: string; chosen: string; current: string } | null>(null);
+  const pendingName = useRef<string | null>(null);
+
+  const nameRecipient = (contactId: string, replace: boolean) => {
     setError(null);
     setSaved(false);
     startTransition(async () => {
       await saveQueue.current;
-      let result = await setBursaryRecipient({ conferenceId, organizationId, contactId });
-      if (result.success && result.data.confirmReplacing) {
-        const chosen = newName ?? view.people.find((p) => p.contactId === contactId)?.name ?? "this person";
-        const ok = window.confirm(
-          `${result.data.confirmReplacing} holds your CANCOLL-covered registration now. Name ${chosen} instead? ` +
-            `${result.data.confirmReplacing} will no longer have that registration.`
-        );
-        if (!ok) return;
-        result = await setBursaryRecipient({ conferenceId, organizationId, contactId, replace: true });
-      }
+      const result = await setBursaryRecipient({ conferenceId, organizationId, contactId, replace });
       if (!result.success) return setError(result.error);
+      if (result.data.confirmReplacing) {
+        const chosen = view.people.find((p) => p.contactId === contactId)?.name ?? pendingName.current ?? "this person";
+        setReplacing({ contactId, chosen, current: result.data.confirmReplacing });
+        return;
+      }
+      setReplacing(null);
       setSaved(true);
       router.refresh();
     });
+  };
+
+  const chooseRecipient = (contactId: string, newName?: string) => {
+    if (!contactId) return;
+    pendingName.current = newName ?? null;
+    nameRecipient(contactId, false);
   };
 
   const askRefund = (seatId: string) => {
@@ -203,6 +211,44 @@ export default function BursaryRequestForm({
           }}
         />
       )}
+      <Modal
+        open={replacing !== null}
+        onClose={() => setReplacing(null)}
+        title="Change who holds your CANCOLL registration?"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setReplacing(null)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => replacing && nameRecipient(replacing.contactId, true)}
+              className="rounded-md bg-[#163D6D] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {isPending ? "Updating…" : `Name ${replacing?.chosen ?? ""}`}
+            </button>
+          </div>
+        }
+      >
+        {replacing && (
+          <div className="space-y-2 px-5 py-4 text-sm text-gray-800">
+            <p>
+              {replacing.current} holds your CANCOLL-covered registration now. Naming {replacing.chosen} moves it to them,
+              with the travel support.
+            </p>
+            <p>
+              {replacing.current} will no longer have that registration. If they&apos;re still coming, register them
+              separately.
+            </p>
+          </div>
+        )}
+      </Modal>
       {view.openRegistrations.map((open) => (
         <div key={open.seatId} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
           <p className="font-medium">You have an open {open.entityName} that nobody holds.</p>
