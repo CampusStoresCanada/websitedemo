@@ -18,6 +18,7 @@ import {
   type BursaryRequestAnswers,
   type BursaryRequestField,
 } from "@/lib/conference/bursary-request";
+import ContactEditModal from "@/components/org/ContactEditModal";
 
 /**
  * The request itself. Each answer saves as it is given, the way the
@@ -50,7 +51,9 @@ export default function BursaryRequestForm({
   const gaps = bursaryRequestGaps(answers);
   const [refundAsked, setRefundAsked] = useState<Set<string>>(new Set());
 
-  const chooseRecipient = (contactId: string) => {
+  const [addingPerson, setAddingPerson] = useState(false);
+
+  const chooseRecipient = (contactId: string, newName?: string) => {
     if (!contactId) return;
     setError(null);
     setSaved(false);
@@ -58,7 +61,7 @@ export default function BursaryRequestForm({
       await saveQueue.current;
       let result = await setBursaryRecipient({ conferenceId, organizationId, contactId });
       if (result.success && result.data.confirmReplacing) {
-        const chosen = view.people.find((p) => p.contactId === contactId)?.name ?? "this person";
+        const chosen = newName ?? view.people.find((p) => p.contactId === contactId)?.name ?? "this person";
         const ok = window.confirm(
           `${result.data.confirmReplacing} holds your CANCOLL-covered registration now. Name ${chosen} instead? ` +
             `${result.data.confirmReplacing} will no longer have that registration.`
@@ -133,10 +136,16 @@ export default function BursaryRequestForm({
       {view.people.length === 0 ? (
         <p className="text-gray-600">
           Your institution has no contacts on its page yet.{" "}
+          {view.canDesignate && (
+            <button type="button" onClick={() => setAddingPerson(true)} className="font-medium text-[#163D6D] underline">
+              Add the person
+            </button>
+          )}
+          {" "}or{" "}
           <a href={registerHref} className="font-medium text-[#163D6D] underline">
-            Register for the conference
+            register for the conference
           </a>
-          , then come back here. You can send your request now and choose the person later.
+          . You can send your request now and choose the person later.
         </p>
       ) : (
         <>
@@ -155,6 +164,16 @@ export default function BursaryRequestForm({
               </option>
             ))}
           </select>
+          {view.canDesignate && (
+            <button
+              type="button"
+              onClick={() => setAddingPerson(true)}
+              disabled={isPending}
+              className="block text-left font-medium text-[#163D6D] underline disabled:opacity-50"
+            >
+              Add someone who isn&apos;t listed
+            </button>
+          )}
           {isPending && <p className="text-gray-500">Updating who the support is for…</p>}
           <p className="text-gray-600">
             {view.hasFundedRegistration
@@ -170,6 +189,19 @@ export default function BursaryRequestForm({
             ? `${recipient.name} has agreed to the Travel Bursary Terms.`
             : `${recipient.name} needs to agree to the Travel Bursary Terms on their own conference page. We've asked them to. Only the person taking the bursary can agree.`}
         </p>
+      )}
+      {/* The org page's own "Add contact" form (as PersonPickerModal reuses it):
+          a new contact, then named straight to the support. */}
+      {addingPerson && (
+        <ContactEditModal
+          contact={null}
+          organizationId={organizationId}
+          onClose={() => setAddingPerson(false)}
+          onCreated={(created) => {
+            setAddingPerson(false);
+            chooseRecipient(created.id, created.name);
+          }}
+        />
       )}
       {view.openRegistrations.map((open) => (
         <div key={open.seatId} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
