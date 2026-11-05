@@ -177,7 +177,7 @@ export default function ExpenseClaimForm({ view }: { view: ExpenseClaimView }) {
             <fieldset disabled={!editable} className="mt-3 grid gap-3 sm:grid-cols-2">
               {c.measure === "distance" ? (
                 <label className="block">
-                  Kilometres, round trip
+                  Total kilometres
                   <input
                     inputMode="decimal"
                     defaultValue={line.distanceKm ?? ""}

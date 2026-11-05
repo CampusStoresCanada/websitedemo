@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { safeNextPath } from "@/lib/auth/login-redirect";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -22,7 +23,7 @@ function CallbackHandler() {
       if (error) {
         setError(true);
       } else {
-        window.location.assign(next.startsWith("/") ? next : "/");
+        window.location.assign(safeNextPath(next, "/"));
       }
     });
   }, [searchParams]);

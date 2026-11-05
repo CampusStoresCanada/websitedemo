@@ -139,9 +139,9 @@ describe("personIdsInTaskScope", async () => {
   });
 
   /**
-   * The travel bursary delegate: whoever holds the seat a school's request
-   * names. Not the holder of the CANCOLL-funded seat, who agrees to the CANCOLL
-   * consent instead (Steve, 2026-11-02).
+   * The travel bursary delegate: whoever holds the school's supported seat.
+   * On the CANCOLL-funded seat too: only the person taking the bursary can
+   * agree to its terms (Steve, 2026-11-05).
    */
   it("asks the holder of a bursary-designated seat, and follows a swap", () => {
     const scope = { scope_designation: "bursary_delegate" };
@@ -150,9 +150,10 @@ describe("personIdsInTaskScope", async () => {
     expect(personIdsInTaskScope(swapped, entities, scope, new Set(["s-full"]))).toEqual(new Set(["new-buyer"]));
   });
 
-  it("leaves a designated CANCOLL-funded seat to the CANCOLL consent", () => {
+  it("asks the holder of a designated CANCOLL-funded seat as well", () => {
     const scope = { scope_designation: "bursary_delegate" };
-    expect(personIdsInTaskScope(seats, entities, scope, new Set(["s-funded"]))).toEqual(new Set());
+    const holder = seats.find((s) => s.seatId === "s-funded")?.holderPersonId;
+    expect(personIdsInTaskScope(seats, entities, scope, new Set(["s-funded"]))).toEqual(new Set([holder]));
   });
 
   it("asks nobody when the designated seats were not loaded", () => {

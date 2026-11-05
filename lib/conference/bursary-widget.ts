@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatDayMonth, parseSupabaseTimestamp, isValidDate } from "@/lib/time/supabase-timestamp";
 import { abbreviateProvince } from "@/lib/constants/provinces";
-import { loadSeatHoldings } from "@/lib/conference/seats";
+import { loadSupportedSeats } from "@/lib/conference/bursary-access";
 
 /**
  * The travel-bursary review queue, for the admin console widget.
@@ -133,14 +133,10 @@ export async function loadBursaryApplications(
   if (error) throw new Error(`Failed to load bursary applications: ${error.message}`);
   const rows = (data ?? []) as unknown as JoinedRow[];
 
-  // The delegate is whoever holds the picked registration, read now: a swap on
-  // the org page moves the support without touching this row.
-  const seatIds = rows.map((r) => r.delegate_seat_id).filter((id): id is string => !!id);
-  const holderBySeat = new Map<string, string | null>();
-  if (seatIds.length > 0) {
-    const { seats } = await loadSeatHoldings(db, { conferenceId, seatIds });
-    for (const seat of seats) holderBySeat.set(seat.seatId, seat.holderName);
-  }
+  // The delegate is whoever holds the school's supported registration, read
+  // now (bursary-access.ts): a swap on the org page moves the support without
+  // touching this row.
+  const supported = await loadSupportedSeats(db, conferenceId);
 
   return rows.map((r) => ({
     id: r.id,
@@ -157,10 +153,10 @@ export async function loadBursaryApplications(
     daysWaiting: daysSince(r.created_at),
     request: r.requested_at
       ? {
-          delegateName: r.delegate_seat_id
-            ? holderBySeat.get(r.delegate_seat_id) ?? "registration not yet named"
+          delegateName: supported.has(r.organization_id)
+            ? supported.get(r.organization_id)?.holderName ?? "registration not yet named"
             : r.delegate?.name ?? null,
-          delegateTitle: r.delegate_seat_id ? null : r.delegate?.role_title ?? null,
+          delegateTitle: supported.has(r.organization_id) ? null : r.delegate?.role_title ?? null,
           hotel: r.covers_hotel === true,
           travel: r.covers_travel === true,
           payment: r.payment_preference,
@@ -168,7 +164,7 @@ export async function loadBursaryApplications(
           submittedAt: r.requested_at,
           hotelNights: r.hotel_nights,
           prepayBookedAt: r.prepay_booked_at,
-          seatPicked: !!r.delegate_seat_id || !!r.delegate,
+          seatPicked: supported.has(r.organization_id) || !!r.delegate,
         }
       : null,
   }));

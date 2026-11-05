@@ -331,6 +331,14 @@ export type AudienceType =
   | "conference_holders"
   | "conference_orgs_with_open_seats"
   | "conference_orgs_fully_assigned"
+  /** Schools with a submitted travel bursary request: its contact and its submitter (lib/conference/bursary-access.ts). */
+  | "bursary_requesters"
+  /**
+   * Every contact at the schools that have done NEITHER for a conference:
+   * registered anyone (a Board Registration counts) nor submitted a travel
+   * bursary request. Worked out when it sends. `school_segment` picks which.
+   */
+  | "conference_schools_not_acted"
   | "global_admins"
   | "org_admins"
   | "event_registrants"
@@ -365,6 +373,8 @@ export interface AudienceDefinition {
      * seat_kind when both are set.
      */
     entity_id?: string;
+    /** For conference_schools_not_acted: which schools. */
+    school_segment?: "cancoll_members" | "members_not_in_cancoll" | "lapsed_members" | "cancoll_not_in_csc";
     /** For custom_recipient_list: exactly who to send to, with per-recipient variables already resolved. */
     recipients?: { email: string; name?: string | null; variableOverrides?: Record<string, string> }[];
     /** For contact_tags: contacts.contact_type values to match (see lib/contacts/tags.ts). Any-of match. */

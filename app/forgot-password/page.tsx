@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { safeNextPath } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { initiateAccountRecovery } from "@/lib/actions/account-recovery";
@@ -26,7 +27,7 @@ export default function ForgotPasswordPage() {
   useEffect(() => { if (emailFromLink) setEmail(emailFromLink); }, [emailFromLink]);
 
   const rawNext = searchParams.get("next");
-  const nextPath = rawNext && rawNext.startsWith("/") ? rawNext : null;
+  const nextPath = rawNext ? safeNextPath(rawNext, "") || null : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

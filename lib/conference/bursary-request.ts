@@ -32,9 +32,17 @@ export const BURSARY_PAYMENT_PREFERENCES = ["reimburse", "prepay"] as const;
 export type BursaryPaymentPreference = (typeof BURSARY_PAYMENT_PREFERENCES)[number];
 
 export const BURSARY_PAYMENT_LABELS: Record<BursaryPaymentPreference, string> = {
-  reimburse: "Reimburse us after the conference (preferred)",
+  reimburse: "Reimbursed after the conference",
   prepay: "CSC pays in advance",
 };
+
+/**
+ * Reimbursement is the default and the school no longer chooses (the board,
+ * 2026-11-05): paying in advance is something a school asks the board for by
+ * email, so it stays the exception. Requests made before that keep the
+ * preference they saved.
+ */
+export const BURSARY_PREPAY_CONTACT = "board@campusstores.ca";
 
 /** The exact wording of the eligibility rule, shown wherever it is confirmed. */
 export const GM_BUYER_RULE =
@@ -45,7 +53,6 @@ export const BURSARY_REQUEST_FIELDS = [
   "delegate_seat_id",
   "covers_hotel",
   "covers_travel",
-  "payment_preference",
   "gm_buyer_confirmed",
   "notes",
 ] as const;
@@ -99,10 +106,6 @@ export function validateBursaryAnswer(
       return typeof value === "boolean"
         ? { valid: true, clean: value }
         : { valid: false, error: "That answer should be yes or no." };
-    case "payment_preference":
-      return typeof value === "string" && (BURSARY_PAYMENT_PREFERENCES as readonly string[]).includes(value)
-        ? { valid: true, clean: value }
-        : { valid: false, error: "Choose how you'd like to be paid." };
     case "notes": {
       if (typeof value !== "string") return { valid: false, error: "That answer should be text." };
       const clean = value.trim();
@@ -118,14 +121,12 @@ export function validateBursaryAnswer(
  * What still stands between this request and submitting it, in the school's
  * terms. Empty means it can be submitted.
  */
-export function bursaryRequestGaps(answers: BursaryRequestAnswers, termsAccepted: boolean): string[] {
+export function bursaryRequestGaps(answers: BursaryRequestAnswers): string[] {
   // Who it is for is NOT a gap: the school may submit before it registers,
   // and pick the registration later.
   const gaps: string[] = [];
   if (!answers.covers_hotel && !answers.covers_travel) gaps.push("Choose hotel, travel, or both.");
-  if (!answers.payment_preference) gaps.push("Choose how you'd like to be paid.");
   if (answers.gm_buyer_confirmed !== true) gaps.push(`Confirm the delegate is ${GM_BUYER_RULE}.`);
-  if (!termsAccepted) gaps.push("Read and agree to the Travel Bursary Terms.");
   return gaps;
 }
 

@@ -2,22 +2,33 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveBursaryAnswer, submitBursaryRequest, type BursaryRequestView } from "@/lib/actions/conference-bursary";
+import {
+  requestOpenRegistrationRefund,
+  saveBursaryAnswer,
+  setBursaryRecipient,
+  submitBursaryRequest,
+  type BursaryRequestView,
+} from "@/lib/actions/conference-bursary";
 import {
   BURSARY_NOTES_MAX,
   BURSARY_PAYMENT_LABELS,
-  BURSARY_PAYMENT_PREFERENCES,
+  BURSARY_PREPAY_CONTACT,
   GM_BUYER_RULE,
   bursaryRequestGaps,
   type BursaryRequestAnswers,
   type BursaryRequestField,
 } from "@/lib/conference/bursary-request";
-import AgreeToDocument from "@/components/me/AgreeToDocument";
+import ContactEditModal from "@/components/org/ContactEditModal";
+import Modal from "@/components/ui/Modal";
 
 /**
  * The request itself. Each answer saves as it is given, the way the
  * benchmarking survey does, so a colleague who opens it next sees where it is.
- * Submitting needs every question answered and the terms agreed to.
+ * Submitting needs every question answered.
+ *
+ * Whoever fills it in makes the choices and can read the terms; only the
+ * person taking the bursary agrees to them, on their own conference page
+ * (Steve, 2026-11-05).
  */
 export default function BursaryRequestForm({
   conferenceId,
@@ -38,7 +49,48 @@ export default function BursaryRequestForm({
   const [isPending, startTransition] = useTransition();
   const deadline = view.closesOnLabel;
   const locked = !view.canEdit;
-  const gaps = bursaryRequestGaps(answers, view.termsAccepted);
+  const gaps = bursaryRequestGaps(answers);
+  const [refundAsked, setRefundAsked] = useState<Set<string>>(new Set());
+
+  const [addingPerson, setAddingPerson] = useState(false);
+
+  /* Someone else holds the CANCOLL-covered registration: say who loses it, in
+     the site's modal, before anything moves. */
+  const [replacing, setReplacing] = useState<{ contactId: string; chosen: string; current: string } | null>(null);
+  const pendingName = useRef<string | null>(null);
+
+  const nameRecipient = (contactId: string, replace: boolean) => {
+    setError(null);
+    setSaved(false);
+    startTransition(async () => {
+      await saveQueue.current;
+      const result = await setBursaryRecipient({ conferenceId, organizationId, contactId, replace });
+      if (!result.success) return setError(result.error);
+      if (result.data.confirmReplacing) {
+        const chosen = view.people.find((p) => p.contactId === contactId)?.name ?? pendingName.current ?? "this person";
+        setReplacing({ contactId, chosen, current: result.data.confirmReplacing });
+        return;
+      }
+      setReplacing(null);
+      setSaved(true);
+      router.refresh();
+    });
+  };
+
+  const chooseRecipient = (contactId: string, newName?: string) => {
+    if (!contactId) return;
+    pendingName.current = newName ?? null;
+    nameRecipient(contactId, false);
+  };
+
+  const askRefund = (seatId: string) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await requestOpenRegistrationRefund({ conferenceId, organizationId, seatId });
+      if (!result.success) return setError(result.error);
+      setRefundAsked((current) => new Set(current).add(seatId));
+    });
+  };
 
   /*
     Saves go one after another, never in parallel, and the questions stay
@@ -77,49 +129,171 @@ export default function BursaryRequestForm({
   };
 
   /*
-    Who it is for: one of the school's registrations. The holder of that seat is
-    the delegate, so naming someone else to the registration on the
-    institution's page moves the support with it. Open after submitting too,
-    until the designation deadline.
+    Who it is for: a person. For a school with a CANCOLL-funded registration,
+    choosing them names them to it (setBursaryRecipient), so the free
+    registration, CANCOLL's lists and the support are the same person. Open
+    after submitting too, until the designation deadline.
   */
+  const orgHref = view.orgSlug ? `/org/${view.orgSlug}#conference_checklist` : null;
+  const recipient = view.recipient;
   const designation = (
-    <section>
+    <section className="space-y-2">
       <label className="block font-medium text-gray-900" htmlFor="bursary-delegate">
-        Who is the support for?
+        Who is getting the support?
       </label>
-      {view.seats.length === 0 ? (
-        <p className="mt-1 text-gray-600">
-          Pick one of your institution&apos;s conference registrations. You don&apos;t have one yet.{" "}
+      {view.people.length === 0 ? (
+        <p className="text-gray-600">
+          Your institution has no contacts on its page yet.{" "}
+          {view.canDesignate && (
+            <button type="button" onClick={() => setAddingPerson(true)} className="font-medium text-[#163D6D] underline">
+              Add the person
+            </button>
+          )}
+          {" "}or{" "}
           <a href={registerHref} className="font-medium text-[#163D6D] underline">
-            Register for the conference
+            register for the conference
           </a>
-          , then come back here. You can send your request now and choose the registration later.
+          . You can send your request now and choose the person later.
         </p>
       ) : (
         <>
           <select
             id="bursary-delegate"
-            value={answers.delegate_seat_id ?? ""}
-            disabled={!view.canDesignate}
-            onChange={(e) => save("delegate_seat_id", e.target.value || null)}
-            className="mt-1 w-full max-w-md rounded-md border border-gray-300 px-2 py-1.5"
+            value={recipient?.contactId ?? ""}
+            disabled={!view.canDesignate || isPending}
+            onChange={(e) => chooseRecipient(e.target.value)}
+            className="w-full max-w-md rounded-md border border-gray-300 px-2 py-1.5"
           >
-            <option value="">Choose a registration</option>
-            {view.seats.map((seat) => (
-              <option key={seat.seatId} value={seat.seatId}>
-                {seat.label}
+            <option value="">Choose a person</option>
+            {view.people.map((p) => (
+              <option key={p.contactId} value={p.contactId}>
+                {p.name}
+                {p.holds.length > 0 ? `, ${p.holds.join(", ")}` : ", not registered"}
               </option>
             ))}
           </select>
-          <p className="mt-1 text-gray-600">
-            The support goes with the registration. To send someone else, name them to it on your
-            institution&apos;s page
-            {view.designationClosesOnLabel && <>, or pick a different registration here, until the end of {view.designationClosesOnLabel}</>}.
+          {view.canDesignate && (
+            <button
+              type="button"
+              onClick={() => setAddingPerson(true)}
+              disabled={isPending}
+              className="block text-left font-medium text-[#163D6D] underline disabled:opacity-50"
+            >
+              Add someone who isn&apos;t listed
+            </button>
+          )}
+          {isPending && <p className="text-gray-500">Updating who the support is for…</p>}
+          <p className="text-gray-600">
+            {view.hasFundedRegistration
+              ? "The person you choose is named to your CANCOLL-covered registration, so the free registration and the travel support go to the same person."
+              : "The support goes with the registration the person you choose holds."}
+            {view.designationClosesOnLabel && <> You can change this until the end of {view.designationClosesOnLabel}.</>}
           </p>
         </>
       )}
+      {recipient?.name && (
+        <p className={recipient.agreed ? "text-green-700" : "text-amber-800"}>
+          {recipient.agreed
+            ? `${recipient.name} has agreed to the Travel Bursary Terms.`
+            : `${recipient.name} needs to agree to the Travel Bursary Terms on their own conference page. We've asked them to. Only the person taking the bursary can agree.`}
+        </p>
+      )}
+      {/* The org page's own "Add contact" form (as PersonPickerModal reuses it):
+          a new contact, then named straight to the support. */}
+      {addingPerson && (
+        <ContactEditModal
+          contact={null}
+          organizationId={organizationId}
+          onClose={() => setAddingPerson(false)}
+          onCreated={(created) => {
+            setAddingPerson(false);
+            chooseRecipient(created.id, created.name);
+          }}
+        />
+      )}
+      <Modal
+        open={replacing !== null}
+        onClose={() => setReplacing(null)}
+        title="Change who holds your CANCOLL registration?"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setReplacing(null)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => replacing && nameRecipient(replacing.contactId, true)}
+              className="rounded-md bg-[#163D6D] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {isPending ? "Updating…" : `Name ${replacing?.chosen ?? ""}`}
+            </button>
+          </div>
+        }
+      >
+        {replacing && (
+          <div className="space-y-2 px-5 py-4 text-sm text-gray-800">
+            <p>
+              {replacing.current} holds your CANCOLL-covered registration now. Naming {replacing.chosen} moves it to them,
+              with the travel support.
+            </p>
+            <p>
+              {replacing.current} will no longer have that registration. If they&apos;re still coming, register them
+              separately.
+            </p>
+          </div>
+        )}
+      </Modal>
+      {view.openRegistrations.map((open) => (
+        <div key={open.seatId} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+          <p className="font-medium">You have an open {open.entityName} that nobody holds.</p>
+          {refundAsked.has(open.seatId) ? (
+            <p className="mt-1">We&apos;ve asked Campus Stores Canada to refund it. They&apos;ll be in touch.</p>
+          ) : (
+            <>
+              <p className="mt-1">
+                <span className="font-medium">To give it to someone else:</span> open your institution&apos;s page, open the
+                toolkit (the round + button, bottom right) and choose Edit. Then, in your people list, tick the person under{" "}
+                {open.entityName}.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {orgHref && (
+                  <a href={orgHref} className="rounded-md bg-[#163D6D] px-3 py-1.5 font-semibold text-white">
+                    Reassign it
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => askRefund(open.seatId)}
+                  disabled={isPending}
+                  className="rounded-md border border-amber-300 bg-white px-3 py-1.5 font-medium disabled:opacity-50"
+                >
+                  Ask for a refund
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ))}
     </section>
   );
+
+  const termsPanel = view.terms ? (
+    <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
+      <summary className="cursor-pointer font-medium text-gray-900">
+        What the Travel Bursary covers (the full terms)
+      </summary>
+      <div
+        className="prose prose-sm mt-2 max-w-none text-sm text-gray-700"
+        dangerouslySetInnerHTML={{ __html: view.terms.content }}
+      />
+    </details>
+  ) : null;
 
   if (view.submittedAt) {
     return (
@@ -134,19 +308,12 @@ export default function BursaryRequestForm({
           {answers.covers_hotel && <p className="mt-1">Hotel: {view.hotelText}.</p>}
           {answers.notes && <p className="mt-1">You also told us: {answers.notes}</p>}
           <p className="mt-1">
-            There is no separate approval to wait for. After the conference, claim your expenses on this page, with
-            receipts.
+            There is no separate approval to wait for. After the conference, you&apos;ll claim your expenses, with
+            receipts, on a separate page.
           </p>
-        {/* The terms changed after this request went in (v2, 2026-11-02): the
-            school agrees to the current version here, by the same control. */}
-        {!view.termsAccepted && view.terms && (
-          <div className="mt-4 text-gray-800">
-            <p className="mb-2 font-medium">The Travel Bursary Terms have been updated. Please read and agree to them.</p>
-            <AgreeToDocument versionId={view.terms.versionId} title={view.terms.title} content={view.terms.content} />
-          </div>
-        )}
         </div>
         <div className="text-gray-800">{designation}</div>
+        {termsPanel}
         {error && <p className="text-red-700">{error}</p>}
         {saved && !error && <p className="text-gray-500">Saved.</p>}
       </div>
@@ -177,18 +344,12 @@ export default function BursaryRequestForm({
         </section>
 
         <section>
-          <p className="font-medium text-gray-900">How would you like to be paid?</p>
-          {BURSARY_PAYMENT_PREFERENCES.map((p) => (
-            <label key={p} className="mt-1 flex items-center gap-2">
-              <input
-                type="radio"
-                name="bursary-payment"
-                checked={answers.payment_preference === p}
-                onChange={() => save("payment_preference", p)}
-              />
-              {BURSARY_PAYMENT_LABELS[p]}
-            </label>
-          ))}
+          <p className="font-medium text-gray-900">Payment</p>
+          <p className="mt-1">
+            We reimburse your expenses after the conference. If paying up front is a problem for your institution,
+            email <a href={`mailto:${BURSARY_PREPAY_CONTACT}`} className="underline">{BURSARY_PREPAY_CONTACT}</a> and
+            we may be able to help.
+          </p>
         </section>
 
         <section>
@@ -225,17 +386,7 @@ export default function BursaryRequestForm({
         </section>
       </fieldset>
 
-      <section>
-        {view.termsAccepted ? (
-          <p className="text-green-700">You&apos;ve agreed to the Travel Bursary Terms.</p>
-        ) : view.terms ? (
-          !locked && (
-            <AgreeToDocument versionId={view.terms.versionId} title={view.terms.title} content={view.terms.content} />
-          )
-        ) : (
-          <p className="text-gray-500">The Travel Bursary Terms aren&apos;t published yet.</p>
-        )}
-      </section>
+      {termsPanel}
 
       {error && <p className="text-red-700">{error}</p>}
       {saved && !error && <p className="text-gray-500">Saved.</p>}

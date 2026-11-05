@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, Suspense } from "react";
+import { safeNextPath } from "@/lib/auth/login-redirect";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -82,7 +83,7 @@ function ResetPasswordContent() {
     // org admin, is bounced to /me, so an ordinary password reset still ends
     // up somewhere sensible.
     const rawNext = searchParams.get("next");
-    const destination = rawNext && rawNext.startsWith("/") ? rawNext : "/onboarding";
+    const destination = safeNextPath(rawNext, "/onboarding");
 
     setTimeout(() => {
       router.push(destination);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { safeNextPath } from "@/lib/auth/login-redirect";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -18,7 +19,7 @@ export default function LoginForm() {
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
   const rawNext = searchParams.get("next");
-  const nextPath = rawNext && rawNext.startsWith("/") ? rawNext : "/";
+  const nextPath = safeNextPath(rawNext, "/");
 
   useEffect(() => {
     if (!rawNext) return;
