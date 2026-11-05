@@ -16,7 +16,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveOrgAdminEmails } from "@/lib/supabase/user-lookup";
 import { sendTransactional } from "@/lib/comms/send";
-import { butlerDm, dmPara, dmText, dmLink } from "@/lib/ghosts/butler-dm";
+import { helpfulGhostDm, dmPara, dmText, dmLink } from "@/lib/ghosts/butler-dm";
 import { formatCents } from "@/lib/utils";
 import { serviceName } from "@/lib/purolator/services";
 
@@ -113,7 +113,7 @@ export async function notifyShipmentBooked(shipmentId: string): Promise<void> {
 }
 
 /**
- * The same message in Circle, from the ghost DMs come from (butlerDm). ⛔ A
+ * The same message in Circle, from Helpful Ghost (Steve, 2026-11-04). ⛔ A
  * local server shares the live database and Circle, so DEV_EMAIL_INTERCEPT
  * redirects these as it does email (as lib/circle/flag-notify.ts does).
  */
@@ -129,5 +129,5 @@ async function circleMessage(r: Recipient, f: Record<string, string>): Promise<v
     dmPara(dmLink("See the shipment", r.url)),
   ];
   const fallback = `Your Purolator shipment from the conference is booked: ${f.reference}, ${f.box_count} box(es) to ${f.destination}. ${r.url}`;
-  await butlerDm(to, content, fallback);
+  await helpfulGhostDm(to, content, fallback);
 }

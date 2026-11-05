@@ -11,6 +11,8 @@ export interface CircleConfig {
   botEmail: string;
   /** Admin API key belonging to Butler Ghost — used to send DMs as Butler */
   ghostApiKey: string;
+  /** Admin API key belonging to Helpful Ghost — used to send DMs as Helpful */
+  helpfulGhostApiKey: string;
   announcementsSpaceId: string;
   headlessAuthToken: string;
   /** Space ID where CSC events are published in Circle */
@@ -29,6 +31,7 @@ export function getCircleConfig(): CircleConfig | null {
   const botUserId = process.env.CIRCLE_BOT_USER_ID;
   const botEmail = process.env.CIRCLE_BOT_EMAIL;
   const ghostApiKey = process.env.CIRCLE_GHOST_KEY;
+  const helpfulGhostApiKey = process.env.CIRCLE_HELPFULGHOST;
   const announcementsSpaceId = process.env.CIRCLE_ANNOUNCEMENTS_SPACE_ID;
   const headlessAuthToken = process.env.CIRCLE_HEADLESS_AUTH_TOKEN;
   const eventsSpaceId = process.env.CIRCLE_EVENTS_SPACE_ID;
@@ -49,6 +52,7 @@ export function getCircleConfig(): CircleConfig | null {
     botUserId: botUserId ?? "",
     botEmail: botEmail ?? "",
     ghostApiKey: ghostApiKey ?? "",
+    helpfulGhostApiKey: helpfulGhostApiKey ?? "",
     announcementsSpaceId: announcementsSpaceId ?? "",
     headlessAuthToken: headlessAuthToken ?? "",
     eventsSpaceId: eventsSpaceId ?? "",

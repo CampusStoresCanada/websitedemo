@@ -802,6 +802,7 @@ export class CircleAdminClient {
 
 let _instance: CircleAdminClient | null = null;
 let _ghostInstance: CircleAdminClient | null = null;
+let _helpfulGhostInstance: CircleAdminClient | null = null;
 
 /**
  * Returns a CircleAdminClient singleton using the main API key.
@@ -830,4 +831,20 @@ export function getCircleGhostClient(): CircleAdminClient | null {
   const key = config.ghostApiKey || config.apiKey;
   _ghostInstance = new CircleAdminClient(key, config.communityId);
   return _ghostInstance;
+}
+
+/**
+ * Returns a CircleAdminClient using Helpful Ghost's API key, so DMs come from
+ * Helpful. Falls back to Butler's (then the main key) if CIRCLE_HELPFULGHOST
+ * is not configured.
+ */
+export function getCircleHelpfulGhostClient(): CircleAdminClient | null {
+  if (_helpfulGhostInstance) return _helpfulGhostInstance;
+
+  const config = getCircleConfig();
+  if (!config) return null;
+
+  const key = config.helpfulGhostApiKey || config.ghostApiKey || config.apiKey;
+  _helpfulGhostInstance = new CircleAdminClient(key, config.communityId);
+  return _helpfulGhostInstance;
 }

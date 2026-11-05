@@ -32,18 +32,36 @@ export async function butlerDm(
   content: DmNode[],
   fallbackText: string
 ): Promise<boolean> {
+  return ghostDm("butler", recipientEmail, content, fallbackText);
+}
+
+/** The same, from Helpful Ghost: messages that help a member do something. */
+export async function helpfulGhostDm(
+  recipientEmail: string | null | undefined,
+  content: DmNode[],
+  fallbackText: string
+): Promise<boolean> {
+  return ghostDm("helpful", recipientEmail, content, fallbackText);
+}
+
+async function ghostDm(
+  from: "butler" | "helpful",
+  recipientEmail: string | null | undefined,
+  content: DmNode[],
+  fallbackText: string
+): Promise<boolean> {
   if (!recipientEmail) return false;
   try {
-    const { getCircleGhostClient } = await import("@/lib/circle/client");
-    const ghost = getCircleGhostClient();
+    const { getCircleGhostClient, getCircleHelpfulGhostClient } = await import("@/lib/circle/client");
+    const ghost = from === "helpful" ? getCircleHelpfulGhostClient() : getCircleGhostClient();
     if (!ghost) return false;
     const result = await ghost.sendDirectMessageRich(recipientEmail, content, fallbackText);
     if (!result.success) {
-      console.warn("[butler-dm] failed", recipientEmail, result.error ?? (result.selfDm ? "self-DM" : ""));
+      console.warn(`[${from}-dm] failed`, recipientEmail, result.error ?? (result.selfDm ? "self-DM" : ""));
     }
     return result.success;
   } catch (err) {
-    console.error("[butler-dm] threw", err);
+    console.error(`[${from}-dm] threw`, err);
     return false;
   }
 }

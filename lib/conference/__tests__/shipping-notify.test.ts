@@ -17,7 +17,7 @@ vi.mock("@/lib/ghosts/butler-dm", () => ({
   dmText: (text: string) => ({ text }),
   dmLink: (label: string, href: string) => ({ text: `${label} <${href}>` }),
   dmPara: (...nodes: Array<{ text: string }>) => ({ text: nodes.map((n) => n.text).join("") }),
-  butlerDm: async (to: string, content: Array<{ text: string }>) => {
+  helpfulGhostDm: async (to: string, content: Array<{ text: string }>) => {
     sent.dms.push({ to, text: content.map((c) => c.text).join("\n") });
     return true;
   },
