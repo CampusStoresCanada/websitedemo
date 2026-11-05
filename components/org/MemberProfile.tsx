@@ -112,6 +112,8 @@ interface MemberProfileProps {
    *  server-side from the conference itself, not from conferenceAttendance (which can be
    *  empty for an org that holds seats but hasn't assigned anyone yet). */
   currentConferenceIsPublic: boolean;
+  /** The holder of this school's supported registration: its travel bursary recipient. */
+  bursaryRecipientPersonId?: string | null;
   initialRFPs?: RFPWithContext[];
   memberSuppliers?: SupplierData | null;
   /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
@@ -141,6 +143,7 @@ export default function MemberProfile({
   buyableExtras,
   currentConferenceId,
   currentConferenceIsPublic,
+  bursaryRecipientPersonId = null,
   sponsorTier,
   initialRFPs = [],
   memberSuppliers = null,
@@ -1158,6 +1161,11 @@ export default function MemberProfile({
                               ) : (contact.name as string)
                             )
                           ) : "—"}
+                          {person && person.personId === bursaryRecipientPersonId && (
+                            <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                              Travel Bursary Recipient
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 pr-4 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_email", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
@@ -1780,6 +1788,11 @@ export default function MemberProfile({
                               ) : (contact.name as string)
                             )
                           ) : "—"}
+                          {person && person.personId === bursaryRecipientPersonId && (
+                            <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                              Travel Bursary Recipient
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "role_title", contact.id, organization.id)}>
                           {contact.role_title ? (contact.role_title as string) : "—"}

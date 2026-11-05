@@ -121,13 +121,12 @@ export function validateBursaryAnswer(
  * What still stands between this request and submitting it, in the school's
  * terms. Empty means it can be submitted.
  */
-export function bursaryRequestGaps(answers: BursaryRequestAnswers, termsAccepted: boolean): string[] {
+export function bursaryRequestGaps(answers: BursaryRequestAnswers): string[] {
   // Who it is for is NOT a gap: the school may submit before it registers,
   // and pick the registration later.
   const gaps: string[] = [];
   if (!answers.covers_hotel && !answers.covers_travel) gaps.push("Choose hotel, travel, or both.");
   if (answers.gm_buyer_confirmed !== true) gaps.push(`Confirm the delegate is ${GM_BUYER_RULE}.`);
-  if (!termsAccepted) gaps.push("Read and agree to the Travel Bursary Terms.");
   return gaps;
 }
 

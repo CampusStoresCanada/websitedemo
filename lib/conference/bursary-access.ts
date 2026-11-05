@@ -1,5 +1,7 @@
 import { canManageOrganization, type AuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isFundedOffer } from "@/lib/conference/entity-pricing";
+import { loadSeatHoldings, type SeatHolding } from "@/lib/conference/seats";
 
 /**
  * Who may fill in a school's request: anyone registered for this conference
@@ -25,24 +27,68 @@ export async function canFillBursaryRequest(
 
 
 /**
- * The registration seats this conference's travel bursary requests point at:
- * one per school, whoever holds it is the supported delegate. Only submitted
- * requests that were not declined.
+ * A school's supported registration: the one seat its travel support, its
+ * CANCOLL funding and its recipient's obligations all hang from (Steve,
+ * 2026-11-05: "those things need to be one thing").
  *
- * A seat id, never a person: a swap on the org page moves the support with the
- * seat, as it moves the CANCOLL consent with the funded registration.
+ * The CANCOLL-funded registration when the school holds one, whoever its
+ * request names; otherwise the registration the request names. Read here, every
+ * time, never written back: a school that buys or is switched to the funded
+ * registration after it picked one is moved by the rule, not by a row.
+ */
+export function supportedSeat(
+  orgSeats: ReadonlyArray<SeatHolding>,
+  entitiesById: ReadonlyMap<string, { attributes?: Record<string, unknown> | null }>,
+  pickedSeatId: string | null
+): SeatHolding | null {
+  const funded = orgSeats.filter(
+    (s) => s.entityKind === "registration" && isFundedOffer(entitiesById.get(s.entityId)?.attributes)
+  );
+  if (funded.length > 0) return funded.find((s) => s.holderPersonId) ?? funded[0];
+  return orgSeats.find((s) => s.seatId === pickedSeatId) ?? null;
+}
+
+/**
+ * Every school's supported registration for this conference, by organization,
+ * for the requests that are submitted and not declined.
+ */
+export async function loadSupportedSeats(
+  db: { from: (table: string) => { select: (columns: string) => any } }, // eslint-disable-line @typescript-eslint/no-explicit-any
+  conferenceId: string
+): Promise<Map<string, SeatHolding>> {
+  const { data, error } = await db
+    .from("conference_bursary_applications")
+    .select("organization_id, delegate_seat_id, status, requested_at")
+    .eq("conference_id", conferenceId)
+    .not("requested_at", "is", null)
+    .neq("status", "denied");
+  if (error) throw new Error(`Could not load travel bursary delegates: ${error.message}`);
+  const requests = (data ?? []) as Array<{ organization_id: string; delegate_seat_id: string | null }>;
+  if (requests.length === 0) return new Map();
+  const { seats, entitiesById } = await loadSeatHoldings(db as never, { conferenceId, entityKinds: ["registration"] });
+  const byOrg = new Map<string, SeatHolding[]>();
+  for (const seat of seats) {
+    const list = byOrg.get(seat.organizationId) ?? [];
+    list.push(seat);
+    byOrg.set(seat.organizationId, list);
+  }
+  const supported = new Map<string, SeatHolding>();
+  for (const r of requests) {
+    const seat = supportedSeat(byOrg.get(r.organization_id) ?? [], entitiesById, r.delegate_seat_id);
+    if (seat) supported.set(r.organization_id, seat);
+  }
+  return supported;
+}
+
+/**
+ * The supported registrations' seat ids: whoever holds one is a travel bursary
+ * recipient. A seat id, never a person: a swap on the org page moves the
+ * support with the seat, as it moves the CANCOLL consent with the funded
+ * registration.
  */
 export async function loadBursaryDesignatedSeatIds(
   db: { from: (table: string) => { select: (columns: string) => any } }, // eslint-disable-line @typescript-eslint/no-explicit-any
   conferenceId: string
 ): Promise<Set<string>> {
-  const { data, error } = await db
-    .from("conference_bursary_applications")
-    .select("delegate_seat_id, status, requested_at")
-    .eq("conference_id", conferenceId)
-    .not("delegate_seat_id", "is", null)
-    .not("requested_at", "is", null)
-    .neq("status", "denied");
-  if (error) throw new Error(`Could not load travel bursary delegates: ${error.message}`);
-  return new Set(((data ?? []) as Array<{ delegate_seat_id: string }>).map((r) => r.delegate_seat_id));
+  return new Set([...(await loadSupportedSeats(db, conferenceId)).values()].map((s) => s.seatId));
 }

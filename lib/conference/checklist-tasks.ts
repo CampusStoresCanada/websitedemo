@@ -30,7 +30,6 @@ import { ORG_TYPE } from "@/lib/constants/org-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "../constants/conference";
 import { loadSeatHoldings, type SeatHolding } from "./seats";
-import { isFundedOffer } from "./entity-pricing";
 import { loadBursaryDesignatedSeatIds } from "./bursary-access";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -117,13 +116,12 @@ export function personIdsInTaskScope(
     if (scope.scope_entity_kind && entitiesById.get(seat.entityId)?.kind !== scope.scope_entity_kind) continue;
     if (scope.scope_designation === "bursary_delegate") {
       /**
-       * The holder of the seat a school's bursary request names. Not when that
-       * seat is the CANCOLL-funded registration: that delegate agrees to the
-       * CANCOLL consent instead, on its own task (Steve, 2026-11-02: "CANCOLL
-       * consent, or bursary Terms for non-CANCOLL").
+       * The holder of a school's supported registration (bursary-access.ts).
+       * On the CANCOLL-funded registration too: only the person taking the
+       * bursary can agree to its terms (Steve, 2026-11-05), and the CANCOLL
+       * consent is a separate agreement on its own task.
        */
       if (!designatedSeatIds?.has(seat.seatId)) continue;
-      if (isFundedOffer(entitiesById.get(seat.entityId)?.attributes)) continue;
     }
     inScope.add(seat.holderPersonId);
   }

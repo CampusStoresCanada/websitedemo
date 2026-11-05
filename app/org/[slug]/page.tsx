@@ -7,6 +7,7 @@ import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
+import { loadSupportedSeats } from "@/lib/conference/bursary-access";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import ConferenceChecklistSection from "@/components/org/ConferenceChecklistSection";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
@@ -314,6 +315,7 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
   let assignableEntities: AssignableEntityColumn[] = [];
   let buyableExtras: ConferenceOffer[] = [];
   let currentConferenceId: string | null = null;
+  let bursaryRecipientPersonId: string | null = null;
   let currentConferenceIsPublic = false;
   // Booth ownership drives the public "Exhibitor" badge + booth number, so it
   // is resolved OUTSIDE canViewConferenceAttendance: the floor plan is public
@@ -478,6 +480,13 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       }
 
       assignableEntities = [...byEntity.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+      // Who holds this school's supported registration: the travel bursary
+      // recipient, named on the roster (bursary-access.ts).
+      if (organization.type === "Member") {
+        const supported = await loadSupportedSeats(createAdminClient(), currentConferenceId);
+        bursaryRecipientPersonId = supported.get(organization.id)?.holderPersonId ?? null;
+      }
 
       // Held entities stay in buyableExtras too now — MemberProfile/
       // PartnerProfile render those as HeldOfferCard instead of plain
@@ -683,6 +692,7 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
         buyableExtras={buyableExtras}
         currentConferenceId={currentConferenceId}
         currentConferenceIsPublic={currentConferenceIsPublic}
+        bursaryRecipientPersonId={bursaryRecipientPersonId}
         sponsorTier={sponsorTier}
         initialRFPs={orgRFPs}
         memberSuppliers={memberSuppliers}

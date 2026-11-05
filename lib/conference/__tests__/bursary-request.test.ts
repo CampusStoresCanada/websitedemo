@@ -50,28 +50,28 @@ describe("the question list", () => {
   });
 
   it("does not need the additional-help answer to submit", () => {
-    expect(bursaryRequestGaps({ ...complete, notes: null }, true)).toEqual([]);
+    expect(bursaryRequestGaps({ ...complete, notes: null })).toEqual([]);
   });
 });
 
 describe("what stands between a request and submitting it", () => {
-  it("nothing, when every question is answered and the terms agreed", () => {
-    expect(bursaryRequestGaps(complete, true)).toEqual([]);
+  it("nothing, when every question is answered", () => {
+    expect(bursaryRequestGaps(complete)).toEqual([]);
   });
 
   it("hotel or travel, at least one", () => {
-    expect(bursaryRequestGaps({ ...complete, covers_hotel: false, covers_travel: false }, true)).toEqual([
+    expect(bursaryRequestGaps({ ...complete, covers_hotel: false, covers_travel: false })).toEqual([
       "Choose hotel, travel, or both.",
     ]);
   });
 
   it("the GM-buyer rule must be confirmed, not merely left blank", () => {
-    expect(bursaryRequestGaps({ ...complete, gm_buyer_confirmed: null }, true)).toHaveLength(1);
-    expect(bursaryRequestGaps({ ...complete, gm_buyer_confirmed: false }, true)).toHaveLength(1);
+    expect(bursaryRequestGaps({ ...complete, gm_buyer_confirmed: null })).toHaveLength(1);
+    expect(bursaryRequestGaps({ ...complete, gm_buyer_confirmed: false })).toHaveLength(1);
   });
 
-  it("the terms must be agreed", () => {
-    expect(bursaryRequestGaps(complete, false)).toEqual(["Read and agree to the Travel Bursary Terms."]);
+  it("never waits on the terms: only the person taking the bursary agrees, on their own page", () => {
+    expect(bursaryRequestGaps(complete)).toEqual([]);
   });
 });
 
@@ -110,7 +110,7 @@ describe("hotel nights (Steve, 2026-11-02)", async () => {
     expect(hotelCapCents(3, hilton)).toBe(66478);
   });
   it("lets a school submit before it has picked a registration", () => {
-    expect(bursaryRequestGaps({ ...complete, delegate_seat_id: null }, true)).toEqual([]);
+    expect(bursaryRequestGaps({ ...complete, delegate_seat_id: null })).toEqual([]);
   });
 });
 

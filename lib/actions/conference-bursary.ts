@@ -21,7 +21,9 @@ import {
 import { loadSeatHoldings } from "@/lib/conference/seats";
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
-import { canFillBursaryRequest } from "@/lib/conference/bursary-access";
+import { canFillBursaryRequest, supportedSeat } from "@/lib/conference/bursary-access";
+import { isFundedOffer } from "@/lib/conference/entity-pricing";
+import { addConferenceAttendee, allocateSeat, deallocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { claimWindowOpen } from "@/lib/expenses/rules";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
@@ -268,6 +270,14 @@ type RequestRow = {
 } & BursaryRequestAnswers;
 
 /** One of the school's registrations, as the "who is it for" question lists it. */
+export type BursaryPersonOption = {
+  /** A school contact, as the org roster lists them. */
+  contactId: string;
+  name: string;
+  /** The registrations they hold now, by name: "Full Conference Registration". */
+  holds: string[];
+};
+
 export type BursarySeatOption = {
   seatId: string;
   /** "Jane Smith, Full Conference Registration", or "Not yet named, ..." */
@@ -294,8 +304,28 @@ export type BursaryRequestView = {
   hotelNights: number;
   /** "3 hotel nights, up to $664.77 including tax" */
   hotelText: string;
+  /** Shown so whoever fills in the request can see what is covered. Only the recipient agrees to them. */
   terms: { versionId: string; title: string; content: string } | null;
-  termsAccepted: boolean;
+  /** The school's people at this conference: who the support can be for. */
+  people: BursaryPersonOption[];
+  /**
+   * The person the support is for: the holder of the school's supported
+   * registration (bursary-access.ts), and whether they have agreed to the
+   * current terms themselves.
+   */
+  recipient: {
+    /** The roster contact who holds it, when one matches. */
+    contactId: string | null;
+    name: string | null;
+    entityName: string;
+    funded: boolean;
+    agreed: boolean;
+  } | null;
+  /** The school holds a CANCOLL-funded registration: picking a person names them to it. */
+  hasFundedRegistration: boolean;
+  /** Paid registrations nobody holds, once a recipient is named: reassign, or ask for a refund. */
+  openRegistrations: Array<{ seatId: string; entityName: string }>;
+  orgSlug: string | null;
   open: boolean;
   closesAt: string | null;
   /**
@@ -308,6 +338,37 @@ export type BursaryRequestView = {
   canEdit: boolean;
   gaps: string[];
 };
+
+type ConferencePersonRow = {
+  id: string;
+  display_name: string | null;
+  user_id: string | null;
+  contact_id: string | null;
+  contact_email: string | null;
+  assigned_email_snapshot: string | null;
+};
+
+/**
+ * The conference person a school contact is, as the org roster finds them: by
+ * contact, then email, then name. Null when they aren't on this conference's
+ * list yet.
+ */
+function personForContact(
+  contact: { id: string; name: string; email: string | null },
+  people: ReadonlyArray<ConferencePersonRow>
+): ConferencePersonRow | null {
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  const email = norm(contact.email);
+  const name = norm(contact.name);
+  return (
+    people.find((p) => p.contact_id === contact.id) ??
+    (email ? people.find((p) => norm(p.contact_email) === email || norm(p.assigned_email_snapshot) === email) : undefined) ??
+    (name ? people.find((p) => norm(p.display_name) === name) : undefined) ??
+    null
+  );
+}
+
+const PERSON_COLUMNS = "id, display_name, user_id, contact_id, contact_email, assigned_email_snapshot";
 
 /** The school must be a member whose membership covers the conference. */
 async function memberCovered(conferenceId: string, organizationId: string): Promise<string | null> {
@@ -414,23 +475,23 @@ export async function getBursaryRequest(params: {
     return { success: false, error: "Only people registered from your institution, or its admin, can request travel support." };
   }
 
-  const [row, { contacts }, terms, settings, seats] = await Promise.all([
+  const db = createAdminClient();
+  const [row, { contacts }, terms, settings, seats, holdings, peopleRes, orgRes] = await Promise.all([
     loadRequestRow(params.conferenceId, params.organizationId),
     loadStoreContacts(params.organizationId),
     loadTerms(params.conferenceId),
     loadSettings(params.conferenceId),
     loadSeatOptions(params.conferenceId, params.organizationId),
+    loadSeatHoldings(db, { conferenceId: params.conferenceId, organizationId: params.organizationId, entityKinds: ["registration"] }),
+    db
+      .from("conference_people")
+      .select(PERSON_COLUMNS)
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .neq("assignment_status", "canceled"),
+    db.from("organizations").select("slug").eq("id", params.organizationId).maybeSingle(),
   ]);
   const { closesAt } = settings;
-  let termsAccepted = false;
-  if (terms) {
-    const { count } = await createAdminClient()
-      .from("legal_acceptances")
-      .select("id", { count: "exact", head: true })
-      .eq("legal_version_id", terms.versionId)
-      .eq("user_id", auth.ctx.userId);
-    termsAccepted = (count ?? 0) > 0;
-  }
   const answers = answersOf(row);
   // The request deadline is the date we SAY (November 27), not the date the
   // page stops taking requests: those keep coming until the designation
@@ -441,6 +502,31 @@ export async function getBursaryRequest(params: {
   const designationOpen = bursaryRequestOpen(settings.designationClosesAt);
   const hotelNights = row?.hotel_nights ?? defaultHotelNights(params.organizationId, settings.fourNightOrgIds);
   const pickedSeat = seats.find((s) => s.seatId === answers.delegate_seat_id);
+
+  const orgSeats = holdings.seats;
+  const isFunded = (seat: { entityId: string }) => isFundedOffer(holdings.entitiesById.get(seat.entityId)?.attributes);
+  const supported = supportedSeat(orgSeats, holdings.entitiesById, answers.delegate_seat_id);
+  const confPeople = (peopleRes.data ?? []) as ConferencePersonRow[];
+  const liveContacts = contacts.filter((c) => !c.isArchived && c.name.trim());
+  const people = liveContacts.map((c) => {
+    const person = personForContact(c, confPeople);
+    return {
+      contactId: c.id,
+      name: c.name,
+      personId: person?.id ?? null,
+      holds: person ? orgSeats.filter((seat) => seat.holderPersonId === person.id).map((seat) => seat.entityName) : [],
+    };
+  });
+  const recipientPerson = supported?.holderPersonId ? confPeople.find((p) => p.id === supported.holderPersonId) : null;
+  let recipientAgreed = false;
+  if (terms && recipientPerson?.user_id) {
+    const { count } = await db
+      .from("legal_acceptances")
+      .select("id", { count: "exact", head: true })
+      .eq("legal_version_id", terms.versionId)
+      .eq("user_id", recipientPerson.user_id);
+    recipientAgreed = (count ?? 0) > 0;
+  }
   return {
     success: true,
     data: {
@@ -449,21 +535,39 @@ export async function getBursaryRequest(params: {
       status: row?.status ?? "submitted",
       contacts: contacts.filter((c) => !c.isArchived),
       seats,
-      delegateName: answers.delegate_seat_id
-        ? pickedSeat?.holderName ?? null
-        : contacts.find((c) => c.id === answers.delegate_contact_id)?.name ?? null,
+      delegateName: supported
+        ? supported.holderName ?? null
+        : answers.delegate_seat_id
+          ? pickedSeat?.holderName ?? null
+          : contacts.find((c) => c.id === answers.delegate_contact_id)?.name ?? null,
       designationOpen,
       designationClosesOnLabel: formatDeadline(settings.designationClosesAt),
       canDesignate: designationOpen && (open || !!row?.requested_at),
       hotelNights,
       hotelText: hotelNightsText(hotelNights, settings.rate),
       terms,
-      termsAccepted,
+      people: people.map(({ contactId, name, holds }) => ({ contactId, name, holds })),
+      recipient: supported
+        ? {
+            contactId: people.find((p) => p.personId && p.personId === supported.holderPersonId)?.contactId ?? null,
+            name: supported.holderName,
+            entityName: supported.entityName,
+            funded: isFunded(supported),
+            agreed: recipientAgreed,
+          }
+        : null,
+      hasFundedRegistration: orgSeats.some(isFunded),
+      openRegistrations: supported
+        ? orgSeats
+            .filter((seat) => !seat.holderPersonId && !isFunded(seat))
+            .map((seat) => ({ seatId: seat.seatId, entityName: seat.entityName }))
+        : [],
+      orgSlug: (orgRes.data?.slug as string | null) ?? null,
       open,
       closesAt,
       closesOnLabel: bursaryRequestOpen(closesAt) ? formatDeadline(closesAt) : null,
       canEdit: open && !row?.requested_at,
-      gaps: bursaryRequestGaps(answers, termsAccepted),
+      gaps: bursaryRequestGaps(answers),
     },
   };
 }
@@ -606,6 +710,161 @@ export async function submitBursaryRequest(params: {
   return { success: true, data: null };
 }
 
+
+
+/**
+ * Name the person the support is for, from the request page (Steve,
+ * 2026-11-05: the person in charge of the registration makes the choices, the
+ * person taking the bursary signs).
+ *
+ * ⛔ Not a second way to seat someone: it names them to the school's supported
+ * registration through allocateSeat / deallocateSeat, the org roster's own
+ * actions, so the roster, CANCOLL's lists, the funded registration and the
+ * recipient's terms task all move together.
+ *
+ * A school with a CANCOLL-funded registration: the person is named to it. If
+ * someone else holds it, nothing changes until the caller confirms
+ * (`replace`); the answer names who would lose it. A paid registration the
+ * person held is emptied, for the school to reassign or ask CSC to refund.
+ * Any other school: the support goes with the registration the person holds.
+ */
+export async function setBursaryRecipient(params: {
+  conferenceId: string;
+  organizationId: string;
+  contactId: string;
+  replace?: boolean;
+}): Promise<Result<{ confirmReplacing: string | null }>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  const notMember = await memberCovered(params.conferenceId, params.organizationId);
+  if (notMember) return { success: false, error: notMember };
+  if (!(await canFillBursaryRequest(auth.ctx, params.conferenceId, params.organizationId))) {
+    return { success: false, error: "Only people registered from your institution, or its admin, can request travel support." };
+  }
+  const settings = await loadSettings(params.conferenceId);
+  if (!bursaryRequestOpen(settings.designationClosesAt)) {
+    return { success: false, error: "The date to change who the support is for has passed. Please contact Campus Stores Canada." };
+  }
+
+  const db = createAdminClient();
+  const [{ contacts }, { data: peopleRows }] = await Promise.all([
+    loadStoreContacts(params.organizationId),
+    db
+      .from("conference_people")
+      .select(PERSON_COLUMNS)
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .neq("assignment_status", "canceled"),
+  ]);
+  const contact = contacts.find((c) => c.id === params.contactId && !c.isArchived);
+  if (!contact) return { success: false, error: "That person isn't one of your institution's contacts." };
+  const name = contact.name;
+  let personId = personForContact(contact, (peopleRows ?? []) as ConferencePersonRow[])?.id ?? null;
+
+  const { seats, entitiesById } = await loadSeatHoldings(db, {
+    conferenceId: params.conferenceId,
+    organizationId: params.organizationId,
+    entityKinds: ["registration"],
+  });
+  const funded = supportedSeat(
+    seats.filter((seat) => isFundedOffer(entitiesById.get(seat.entityId)?.attributes)),
+    entitiesById,
+    null
+  );
+
+  let seatId: string;
+  if (funded) {
+    if (!personId || funded.holderPersonId !== personId) {
+      if (funded.holderPersonId && !params.replace) {
+        return { success: true, data: { confirmReplacing: funded.holderName ?? "Someone else" } };
+      }
+      for (const seat of seats) {
+        if (personId && seat.holderPersonId === personId && seat.seatId !== funded.seatId) {
+          const freed = await deallocateSeat(seat.seatId);
+          if (!freed.success) return { success: false, error: freed.error };
+        }
+      }
+      if (funded.holderPersonId) {
+        const freed = await deallocateSeat(funded.seatId);
+        if (!freed.success) return { success: false, error: freed.error };
+      }
+      // Releasing a seat can take someone off the conference list altogether
+      // (release-seat.ts), so they are found, or added, only now: the roster's
+      // own path for naming a contact who isn't on the list yet.
+      const { data: again } = await db
+        .from("conference_people")
+        .select(PERSON_COLUMNS)
+        .eq("conference_id", params.conferenceId)
+        .eq("organization_id", params.organizationId)
+        .neq("assignment_status", "canceled");
+      personId = personForContact(contact, (again ?? []) as ConferencePersonRow[])?.id ?? null;
+      if (!personId) {
+        const added = await addConferenceAttendee(params.conferenceId, params.organizationId, {
+          displayName: name,
+          contactEmail: contact.email,
+          contactId: contact.id,
+        });
+        if (!added.success) return { success: false, error: added.error };
+        personId = added.data.id;
+      }
+      const named = await allocateSeat(funded.seatId, personId);
+      if (!named.success) return { success: false, error: named.error };
+    }
+    seatId = funded.seatId;
+  } else {
+    const held = personId ? seats.find((seat) => seat.holderPersonId === personId) : undefined;
+    if (!held) {
+      return { success: false, error: `${name} doesn't have a registration yet. Register them first, then choose them here.` };
+    }
+    seatId = held.seatId;
+  }
+
+  const saved = await saveBursaryAnswer({
+    conferenceId: params.conferenceId,
+    organizationId: params.organizationId,
+    field: "delegate_seat_id",
+    value: seatId,
+  });
+  if (!saved.success) return saved;
+  revalidatePath("/org", "layout");
+  return { success: true, data: { confirmReplacing: null } };
+}
+
+/**
+ * Ask CSC to refund a paid registration nobody holds any more, after the
+ * school named its recipient to the CANCOLL-funded one. An Ask in the War
+ * Room (a flag on this conference's admin pages, loadConferenceAsks), not a
+ * refund: staff decide and issue it.
+ */
+export async function requestOpenRegistrationRefund(params: {
+  conferenceId: string;
+  organizationId: string;
+  seatId: string;
+}): Promise<Result<null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!(await canFillBursaryRequest(auth.ctx, params.conferenceId, params.organizationId))) {
+    return { success: false, error: "Only people registered from your institution, or its admin, can ask for this." };
+  }
+  const db = createAdminClient();
+  const [{ seats }, { data: org }] = await Promise.all([
+    loadSeatHoldings(db, { conferenceId: params.conferenceId, organizationId: params.organizationId, seatIds: [params.seatId] }),
+    db.from("organizations").select("name").eq("id", params.organizationId).maybeSingle(),
+  ]);
+  const seat = seats[0];
+  if (!seat) return { success: false, error: "That isn't one of your institution's registrations." };
+  if (seat.holderPersonId) return { success: false, error: "Someone holds that registration now, so there's nothing to refund." };
+
+  const { submitFlag } = await import("@/lib/actions/submit-flag");
+  const result = await submitFlag({
+    pageUrl: `/admin/conference/${params.conferenceId}/registrations?refund_seat=${params.seatId}`,
+    priority: "normal",
+    note: `Refund request: ${org?.name ?? "A school"} has an unused ${seat.entityName} after naming its travel bursary recipient to the CANCOLL-funded registration.`,
+    elementContent: `Seat ${params.seatId}`,
+    organizationId: params.organizationId,
+  });
+  return result.success ? { success: true, data: null } : { success: false, error: result.error ?? "Couldn't send that." };
+}
 
 // ─────────────────────────────────────────────────────────────────
 // The expense claim that follows an approved request
