@@ -90,7 +90,11 @@ export default async function StatusLine({
       <StatusItem tone={urgentCount > 0 ? "alert" : waitingCount > 0 ? "warn" : "quiet"} href="?tab=waiting">
         {waitingCount === 0 ? "Nobody waiting on us" : `${waitingCount} waiting on us${urgentCount ? `, ${urgentCount} urgent` : ""}`}
       </StatusItem>
-      <StatusItem tone={station.stations === 0 ? "quiet" : station.online ? "ok" : "alert"} href="?tab=print">
+      {/* The station's own page: setup, its key and the app download. */}
+      <StatusItem
+        tone={station.stations === 0 ? "quiet" : station.online ? "ok" : "alert"}
+        href={`/admin/conference/${conferenceId}/check-in/print-station`}
+      >
         {station.stations === 0 ? "No print station" : station.online ? "Print station online" : "Print station offline"}
         {station.queued ? ` · ${station.queued} waiting` : ""}
       </StatusItem>
