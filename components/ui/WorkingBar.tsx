@@ -177,10 +177,7 @@ export default function WorkingBar() {
   if (!visible) return null;
   return (
     <div role="status" aria-live="polite" className="pointer-events-none fixed inset-x-0 top-0 z-[400]">
-      <style>{`@keyframes csc-working-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }`}</style>
-      <div className="h-1 w-full overflow-hidden bg-[#EE2A2E]/20">
-        <div className="h-full w-1/4 bg-[#EE2A2E]" style={{ animation: "csc-working-bar 1.2s ease-in-out infinite" }} />
-      </div>
+      <WorkingStrip />
       {slow ? (
         <p className="mx-auto mt-2 w-fit rounded-full bg-white/95 px-3 py-1 text-xs text-gray-700 shadow">
           Still working. Slow connections can take a little longer.
@@ -189,5 +186,17 @@ export default function WorkingBar() {
         <span className="sr-only">Loading</span>
       )}
     </div>
+  );
+}
+
+/** The moving red strip itself, also shown by app/loading.tsx while a page loads. */
+export function WorkingStrip() {
+  return (
+    <>
+      <style>{`@keyframes csc-working-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }`}</style>
+      <div className="h-1 w-full overflow-hidden bg-[#EE2A2E]/20">
+        <div className="h-full w-1/4 bg-[#EE2A2E]" style={{ animation: "csc-working-bar 1.2s ease-in-out infinite" }} />
+      </div>
+    </>
   );
 }
