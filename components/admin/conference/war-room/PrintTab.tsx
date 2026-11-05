@@ -55,7 +55,8 @@ export function PrintView({
   const [reprintOpen, setReprintOpen] = useState(false);
   const [doorEntity, setDoorEntity] = useState("");
   const [shipping, setShipping] = useState<ShippingLabelQueue | null>(null);
-  // What the QL last said it had loaded, e.g. "Die-cut labels 102 mm".
+  // What the QL says is loaded, e.g. "Die-cut labels 104 x 164 mm". The
+  // station asks it every 10 seconds between jobs.
   const [loadedMedia, setLoadedMedia] = useState<string | null>(null);
   const [pickup, setPickup] = useState<PickupPlan | null>(null);
 
@@ -343,13 +344,17 @@ export function PrintView({
                 shipping.waiting > 0
                   ? `${shipping.waiting} shipment${shipping.waiting === 1 ? "" : "s"} waiting, ${shipping.waitingBoxes} label${
                       shipping.waitingBoxes === 1 ? "" : "s"
-                    }. Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back.`
+                    }. ${
+                      shippingRollLoaded(loadedMedia)
+                        ? "The shipping roll (DK-1247) is loaded: print them, then swap the badge roll back."
+                        : "Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back."
+                    }`
                   : null,
                 shipping.released > 0 ? `${shipping.released} at the print station now.` : null,
                 shipping.waiting === 0 && shipping.released === 0
                   ? "Nothing waiting. Shipments booked at the Shipping Desk wait here until you load the DK-1247 roll and print them."
                   : null,
-                loadedMedia ? `The printer last reported: ${loadedMedia}.` : null,
+                loadedMedia ? `The printer reports: ${loadedMedia}.` : null,
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -757,4 +762,9 @@ function PickupRow({
       }
     />
   );
+}
+
+/** DK-1247: the QL reports it as "Die-cut labels 104 x 164 mm" (2026-11-05). */
+function shippingRollLoaded(media: string | null): boolean {
+  return Boolean(media && /die-cut/i.test(media) && /\b16[34]\b/.test(media));
 }

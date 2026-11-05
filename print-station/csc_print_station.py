@@ -44,7 +44,7 @@ if not hasattr(Image, "ANTIALIAS"):
     Image.ANTIALIAS = Image.LANCZOS
 
 import pymupdf  # noqa: E402
-from brother_ql.backends.helpers import send  # noqa: E402
+from brother_ql.backends.helpers import send, status as printer_status_request  # noqa: E402
 from brother_ql.conversion import convert  # noqa: E402
 from brother_ql.raster import BrotherQLRaster  # noqa: E402
 
@@ -206,9 +206,32 @@ def describe_printer(result: dict) -> tuple:
     state = result.get("printer_state") or {}
     media = state.get("media_type")
     width = state.get("media_width")
-    media_text = f"{media} {width} mm" if media else None
+    length = state.get("media_length")
+    # DK-1247 reports "Die-cut labels 104 x 164 mm"; the website reads that
+    # to say the shipping roll is in. Continuous rolls report length 0.
+    size = f"{width} x {length} mm" if length else f"{width} mm"
+    media_text = f"{media} {size}" if media else None
     errors = state.get("errors") or []
     return ("; ".join(errors) if errors else "ready"), media_text
+
+
+# How often to ask the printer what is loaded, between jobs.
+PRINTER_CHECK_SECONDS = 10
+
+
+def check_printer(station, printer: str) -> None:
+    """Ask the QL what roll is loaded, without printing, so the website knows
+    when the shipping roll goes in. USB only: the library has no network
+    status request, and a network printer reports only when it prints."""
+    if backend_for(printer) != "pyusb":
+        return
+    try:
+        state, _raw = printer_status_request(printer_model=SHIPPING_MODEL, printer_identifier=printer,
+                                             backend_identifier="pyusb")
+    except Exception as error:  # cable out, printer off, mid-job
+        station.printer_status = f"Not reachable: {error}"
+        return
+    station.printer_status, station.printer_media = describe_printer({"printer_state": state})
 
 
 def shipping_label_images(pdf: bytes) -> list:
@@ -461,8 +484,12 @@ def run(config: dict, stop=None) -> None:
     log(f"CSC Print Station \"{hello['station']}\" for {hello['conference']}")
     log(f"Printer: {printer} · Drawing with: {Path(browser).name}")
 
+    checked_at = 0.0
     while not (stop and stop.is_set()):
         try:
+            if time.monotonic() - checked_at >= PRINTER_CHECK_SECONDS:
+                check_printer(station, printer)
+                checked_at = time.monotonic()
             station.heartbeat()
             job = station.claim()
             if job:
