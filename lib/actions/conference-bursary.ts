@@ -577,7 +577,13 @@ export async function submitBursaryRequest(params: {
   const now = new Date().toISOString();
   const { data: submitted, error } = await (createAdminClient() as unknown as LooseDb)
     .from("conference_bursary_applications")
-    .update({ requested_at: now, requested_by_user_id: auth.ctx.userId, updated_at: now })
+    .update({
+      requested_at: now,
+      requested_by_user_id: auth.ctx.userId,
+      // Reimbursement unless the school arranged otherwise with the board.
+      payment_preference: view.data.answers.payment_preference ?? "reimburse",
+      updated_at: now,
+    })
     .eq("conference_id", params.conferenceId)
     .eq("organization_id", params.organizationId)
     .is("requested_at", null)

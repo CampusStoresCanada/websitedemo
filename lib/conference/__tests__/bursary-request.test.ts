@@ -33,8 +33,6 @@ describe("the question list", () => {
   it("validates each answer's shape", () => {
     expect(validateBursaryAnswer("covers_travel", true)).toEqual({ valid: true, clean: true });
     expect(validateBursaryAnswer("covers_travel", "yes").valid).toBe(false);
-    expect(validateBursaryAnswer("payment_preference", "prepay")).toEqual({ valid: true, clean: "prepay" });
-    expect(validateBursaryAnswer("payment_preference", "cash").valid).toBe(false);
     expect(validateBursaryAnswer("delegate_seat_id", "not-an-id").valid).toBe(false);
     expect(validateBursaryAnswer("delegate_seat_id", null)).toEqual({ valid: true, clean: null });
     // Picked from seats now: the old contact pick is not a saveable question.

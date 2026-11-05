@@ -6,7 +6,7 @@ import { saveBursaryAnswer, submitBursaryRequest, type BursaryRequestView } from
 import {
   BURSARY_NOTES_MAX,
   BURSARY_PAYMENT_LABELS,
-  BURSARY_PAYMENT_PREFERENCES,
+  BURSARY_PREPAY_CONTACT,
   GM_BUYER_RULE,
   bursaryRequestGaps,
   type BursaryRequestAnswers,
@@ -177,18 +177,12 @@ export default function BursaryRequestForm({
         </section>
 
         <section>
-          <p className="font-medium text-gray-900">How would you like to be paid?</p>
-          {BURSARY_PAYMENT_PREFERENCES.map((p) => (
-            <label key={p} className="mt-1 flex items-center gap-2">
-              <input
-                type="radio"
-                name="bursary-payment"
-                checked={answers.payment_preference === p}
-                onChange={() => save("payment_preference", p)}
-              />
-              {BURSARY_PAYMENT_LABELS[p]}
-            </label>
-          ))}
+          <p className="font-medium text-gray-900">Payment</p>
+          <p className="mt-1">
+            We reimburse your expenses after the conference. If paying up front is a problem for your institution,
+            email <a href={`mailto:${BURSARY_PREPAY_CONTACT}`} className="underline">{BURSARY_PREPAY_CONTACT}</a> and
+            we may be able to help.
+          </p>
         </section>
 
         <section>
