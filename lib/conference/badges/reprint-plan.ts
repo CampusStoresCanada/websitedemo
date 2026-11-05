@@ -59,6 +59,36 @@ export const REPRINT_STOCKS: Record<string, ReprintStock> = {
 export const DEFAULT_REPRINT_STOCK = REPRINT_STOCKS.brother_ql_dk2113;
 
 /**
+ * Which jobs the printer's loaded roll suits, from what the QL reports
+ * (print_stations.printer_media): the 62 mm continuous roll takes stickers,
+ * DK-1247 ("Die-cut labels 104 x 164 mm", seen 2026-11-05) takes shipping
+ * labels. The station makes the same call before it claims a job.
+ */
+export function loadedRoll(media: string | null | undefined): "sticker" | "shipping" | "other" | null {
+  if (!media) return null;
+  if (/die-cut/i.test(media) && /\b16[34]\b/.test(media)) return "shipping";
+  if (/continuous/i.test(media) && /\b62\b/.test(media)) return "sticker";
+  return "other";
+}
+
+/**
+ * Jobs at the station that the loaded roll can't print: what to tell staff,
+ * or null. They wait (the station skips them), so without this they sit.
+ */
+export function rollSwapNeeded(media: string | null | undefined, waiting: { stickers: number; labels: number }): string | null {
+  const roll = loadedRoll(media);
+  if (roll === null) return null;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (roll !== "sticker" && waiting.stickers > 0) {
+    return `Load the 62 mm sticker roll: ${plural(waiting.stickers, "sticker")} waiting`;
+  }
+  if (roll !== "shipping" && waiting.labels > 0) {
+    return `Load the DK-1247 roll: ${plural(waiting.labels, "shipping label job")} waiting`;
+  }
+  return null;
+}
+
+/**
  * Lay the badge's variable layer out for the roll.
  *
  * ⛔ RE-LAYOUT, NOT A SCALE TRANSFORM. A uniform reduction is a hack that fails

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blankCardKey, planReprint, suggestStock } from "../reprint-plan";
+import { blankCardKey, loadedRoll, planReprint, rollSwapNeeded, suggestStock } from "../reprint-plan";
 
 /**
  * ⛔ The delta follows the CARD, not the person. A QL cannot overprint a rigid
@@ -167,5 +167,25 @@ describe("laying the variable layer out for the roll", () => {
   it("puts the stock on a label plan and leaves it off a full-badge one", () => {
     expect(planReprint({ stock: "company_blank", personIsSeated: true }).stockSpec?.widthMm).toBe(62);
     expect(planReprint({ stock: "none", personIsSeated: true }).stockSpec).toBeNull();
+  });
+});
+
+describe("the loaded roll", () => {
+  it("reads what the QL reports", () => {
+    expect(loadedRoll("Die-cut labels 104 x 164 mm")).toBe("shipping");
+    expect(loadedRoll("Continuous length tape 62 mm")).toBe("sticker");
+    expect(loadedRoll("Continuous length tape 29 mm")).toBe("other");
+    expect(loadedRoll(null)).toBeNull();
+  });
+
+  it("asks for a swap only when something waits for the other roll", () => {
+    const shipping = "Die-cut labels 104 x 164 mm";
+    expect(rollSwapNeeded(shipping, { stickers: 1, labels: 0 })).toBe("Load the 62 mm sticker roll: 1 sticker waiting");
+    expect(rollSwapNeeded(shipping, { stickers: 0, labels: 2 })).toBeNull();
+    expect(rollSwapNeeded("Continuous length tape 62 mm", { stickers: 3, labels: 1 })).toBe(
+      "Load the DK-1247 roll: 1 shipping label job waiting"
+    );
+    // Roll unknown: the printer refuses the wrong one, as before.
+    expect(rollSwapNeeded(null, { stickers: 1, labels: 1 })).toBeNull();
   });
 });

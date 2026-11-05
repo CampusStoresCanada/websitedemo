@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadStaffAnsweringOrgId, loadStaffChecklists } from "@/lib/conference/checklist-tasks";
 import { arrangeStaffChecklists, calendarDayIn, describeUrgency } from "@/lib/conference/deadline-urgency";
 import { stationOnline } from "@/lib/conference/badges/print-station";
+import { loadRollSwap } from "@/lib/conference/waiting-on-us";
 import { meetingsSoFar } from "@/lib/conference/checklist-checks";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
@@ -22,19 +23,22 @@ export const loadArrangedChecklists = cache(async (conferenceId: string, timeZon
 /** The print station, for the status line and the Print tab. Cheap: two counts. */
 export const loadPrintStationState = cache(async (conferenceId: string) => {
   const db = createAdminClient();
-  const [stationsRes, waitingJobs] = await Promise.all([
+  const [stationsRes, waitingJobs, rollSwap] = await Promise.all([
     db.from("print_stations").select("last_seen_at").eq("conference_id", conferenceId).is("revoked_at", null),
     db
       .from("badge_print_jobs")
       .select("id", { count: "exact", head: true })
       .eq("conference_id", conferenceId)
       .in("status", ["sent_to_printer", "rendering"]),
+    loadRollSwap(conferenceId),
   ]);
   const stations = stationsRes.data ?? [];
   return {
     stations: stations.length,
     online: stations.some((s) => stationOnline(s.last_seen_at as string | null)),
     queued: waitingJobs.count ?? 0,
+    // The same line Waiting on us shows, beside the queue where you act on it.
+    swap: rollSwap?.message ?? null,
   };
 });
 

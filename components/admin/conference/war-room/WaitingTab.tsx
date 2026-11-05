@@ -98,6 +98,7 @@ const KIND_LABEL: Record<WaitingItem["kind"], string> = {
   swap_cap: "Meeting swaps",
   bursary: "Travel bursary",
   bursary_prepay: "Travel bursary: pay in advance",
+  roll_swap: "Roll swap",
 };
 
 /** One person waiting, and the actions that answer them. */
@@ -130,6 +131,11 @@ function WaitingRow({ item }: { item: WaitingItem }) {
           onConfirm={async () => after(await decideSwapCapIncreaseRequest(item.id, "denied"))}
         />
       </>
+    ) : item.kind === "roll_swap" ? (
+      // Nothing to mark done: it clears when the roll goes in.
+      <a href="?tab=print" className="text-sm font-medium text-gray-700 underline">
+        Print tab
+      </a>
     ) : item.kind === "bursary_prepay" ? (
       <ConfirmAction
         label="Booked"

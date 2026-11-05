@@ -5,6 +5,8 @@ import { loadConferenceAsks, type ConferenceAsk } from "@/lib/actions/flags";
 import { listSwapCapIncreaseRequests } from "@/lib/actions/conference-swaps";
 import { loadBursaryApplications } from "@/lib/conference/bursary-widget";
 import { loadSeatHoldings } from "@/lib/conference/seats";
+import { stationOnline } from "@/lib/conference/badges/print-station";
+import { rollSwapNeeded } from "@/lib/conference/badges/reprint-plan";
 
 /**
  * Everything where a person is waiting on CSC, in one list (Stephen,
@@ -24,13 +26,16 @@ import { loadSeatHoldings } from "@/lib/conference/seats";
  *               there is no approval step since 2026-11-02.
  *   bursary_prepay — a request that asked CSC to pay in advance, until staff
  *               mark the hotel and travel booked (prepay_booked_at).
+ *   roll_swap — print jobs the station's loaded roll can't print, which it
+ *               skips until someone swaps the roll (Steve, 2026-11-05: "it
+ *               should light up Waiting on us"). Clears itself on the swap.
  *
  * ⚠️ Travel-window exceptions are NOT here: they live in
  * conference_registrations, which nothing has written since registrations moved
  * to seats (0 rows, 2026-10-26). A queue item nobody can create is a dead row.
  */
 export type WaitingItem = {
-  kind: "ask" | "swap_cap" | "bursary" | "bursary_prepay";
+  kind: "ask" | "swap_cap" | "bursary" | "bursary_prepay" | "roll_swap";
   id: string;
   /** Who is waiting, and for whom they speak. */
   who: string | null;
@@ -62,16 +67,61 @@ export type WaitingOnUs = {
   doneAsks: ConferenceAsk[];
 };
 
+/**
+ * Jobs at the print station that its loaded roll can't print, or null. A
+ * waiting sticker is urgent: someone is standing at the desk for it.
+ */
+export async function loadRollSwap(
+  conferenceId: string
+): Promise<{ message: string; urgent: boolean; since: string } | null> {
+  const db = createAdminClient();
+  const [{ data: stations }, { data: jobs }] = await Promise.all([
+    db.from("print_stations").select("last_seen_at, printer_media").eq("conference_id", conferenceId).is("revoked_at", null),
+    db
+      .from("badge_print_jobs")
+      .select("pipeline_type, created_at")
+      .eq("conference_id", conferenceId)
+      .in("status", ["sent_to_printer", "rendering"])
+      .order("created_at", { ascending: true }),
+  ]);
+  const media = (stations ?? []).find((s) => s.printer_media && stationOnline(s.last_seen_at as string | null))?.printer_media;
+  const waiting = jobs ?? [];
+  const stickers = waiting.filter((j) => j.pipeline_type === "onsite_reprint");
+  const labels = waiting.filter((j) => j.pipeline_type === "shipping_label");
+  const message = rollSwapNeeded(media as string | null | undefined, { stickers: stickers.length, labels: labels.length });
+  if (!message) return null;
+  const forStickers = message.includes("sticker roll");
+  return {
+    message,
+    urgent: forStickers,
+    since: ((forStickers ? stickers : labels)[0]?.created_at as string | undefined) ?? new Date().toISOString(),
+  };
+}
+
 export async function loadWaitingOnUs(conferenceId: string): Promise<WaitingOnUs> {
   const db = createAdminClient();
-  const [asks, capRequests, bursaries, { seats }] = await Promise.all([
+  const [asks, capRequests, bursaries, { seats }, rollSwap] = await Promise.all([
     loadConferenceAsks(conferenceId),
     listSwapCapIncreaseRequests(conferenceId),
     loadBursaryApplications(conferenceId),
     loadSeatHoldings(db, { conferenceId, entityKinds: ["registration"] }),
+    loadRollSwap(conferenceId),
   ]);
 
   const items: WaitingItem[] = [];
+
+  if (rollSwap) {
+    items.push({
+      kind: "roll_swap",
+      id: "print-station",
+      who: "Print station",
+      org: null,
+      what: rollSwap.message,
+      details: "The station skips them until the roll is swapped, then prints them by itself.",
+      since: rollSwap.since,
+      urgent: rollSwap.urgent,
+    });
+  }
 
   for (const ask of asks) {
     if (!OPEN_ASK.has(ask.status)) continue;

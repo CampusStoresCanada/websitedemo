@@ -13,7 +13,7 @@ import {
 import type { PickupPlan, ShippingLabelQueue } from "@/lib/conference/shipping";
 import { printBadge } from "@/lib/actions/conference-people";
 import { updateField } from "@/lib/actions/update-field";
-import { cardChoices, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
+import { cardChoices, loadedRoll, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
 import ConfirmAction from "@/components/ui/ConfirmAction";
 import Modal from "@/components/ui/Modal";
 import OperateRow from "@/components/ui/OperateRow";
@@ -21,7 +21,7 @@ import OperateRow from "@/components/ui/OperateRow";
 import { whenMountain, type ConferencePerson } from "./shared";
 
 /** The print station, as the page already read it for the status line. */
-export type PrintStationState = { stations: number; online: boolean; queued: number };
+export type PrintStationState = { stations: number; online: boolean; queued: number; swap: string | null };
 
 const JOB_STATUS_WORDS: Record<string, string> = {
   queued: "Being made",
@@ -345,14 +345,14 @@ export function PrintView({
                   ? `${shipping.waiting} shipment${shipping.waiting === 1 ? "" : "s"} waiting, ${shipping.waitingBoxes} label${
                       shipping.waitingBoxes === 1 ? "" : "s"
                     }. ${
-                      shippingRollLoaded(loadedMedia)
+                      loadedRoll(loadedMedia) === "shipping"
                         ? "The shipping roll (DK-1247) is loaded: print them, then swap the badge roll back."
                         : "Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back."
                     }`
                   : null,
                 shipping.released > 0
                   ? `${shipping.released} at the print station${
-                      shippingRollLoaded(loadedMedia) ? " now" : ", printing as soon as the DK-1247 roll goes in"
+                      loadedRoll(loadedMedia) === "shipping" ? " now" : ", printing as soon as the DK-1247 roll goes in"
                     }.`
                   : null,
                 shipping.waiting === 0 && shipping.released === 0
@@ -392,6 +392,7 @@ export function PrintView({
               : `${station.online ? "Station online" : "Station offline"}${station.queued ? ` · ${station.queued} waiting` : ""} ▸`}
           </a>
         </div>
+        {station.swap ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{station.swap}.</p> : null}
         {overview.jobs.length === 0 ? (
           <p className="py-3 text-sm text-gray-500">Nothing printed yet.</p>
         ) : (
@@ -768,7 +769,3 @@ function PickupRow({
   );
 }
 
-/** DK-1247: the QL reports it as "Die-cut labels 104 x 164 mm" (2026-11-05). */
-function shippingRollLoaded(media: string | null): boolean {
-  return Boolean(media && /die-cut/i.test(media) && /\b16[34]\b/.test(media));
-}
