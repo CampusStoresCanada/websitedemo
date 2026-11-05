@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import DevPanel from "@/components/dev/DevPanel";
 import Toolkit, { ToolkitProvider } from "@/components/ui/Toolkit";
+import WorkingBar from "@/components/ui/WorkingBar";
 import FlagReviewPanel from "@/components/ui/FlagReviewPanel";
 import ExplainContextPanel from "@/components/ui/ExplainContextPanel";
 import InternalSharePanel from "@/components/ui/InternalSharePanel";
@@ -108,6 +109,8 @@ export default async function RootLayout({
         <link rel="stylesheet" href="https://use.typekit.net/uxh8ckq.css" />
       </head>
       <body className="antialiased">
+        {/* While the site waits on its server, a bar says so (components/ui/WorkingBar). */}
+        <WorkingBar />
         <AuthProvider
           key={serverAuth.user?.id ?? "anon"}
           initialAuth={initialAuth}
