@@ -864,15 +864,15 @@ export async function requestOpenRegistrationRefund(params: {
  * claim belong to. The same pick the conference page makes for its bursary
  * button. Null when the viewer belongs to no member organisation.
  */
-export async function getBursarySchool(): Promise<{ id: string; name: string } | null> {
+export async function getBursarySchool(): Promise<{ id: string; name: string; slug: string | null } | null> {
   const auth = await requireAuthenticated();
   if (!auth.ok || auth.ctx.activeOrgIds.length === 0) return null;
   const { data } = await createAdminClient()
     .from("organizations")
-    .select("id, name, type")
+    .select("id, name, slug, type")
     .in("id", auth.ctx.activeOrgIds);
   const school = (data ?? []).find((o) => o.type === "Member");
-  return school ? { id: school.id, name: school.name } : null;
+  return school ? { id: school.id, name: school.name, slug: school.slug ?? null } : null;
 }
 
 /**

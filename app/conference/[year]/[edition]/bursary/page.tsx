@@ -38,8 +38,15 @@ export default async function BursaryRequestPage({
     return (
       <main className="mx-auto max-w-3xl px-4 py-10">
         <h1 className="text-xl font-semibold text-gray-900">Travel support</h1>
-        <p className="mt-2 text-sm text-gray-600">Travel support is for CSC member institutions.</p>
-        <p className="mt-2 text-sm">
+        <p className="mt-2 text-sm text-gray-600">
+          Travel support is for CSC member institutions. Join CSC first, then come back here to tell us what you need.
+        </p>
+        <p className="mt-4">
+          <a href="/apply/member" className="inline-block rounded-md bg-[#163D6D] px-4 py-2 text-sm font-semibold text-white">
+            Join CSC
+          </a>
+        </p>
+        <p className="mt-4 text-sm">
           <a href={`/conference/${year}/${edition}/terms#travel_bursary_terms`} className="text-[#163D6D] underline">
             Read the Travel Bursary Terms
           </a>
@@ -69,7 +76,18 @@ export default async function BursaryRequestPage({
           registerHref={`/conference/${year}/${edition}/register`}
         />
       ) : (
-        <p className="mt-4 text-sm text-gray-600">{request.error}</p>
+        <div className="mt-4 text-sm text-gray-600">
+          <p>{request.error}</p>
+          {/* A lapsed school renews on its own page, where the renewal card is
+              (MemberProfile's RenewMembershipCard). */}
+          {request.error.includes("membership") && school.slug && (
+            <p className="mt-4">
+              <a href={`/org/${school.slug}`} className="inline-block rounded-md bg-[#163D6D] px-4 py-2 font-semibold text-white">
+                Renew your membership
+              </a>
+            </p>
+          )}
+        </div>
       )}
       {claimWindow && (
         <p className="mt-8 text-sm text-gray-800">
