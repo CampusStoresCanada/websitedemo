@@ -41,3 +41,24 @@ export function loginWithNext(
   */
   return `/login?next=${encodeURIComponent(next)}`;
 }
+
+/**
+ * The return address a sign-in page may send someone to, or `fallback`.
+ *
+ * ⛔ "Starts with /" is not enough: `//evil.example` and `/\\evil.example`
+ * both start with "/" and browsers read them as another site, so a real
+ * campusstores.ca login link could land a member on a lookalike page after
+ * they sign in. Only a path on this site gets through. Every page that reads
+ * a `next` param uses this, never its own test.
+ */
+export function safeNextPath(raw: string | null | undefined, fallback: string): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return fallback;
+  try {
+    const base = "https://campusstores.invalid";
+    const url = new URL(raw, base);
+    if (url.origin !== base) return fallback;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallback;
+  }
+}
