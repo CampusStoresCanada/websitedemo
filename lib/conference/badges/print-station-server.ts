@@ -86,14 +86,18 @@ const STATION_PIPELINES = ["onsite_reprint", "document", "shipping_label"] as co
  */
 export async function claimNextJob(
   station: PrintStation,
-  options: { acceptsDocuments?: boolean; acceptsShippingLabels?: boolean } = {}
+  options: { acceptsStickers?: boolean; acceptsDocuments?: boolean; acceptsShippingLabels?: boolean } = {}
 ): Promise<ClaimedJob | null> {
   const db = createAdminClient();
   // ⛔ Each kind goes only to a station that says it can print it: an older
-  // app reads anything unknown as a sticker job with no stickers.
-  const pipelines: string[] = ["onsite_reprint"];
+  // app reads anything unknown as a sticker job with no stickers. A station
+  // also leaves out whatever its loaded roll is wrong for, so a sticker waits
+  // while the shipping roll is in, and the other way round.
+  const pipelines: string[] = [];
+  if (options.acceptsStickers ?? true) pipelines.push("onsite_reprint");
   if (options.acceptsDocuments) pipelines.push("document");
   if (options.acceptsShippingLabels) pipelines.push("shipping_label");
+  if (pipelines.length === 0) return null;
   const { data: candidates, error } = await db
     .from("badge_print_jobs")
     .select("id, person_id, status, updated_at, metadata, pipeline_type")

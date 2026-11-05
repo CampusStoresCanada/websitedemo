@@ -215,6 +215,23 @@ def describe_printer(result: dict) -> tuple:
     return ("; ".join(errors) if errors else "ready"), media_text
 
 
+def loaded_roll(media) -> str | None:
+    """Which job the loaded roll suits: "shipping" (DK-1247, reported as
+    "Die-cut labels 104 x 164 mm"), "sticker" (62 mm continuous), "other",
+    or None when the printer has not said."""
+    if not media:
+        return None
+    m = media.lower()
+    if "die-cut" in m and "164" in m:
+        return "shipping"
+    if "continuous" in m and " 62 " in f"{m} ":
+        return "sticker"
+    return "other"
+
+
+ROLL_NAMES = {"sticker": "the 62 mm sticker roll", "shipping": "the 103 x 164 die-cut roll (DK-1247)"}
+
+
 # How often to ask the printer what is loaded, between jobs.
 PRINTER_CHECK_SECONDS = 10
 
@@ -335,9 +352,18 @@ class Station:
 
     def claim(self):
         # Saying we print documents is what gets us handed them; an older
-        # station that doesn't say so only ever gets stickers.
+        # station that doesn't say so only ever gets stickers. ⛔ We leave out
+        # what the loaded roll is wrong for, so it waits on the queue and
+        # prints once the right roll goes in. Roll unknown: ask for both and
+        # let the printer refuse.
+        roll = loaded_roll(self.printer_media)
+        accepts = ["document"]
+        if roll in ("sticker", None):
+            accepts.append("stickers")
+        if roll in ("shipping", None):
+            accepts.append("shipping_label")
         r = self.session.post(self.url("/api/print-station/claim"),
-                              json={"accepts": ["stickers", "document", "shipping_label"]}, timeout=15)
+                              json={"accepts": accepts}, timeout=15)
         r.raise_for_status()
         return r.json().get("job")
 
@@ -372,6 +398,16 @@ class StickerError(Exception):
 
 class DocumentError(Exception):
     """The document itself cannot become a PDF (not shared, not a PDF) — retrying will not help."""
+
+
+def wrong_roll(station, printer: str, wants: str):
+    """Ask again just before printing: the roll may have changed since the
+    last check. Returns what to say if the loaded roll is wrong, else None."""
+    check_printer(station, printer)
+    roll = loaded_roll(station.printer_media)
+    if roll is None or roll == wants:
+        return None
+    return f"Wrong roll: {station.printer_media} is loaded. Load {ROLL_NAMES[wants]}."
 
 
 def run_document_job(station: "Station", config: dict, job: dict) -> None:
@@ -415,6 +451,12 @@ def run_shipping_label_job(station: "Station", printer: str, job: dict) -> None:
         station.report(job["jobId"], ok=False, retry=False, error=f"Unreadable labels: {error}")
         return
 
+    problem = wrong_roll(station, printer, "shipping")
+    if problem:
+        log(f"  {problem} They wait for the next Print the shipping labels.")
+        station.report(job["jobId"], ok=False, retry=True, error=problem)
+        return
+
     try:
         result = print_images(printer, images, label=SHIPPING_LABEL, model=SHIPPING_MODEL)
     except Exception as error:  # cable out, printer off
@@ -454,6 +496,12 @@ def run_job(station: Station, browser: str, printer: str, job: dict) -> None:
         # sticker's fault: back to the queue.
         log(f"  The browser could not draw the sticker ({error}). It stays in the queue.")
         station.report(job["jobId"], ok=False, retry=True, error=f"Drawing failed: {error}")
+        return
+
+    problem = wrong_roll(station, printer, "sticker")
+    if problem:
+        log(f"  {problem} It stays in the queue.")
+        station.report(job["jobId"], ok=False, retry=True, error=problem)
         return
 
     try:

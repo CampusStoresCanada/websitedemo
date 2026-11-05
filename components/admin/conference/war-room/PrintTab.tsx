@@ -350,7 +350,11 @@ export function PrintView({
                         : "Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back."
                     }`
                   : null,
-                shipping.released > 0 ? `${shipping.released} at the print station now.` : null,
+                shipping.released > 0
+                  ? `${shipping.released} at the print station${
+                      shippingRollLoaded(loadedMedia) ? " now" : ", printing as soon as the DK-1247 roll goes in"
+                    }.`
+                  : null,
                 shipping.waiting === 0 && shipping.released === 0
                   ? "Nothing waiting. Shipments booked at the Shipping Desk wait here until you load the DK-1247 roll and print them."
                   : null,
@@ -364,7 +368,7 @@ export function PrintView({
                       label: "Print the shipping labels",
                       consequence: `Sends ${shipping.waitingBoxes} label${
                         shipping.waitingBoxes === 1 ? "" : "s"
-                      } to the print station. If the badge roll is still in, they come back here to wait.`,
+                      } to the print station. With the badge roll in, they wait there and print once DK-1247 is loaded.`,
                       onConfirm: async () => {
                         const res = await printShippingLabels(conferenceId);
                         await loadShipping();

@@ -85,6 +85,20 @@ describe("handing out shipping labels", () => {
   });
 });
 
+describe("the loaded roll decides what a station takes", () => {
+  it("with the shipping roll in, leaves stickers on the queue", async () => {
+    jobs.unshift({ ...jobs[0], id: "sticker", pipeline_type: "onsite_reprint", metadata: {} });
+    const job = await claimNextJob(station, { acceptsStickers: false, acceptsDocuments: true, acceptsShippingLabels: true });
+    expect(pipelinesAsked).not.toContain("onsite_reprint");
+    expect(job?.jobId).toBe("labels");
+  });
+
+  it("asks for nothing when the roll suits nothing", async () => {
+    expect(await claimNextJob(station, { acceptsStickers: false })).toBeNull();
+    expect(pipelinesAsked).toEqual([]);
+  });
+});
+
 describe("a refused print", () => {
   it("sends a shipping label back to waiting for the roll swap", async () => {
     await finishJob(station, "labels", "p1", { ok: false, retry: true, error: "Replace media error" });

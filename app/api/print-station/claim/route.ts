@@ -8,17 +8,20 @@ export const dynamic = "force-dynamic";
  *
  * A station that can print documents and shipping labels says so
  * (`{"accepts": ["stickers", "document", "shipping_label"]}`); one running
- * an older app sends less and is only handed what it named.
+ * an older app sends less and is only handed what it named. A station with
+ * the shipping roll in leaves out "stickers", and with the sticker roll in
+ * leaves out "shipping_label". The oldest app sends nothing: stickers only.
  */
 export async function POST(request: Request) {
   const station = await authenticatePrintStation(request);
   if (!station) return NextResponse.json({ error: "Unknown or revoked print station key." }, { status: 401 });
   const body = (await request.json().catch(() => ({}))) as { accepts?: unknown };
   const accepts = Array.isArray(body.accepts) ? body.accepts : [];
+  const acceptsStickers = accepts.length === 0 || accepts.includes("stickers");
   const acceptsDocuments = accepts.includes("document");
   const acceptsShippingLabels = accepts.includes("shipping_label");
   try {
-    return NextResponse.json({ job: await claimNextJob(station, { acceptsDocuments, acceptsShippingLabels }) });
+    return NextResponse.json({ job: await claimNextJob(station, { acceptsStickers, acceptsDocuments, acceptsShippingLabels }) });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not read the queue." }, { status: 500 });
   }
