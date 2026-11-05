@@ -134,8 +134,8 @@ export default function BursaryRequestForm({
           {answers.covers_hotel && <p className="mt-1">Hotel: {view.hotelText}.</p>}
           {answers.notes && <p className="mt-1">You also told us: {answers.notes}</p>}
           <p className="mt-1">
-            There is no separate approval to wait for. After the conference, claim your expenses on this page, with
-            receipts.
+            There is no separate approval to wait for. After the conference, you&apos;ll claim your expenses, with
+            receipts, on a separate page.
           </p>
         {/* The terms changed after this request went in (v2, 2026-11-02): the
             school agrees to the current version here, by the same control. */}

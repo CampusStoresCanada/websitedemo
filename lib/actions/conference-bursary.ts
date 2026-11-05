@@ -22,6 +22,7 @@ import { loadSeatHoldings } from "@/lib/conference/seats";
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
 import { canFillBursaryRequest } from "@/lib/conference/bursary-access";
+import { claimWindowOpen } from "@/lib/expenses/rules";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
@@ -609,6 +610,51 @@ export async function submitBursaryRequest(params: {
 // ─────────────────────────────────────────────────────────────────
 // The expense claim that follows an approved request
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * The viewer's member school: the school a travel bursary request and its
+ * claim belong to. The same pick the conference page makes for its bursary
+ * button. Null when the viewer belongs to no member organisation.
+ */
+export async function getBursarySchool(): Promise<{ id: string; name: string } | null> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok || auth.ctx.activeOrgIds.length === 0) return null;
+  const { data } = await createAdminClient()
+    .from("organizations")
+    .select("id, name, type")
+    .in("id", auth.ctx.activeOrgIds);
+  const school = (data ?? []).find((o) => o.type === "Member");
+  return school ? { id: school.id, name: school.name } : null;
+}
+
+/**
+ * When the bursary's expense claims open, read without opening a claim, so
+ * the request page can point at the claim page before anyone has one.
+ */
+export async function getBursaryClaimWindow(
+  conferenceId: string
+): Promise<{ open: boolean; notYetOpen: boolean; opensOnLabel: string | null } | null> {
+  const { data: program } = await createAdminClient()
+    .from("expense_programs")
+    .select("opens_at, closes_at")
+    .eq("conference_id", conferenceId)
+    .eq("is_active", true)
+    .like("slug", "travel-bursary-%")
+    .maybeSingle();
+  if (!program) return null;
+  return {
+    open: claimWindowOpen(program.opens_at, program.closes_at),
+    notYetOpen: !!program.opens_at && Date.now() < Date.parse(program.opens_at),
+    opensOnLabel: program.opens_at
+      ? new Date(program.opens_at).toLocaleDateString("en-CA", {
+          timeZone: "America/Edmonton",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })
+      : null,
+  };
+}
 
 /**
  * The school's travel expense claim, opened on first visit once its request is
