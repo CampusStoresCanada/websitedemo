@@ -34,6 +34,7 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_holders", label: "Conference seat-holders (v3)" },
   { value: "conference_orgs_with_open_seats", label: "Orgs with unassigned seats" },
   { value: "conference_orgs_fully_assigned", label: "Orgs — all seats assigned" },
+  { value: "bursary_requesters", label: "Travel bursary requesters" },
   { value: "org_admins", label: "All Org Admins" },
   { value: "contact_tags", label: "Tagged Contacts (lapsed, prospects, board, etc.)" },
   { value: "custom_emails", label: "Custom Email List" },

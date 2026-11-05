@@ -66,10 +66,17 @@ function mockDb(
     profiles: [{ display_name: "Sam Second" }],
     expense_programs: [{ opens_at: "2027-02-04T12:00:00+00:00", closes_at: "2027-03-07T08:00:00+00:00" }],
   };
+  // Lists, for the shared requester reader (bursary-access.ts): the same
+  // fixture, as the rows it reads.
+  const lists: Record<string, unknown[]> = {
+    conference_bursary_applications: forEmail ? [{ id: APP_ID, organization_id: "org-9", ...forEmail }] : [],
+    profiles: [{ id: "user-2", display_name: "Sam Second" }],
+  };
   const chain = (table: string): Record<string, unknown> => {
     const self: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "like", "in", "is"]) self[m] = () => self;
+    for (const m of ["select", "eq", "like", "in", "is", "not", "neq"]) self[m] = () => self;
     self.maybeSingle = () => Promise.resolve({ data: answers[table]?.shift() ?? null, error: null });
+    self.then = (resolve: (v: unknown) => void) => resolve({ data: lists[table] ?? [], error: null });
     return self;
   };
   const client = {

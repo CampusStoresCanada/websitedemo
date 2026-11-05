@@ -329,6 +329,8 @@ export type AudienceType =
   | "conference_holders"
   | "conference_orgs_with_open_seats"
   | "conference_orgs_fully_assigned"
+  /** Schools with a submitted travel bursary request: its contact and its submitter (lib/conference/bursary-access.ts). */
+  | "bursary_requesters"
   | "global_admins"
   | "org_admins"
   | "event_registrants"

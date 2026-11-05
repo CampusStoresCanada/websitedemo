@@ -21,11 +21,10 @@ import {
 import { loadSeatHoldings } from "@/lib/conference/seats";
 import { loadStoreContacts, type StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
-import { canFillBursaryRequest, supportedSeat } from "@/lib/conference/bursary-access";
+import { canFillBursaryRequest, loadBursaryRequesters, supportedSeat } from "@/lib/conference/bursary-access";
 import { isFundedOffer } from "@/lib/conference/entity-pricing";
 import { addConferenceAttendee, allocateSeat, deallocateSeat } from "@/lib/actions/conference-entity-commerce";
 import { claimWindowOpen } from "@/lib/expenses/rules";
-import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -126,20 +125,10 @@ async function tellRequesters(applicationId: string, templateKey: BursaryTemplat
       .maybeSingle();
     if (!row?.conference) return 0;
 
-    const people = new Map<string, string | null>();
-    const add = (email: string | null | undefined, name: string | null | undefined) => {
-      const key = email?.trim().toLowerCase();
-      if (key && !people.has(key)) people.set(key, name?.trim() || null);
-    };
-    add(row.contact_email, row.contact_name !== row.contact_email ? row.contact_name : null);
-    if (row.requested_by_user_id) {
-      const admin = createAdminClient();
-      const [emails, { data: profile }] = await Promise.all([
-        lookupUserEmailsByIds(admin, [row.requested_by_user_id]),
-        admin.from("profiles").select("display_name").eq("id", row.requested_by_user_id).maybeSingle(),
-      ]);
-      add(emails[row.requested_by_user_id], profile?.display_name);
-    }
+    // Submitted a moment ago, so the shared reader finds it.
+    const people = new Map(
+      (await loadBursaryRequesters({ applicationId })).map((p) => [p.email, p.name] as const)
+    );
     if (people.size === 0) return 0;
 
     const { data: program } = await db

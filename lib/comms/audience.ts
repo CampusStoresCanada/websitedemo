@@ -192,6 +192,9 @@ async function resolveAudienceByType(
     case "conference_orgs_fully_assigned":
       return resolveConferenceOrgsBySeatStatus(supabase, audience.filters ?? {}, false);
 
+    case "bursary_requesters":
+      return resolveBursaryRequesters(audience.filters ?? {});
+
     case "global_admins":
       return resolveGlobalAdmins(supabase);
 
@@ -216,6 +219,18 @@ async function resolveAudienceByType(
   }
 }
 
+
+// ── Travel bursary requesters ─────────────────────────────────────
+
+async function resolveBursaryRequesters(filters: AudienceDefinition["filters"]): Promise<ResolvedRecipient[]> {
+  const { loadBursaryRequesters } = await import("@/lib/conference/bursary-access");
+  const people = await loadBursaryRequesters({ conferenceId: filters?.conference_instance_id ?? undefined });
+  const byEmail = new Map<string, ResolvedRecipient>();
+  for (const p of people) {
+    if (!byEmail.has(p.email)) byEmail.set(p.email, { userId: null, email: p.email, name: p.name });
+  }
+  return [...byEmail.values()];
+}
 
 // ── All Conference Attendees ──────────────────────────────────────
 

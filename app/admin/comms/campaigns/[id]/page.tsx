@@ -44,6 +44,8 @@ function describeAudience(audience: AudienceDefinition | null): string {
       return "Orgs with unassigned seats";
     case "conference_orgs_fully_assigned":
       return "Orgs — all seats assigned";
+    case "bursary_requesters":
+      return "Travel bursary requesters";
     case "contact_tags":
       return "Tagged contacts";
     case "custom_emails":

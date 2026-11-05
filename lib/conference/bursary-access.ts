@@ -2,6 +2,7 @@ import { canManageOrganization, type AuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isFundedOffer } from "@/lib/conference/entity-pricing";
 import { loadSeatHoldings, type SeatHolding } from "@/lib/conference/seats";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 /**
  * Who may fill in a school's request: anyone registered for this conference
@@ -91,4 +92,63 @@ export async function loadBursaryDesignatedSeatIds(
   conferenceId: string
 ): Promise<Set<string>> {
   return new Set([...(await loadSupportedSeats(db, conferenceId)).values()].map((s) => s.seatId));
+}
+
+/**
+ * Who CSC writes to about a school's travel bursary request: the contact on
+ * the request and whoever submitted it, once each by address. The one answer
+ * for the request's own emails (tellRequesters) and for a campaign to every
+ * requesting school (the comms audience "bursary_requesters").
+ *
+ * For one request: whatever its status, since its own emails include the
+ * decline. For a whole conference: only submitted requests that were not
+ * declined.
+ */
+export async function loadBursaryRequesters(params: {
+  conferenceId?: string;
+  applicationId?: string;
+}): Promise<Array<{ applicationId: string; organizationId: string; email: string; name: string | null }>> {
+  const db = createAdminClient() as unknown as { from: (t: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let q = db
+    .from("conference_bursary_applications")
+    .select("id, organization_id, contact_name, contact_email, requested_by_user_id, status, requested_at");
+  if (params.applicationId) {
+    q = q.eq("id", params.applicationId);
+  } else {
+    q = q.not("requested_at", "is", null).neq("status", "denied");
+    if (params.conferenceId) q = q.eq("conference_id", params.conferenceId);
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(`Could not load travel bursary requests: ${error.message}`);
+  const rows = (data ?? []) as Array<{
+    id: string;
+    organization_id: string;
+    contact_name: string | null;
+    contact_email: string | null;
+    requested_by_user_id: string | null;
+  }>;
+
+  const userIds = [...new Set(rows.map((r) => r.requested_by_user_id).filter((id): id is string => !!id))];
+  const admin = createAdminClient();
+  const [emails, { data: profiles }] = await Promise.all([
+    userIds.length ? lookupUserEmailsByIds(admin, userIds) : Promise.resolve({} as Record<string, string>),
+    userIds.length
+      ? admin.from("profiles").select("id, display_name").in("id", userIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; display_name: string | null }> }),
+  ]);
+  const nameOf = new Map((profiles ?? []).map((p) => [p.id as string, (p.display_name as string | null) ?? null]));
+
+  const out: Array<{ applicationId: string; organizationId: string; email: string; name: string | null }> = [];
+  for (const r of rows) {
+    const seen = new Set<string>();
+    const add = (email: string | null | undefined, name: string | null | undefined) => {
+      const key = email?.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ applicationId: r.id, organizationId: r.organization_id, email: key, name: name?.trim() || null });
+    };
+    add(r.contact_email, r.contact_name !== r.contact_email ? r.contact_name : null);
+    if (r.requested_by_user_id) add(emails[r.requested_by_user_id], nameOf.get(r.requested_by_user_id));
+  }
+  return out;
 }
