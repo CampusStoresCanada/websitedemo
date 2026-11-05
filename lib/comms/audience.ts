@@ -195,6 +195,9 @@ async function resolveAudienceByType(
     case "bursary_requesters":
       return resolveBursaryRequesters(audience.filters ?? {});
 
+    case "conference_schools_not_acted":
+      return resolveSchoolsNotActed(supabase, audience.filters ?? {});
+
     case "global_admins":
       return resolveGlobalAdmins(supabase);
 
@@ -228,6 +231,87 @@ async function resolveBursaryRequesters(filters: AudienceDefinition["filters"]):
   const byEmail = new Map<string, ResolvedRecipient>();
   for (const p of people) {
     if (!byEmail.has(p.email)) byEmail.set(p.email, { userId: null, email: p.email, name: p.name });
+  }
+  return [...byEmail.values()];
+}
+
+// ── Schools that haven't acted ───────────────────────────────────
+
+const CURRENT_MEMBERSHIP = new Set(["active", "grace", "reactivated"]);
+
+/**
+ * Every contact at the schools in one segment that have done neither, for
+ * this conference: registered anyone (a Board Registration counts: that
+ * school is represented) nor submitted a travel bursary request. Read when
+ * the send goes out, so a school that acts the day before drops off (Steve,
+ * 2026-11-05: the November 20 second round).
+ *
+ * Contacts, not logins: most school contacts never signed in, and a
+ * condition gate resolves a recipient's school through their login, so it
+ * can't do this. Contacts tagged Inactive are left out.
+ */
+async function resolveSchoolsNotActed(
+  supabase: AdminClient,
+  filters: AudienceDefinition["filters"]
+): Promise<ResolvedRecipient[]> {
+  const conferenceId = filters?.conference_instance_id;
+  const segment = filters?.school_segment;
+  if (!conferenceId || !segment) {
+    console.warn("[comms/audience] conference_schools_not_acted needs a conference and a school_segment");
+    return [];
+  }
+
+  const [{ data: orgs }, { data: seats }, { data: requests }] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("id, type, membership_status, is_cancoll_member")
+      .is("archived_at", null)
+      .eq("is_test", false)
+      .in("type", ["Member", "Non-Member"]),
+    supabase
+      .from("entity_balance_seats")
+      .select("organization_id, conference_entities!inner(kind)")
+      .eq("conference_id", conferenceId)
+      .eq("conference_entities.kind", "registration"),
+    (supabase as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+      .from("conference_bursary_applications")
+      .select("organization_id")
+      .eq("conference_id", conferenceId)
+      .not("requested_at", "is", null),
+  ]);
+
+  const acted = new Set<string>([
+    ...((seats ?? []) as Array<{ organization_id: string | null }>).map((r) => r.organization_id).filter((id): id is string => !!id),
+    ...((requests ?? []) as Array<{ organization_id: string }>).map((r) => r.organization_id),
+  ]);
+  const inSegment = (o: { type: string | null; membership_status: string | null; is_cancoll_member: boolean | null }) => {
+    const current = o.type === "Member" && CURRENT_MEMBERSHIP.has(o.membership_status ?? "");
+    switch (segment) {
+      case "cancoll_members":
+        return current && o.is_cancoll_member === true;
+      case "members_not_in_cancoll":
+        return current && o.is_cancoll_member !== true;
+      case "lapsed_members":
+        return o.type === "Member" && !current;
+      case "cancoll_not_in_csc":
+        return o.type === "Non-Member" && o.is_cancoll_member === true;
+    }
+  };
+  const schoolIds = (orgs ?? []).filter((o) => inSegment(o) && !acted.has(o.id)).map((o) => o.id);
+  if (schoolIds.length === 0) return [];
+
+  const { data: contacts } = await supabase
+    .from("contacts")
+    .select("name, email, work_email, contact_type")
+    .in("organization_id", schoolIds)
+    .is("archived_at", null);
+
+  const byEmail = new Map<string, ResolvedRecipient>();
+  for (const c of contacts ?? []) {
+    if ((c.contact_type ?? []).includes("Inactive")) continue;
+    const email = (c.work_email || c.email || "").trim().toLowerCase();
+    if (!email.includes("@") || byEmail.has(email)) continue;
+    byEmail.set(email, { userId: null, email, name: c.name ?? null, variableOverrides: deriveRecipientNameVariables(c.name ?? null, email) });
   }
   return [...byEmail.values()];
 }
