@@ -328,8 +328,9 @@ export function PrintView({
         </div>
       </section>
 
-      {(shipping && (shipping.waiting > 0 || shipping.released > 0)) ||
-      (pickup && (pickup.booked || pickup.totals.ground.pieces + pickup.totals.air.pieces > 0)) ? (
+      {/* Shown before the first shipment too: an empty section is how you
+          learn where the labels will appear. */}
+      {shipping || pickup ? (
         <section className="rounded-xl border border-gray-200 bg-white px-4">
           <h3 className="pt-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Shipping</h3>
           <div className="divide-y divide-gray-100">
@@ -345,6 +346,9 @@ export function PrintView({
                     }. Load the 103 × 164 die-cut roll (DK-1247), print, then swap the badge roll back.`
                   : null,
                 shipping.released > 0 ? `${shipping.released} at the print station now.` : null,
+                shipping.waiting === 0 && shipping.released === 0
+                  ? "Nothing waiting. Shipments booked at the Shipping Desk wait here until you load the DK-1247 roll and print them."
+                  : null,
                 loadedMedia ? `The printer last reported: ${loadedMedia}.` : null,
               ]
                 .filter(Boolean)
