@@ -1,6 +1,8 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
@@ -114,14 +116,30 @@ export interface MarketData {
  * admin-only act. Collapsing the two here would quietly take the panel away from
  * every non-admin who uses it today.
  *
- * ⚠️ DELIBERATELY does NOT also require the org's access to be live, even though
- * the org page does. That is a policy question, not this exposure: the hole is
- * that OTHER people could read a partner's market, not that a lapsed partner can
- * still read their own. Adding it here would silently remove the panel from 6
- * people at 4 canceled partner orgs — and `app/me/page.tsx` calls this in a loop
- * that swallows failures with `if (!result.success) continue`, so they would lose
- * it with no error and no explanation. Bundling a behaviour change into a
- * security patch is how the security patch gets reverted.
+ * ⛔ ALSO requires the org's own access to be live, matching the org page.
+ *
+ * A lapsed partner keeps nothing — decided by Steve on 2026-10-16. The market is
+ * a partner-tier perk, not a permanent entitlement, and this endpoint is the one
+ * place a lapsed partner can still pull OTHER people's data: buyer names and
+ * addresses from the ranked prospect list.
+ *
+ * ⚠️ This was deliberately absent until now, and the reason is worth keeping
+ * rather than deleting. The earlier fix here closed a different hole — any
+ * authenticated user could read any partner's market — and the note said adding
+ * an access check on top would be bundling a behaviour change into a security
+ * patch, which is how security patches get reverted. So it was left for a
+ * separate decision. This is that decision, made on its own.
+ *
+ * Scope when it landed: 26 partner orgs lose it — 20 `locked`, 6 `canceled`.
+ * `grace` and `reactivated` keep it, which is the point of
+ * ORG_ACCESS_ACTIVE_STATUSES: somebody mid-renewal has not lapsed.
+ *
+ * ⚠️ They lose it SILENTLY. `app/me/page.tsx` calls this in a loop that does
+ * `if (!result.success) continue`, so the panel simply stops appearing with no
+ * error and no explanation. That is a known consequence, not an oversight — but
+ * if a lapsed partner ever asks where their market went, this is why, and the
+ * honest fix is a "your partnership lapsed" state on /me rather than loosening
+ * the check here.
  */
 export async function getPartnerMarketData(
   partnerOrgId: string,
@@ -130,8 +148,20 @@ export async function getPartnerMarketData(
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: "Not signed in" };
 
-  const allowed =
-    isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(partnerOrgId);
+  let allowed = isGlobalAdmin(auth.ctx.globalRole);
+  if (!allowed && auth.ctx.activeOrgIds.includes(partnerOrgId)) {
+    // CSC staff keep the unmasked view regardless, so support and billing can
+    // still act on a lapsed partner — the same carve-out lib/visibility/data.ts
+    // makes for the org page.
+    const { data: orgRow } = await createAdminClient()
+      .from("organizations")
+      .select("membership_status")
+      .eq("id", partnerOrgId)
+      .maybeSingle();
+    allowed = isOrgAccessActive(
+      (orgRow?.membership_status as OrgMembershipStatus | null) ?? null
+    );
+  }
   if (!allowed) {
     // ⚠️ Same shape as "nothing here". A refusal that named the org would confirm
     // it exists and has a market worth withholding.
