@@ -4635,6 +4635,7 @@ export type Database = {
           reason: string | null
           refund_cents: number | null
           refund_id: string | null
+          refunded_at: string | null
           seat_id: string
           source_order_id: string | null
           to_entity_id: string
@@ -4651,6 +4652,7 @@ export type Database = {
           reason?: string | null
           refund_cents?: number | null
           refund_id?: string | null
+          refunded_at?: string | null
           seat_id: string
           source_order_id?: string | null
           to_entity_id: string
@@ -4667,6 +4669,7 @@ export type Database = {
           reason?: string | null
           refund_cents?: number | null
           refund_id?: string | null
+          refunded_at?: string | null
           seat_id?: string
           source_order_id?: string | null
           to_entity_id?: string

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   convertSeatToFunded,
   markCancollFirstInvoicePaid,
+  refundFundedConversion,
   type FundedConversionBoard,
 } from "@/lib/actions/conference-funded-conversion";
 import {
@@ -30,8 +31,9 @@ function saveFile(filename: string, content: string) {
 /**
  * Staff list of schools whose paid registration can be cleared through to the
  * CANCOLL-funded one, one seat at a time. Nothing here runs on its own: every
- * switch is a click and a confirmation, and the whole list is locked until
- * CANCOLL's first invoice is recorded as paid.
+ * switch and every refund is a click and a confirmation. Switching works any
+ * time; refunds stay locked until CANCOLL's first invoice is recorded as paid,
+ * and a switched school is listed as owed until it is paid back.
  */
 export default function FundedConversionPanel({
   conferenceId,
@@ -97,17 +99,33 @@ export default function FundedConversionPanel({
     if (!window.confirm(`Record CANCOLL's first invoice as paid on ${paidOn}? This unlocks refunds to schools.`)) return;
     startTransition(async () => {
       const result = await markCancollFirstInvoicePaid({ conferenceId, paidOn });
-      setMessage(result.success ? { tone: "ok", text: "Recorded. Switches are unlocked." } : { tone: "error", text: result.error });
+      setMessage(result.success ? { tone: "ok", text: "Recorded. Refunds are unlocked." } : { tone: "error", text: result.error });
       if (result.success) router.refresh();
     });
   };
 
-  const convert = (schoolName: string, seatId: string, holder: string | null, refundCents: number, viaStripe: boolean) => {
+  const convert = (schoolName: string, seatId: string, holder: string | null, refundCents: number) => {
     const who = holder ?? "the unassigned seat";
-    const how = viaStripe ? "to their card" : "by hand (this order wasn't paid through Stripe)";
-    if (!window.confirm(`Switch ${who} at ${schoolName} to the CANCOLL-funded registration and refund ${formatCents(refundCents)} ${how}?`)) return;
+    const when = locked ? "once CANCOLL pays its first invoice" : "from the Refunds owed list below";
+    if (!window.confirm(`Switch ${who} at ${schoolName} to the CANCOLL-funded registration? No money moves now: the ${formatCents(refundCents)} they paid is refunded ${when}.`)) return;
     startTransition(async () => {
       const result = await convertSeatToFunded({ conferenceId, seatId });
+      if (!result.success) {
+        setMessage({ tone: "error", text: result.error });
+        return;
+      }
+      setMessage({ tone: "ok", text: `${schoolName} switched. They're owed ${formatCents(result.data.refundCents)}.` });
+      router.refresh();
+    });
+  };
+
+  const refund = (conversionId: string, schoolName: string, refundCents: number, viaStripe: boolean) => {
+    const question = viaStripe
+      ? `Refund ${formatCents(refundCents)} to ${schoolName}'s card?`
+      : `Mark ${formatCents(refundCents)} as paid back to ${schoolName} by hand? This order wasn't paid through Stripe, so nothing is sent from here.`;
+    if (!window.confirm(question)) return;
+    startTransition(async () => {
+      const result = await refundFundedConversion({ conferenceId, conversionId });
       if (!result.success) {
         setMessage({ tone: "error", text: result.error });
         return;
@@ -116,8 +134,8 @@ export default function FundedConversionPanel({
         tone: "ok",
         text:
           result.data.refunded === "stripe"
-            ? `${schoolName} switched. ${formatCents(result.data.refundCents)} refunded to their card.`
-            : `${schoolName} switched. Refund ${formatCents(result.data.refundCents)} to them by hand.`,
+            ? `${formatCents(result.data.refundCents)} refunded to ${schoolName}'s card.`
+            : `${schoolName} marked as paid back by hand.`,
       });
       router.refresh();
     });
@@ -128,13 +146,13 @@ export default function FundedConversionPanel({
       <h2 className="text-base font-semibold text-gray-900">CANCOLL-funded registrations</h2>
       <p className="mt-1 text-sm text-gray-600">
         Schools that qualify for CANCOLL funding but paid for their delegate. Switching keeps the same
-        delegate on the seat, makes it the CANCOLL-funded registration, and refunds the school the fee
-        and its tax. One per school.
+        delegate on the seat and makes it the CANCOLL-funded registration, one per school. The fee and
+        its tax are refunded as a separate step.
       </p>
 
       {locked ? (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <p>Locked until CANCOLL pays its first invoice. Schools are refunded only after that (MOU 5.5).</p>
+          <p>Refunds are locked until CANCOLL pays its first invoice (MOU 5.5). Switching works now.</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <label className="text-xs text-amber-900" htmlFor="cancoll-paid-on">Paid on</label>
             <input
@@ -240,13 +258,13 @@ export default function FundedConversionPanel({
                     <span className="text-gray-700">
                       {seat.holderName ?? "Unassigned seat"}
                       <span className="ml-2 text-gray-500">
-                        refund {formatCents(seat.refundCents)} {seat.viaStripe ? "to card" : "by hand"}
+                        paid {formatCents(seat.refundCents)}{seat.viaStripe ? "" : " (not through Stripe)"}
                       </span>
                     </span>
                     <button
                       type="button"
-                      onClick={() => convert(school.organizationName, seat.seatId, seat.holderName, seat.refundCents, seat.viaStripe)}
-                      disabled={locked || isPending}
+                      onClick={() => convert(school.organizationName, seat.seatId, seat.holderName, seat.refundCents)}
+                      disabled={isPending}
                       className="rounded-md border border-[#163D6D] px-3 py-1 text-xs font-semibold text-[#163D6D] hover:bg-[#163D6D] hover:text-white disabled:opacity-40"
                     >
                       Switch to CANCOLL
@@ -257,6 +275,34 @@ export default function FundedConversionPanel({
             </li>
           ))}
         </ul>
+      )}
+
+      {board.owed.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <p className="text-sm font-medium text-gray-900">Refunds owed</p>
+          <p className="mt-0.5 text-xs text-gray-500">Switched to CANCOLL, not paid back yet.</p>
+          <ul className="mt-2 space-y-1">
+            {board.owed.map((row) => (
+              <li key={row.conversionId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="text-gray-700">
+                  {row.organizationName}
+                  <span className="ml-2 text-gray-500">
+                    {row.holderName ?? "unassigned seat"}, {formatCents(row.refundCents)} {row.viaStripe ? "to card" : "by hand"}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => refund(row.conversionId, row.organizationName, row.refundCents, row.viaStripe)}
+                  disabled={locked || isPending}
+                  title={locked ? "Locked until CANCOLL's first invoice is recorded as paid" : undefined}
+                  className="rounded-md border border-[#163D6D] px-3 py-1 text-xs font-semibold text-[#163D6D] hover:bg-[#163D6D] hover:text-white disabled:opacity-40"
+                >
+                  {row.viaStripe ? "Refund" : "Mark paid back"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   );
