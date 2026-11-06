@@ -68,13 +68,21 @@ export function PrintView({
       setError(res.error);
     }
   };
+  // ⛔ Read live, not from the page load: on 2026-11-06 a station stopped for
+  // three hours and the War Room kept saying "online". An offline station's
+  // last reported roll is not what is loaded now.
+  const [liveOnline, setLiveOnline] = useState<boolean | null>(null);
+  const applyStations = useCallback((rows: { online: boolean; printerMedia: string | null }[]) => {
+    setLiveOnline(rows.some((s) => s.online));
+    setLoadedMedia(rows.find((s) => s.online && s.printerMedia)?.printerMedia ?? null);
+  }, []);
   const fetchShipping = useCallback(
     () => Promise.all([getShippingLabelQueue(conferenceId), listPrintStations(conferenceId), getPickupPlan(conferenceId)]),
     [conferenceId]
   );
   const applyShipping = ([queue, stations, plan]: Awaited<ReturnType<typeof fetchShipping>>) => {
     if (queue.success) setShipping(queue.data);
-    if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+    if (stations.success) applyStations(stations.data);
     if (plan.success) setPickup(plan.data);
   };
   const loadShipping = async () => applyShipping(await fetchShipping());
@@ -101,7 +109,7 @@ export function PrintView({
       void fetchShipping().then(([queue, stations, plan]) => {
         if (!live) return;
         if (queue.success) setShipping(queue.data);
-        if (stations.success) setLoadedMedia(stations.data.find((s) => s.printerMedia)?.printerMedia ?? null);
+        if (stations.success) applyStations(stations.data);
         if (plan.success) setPickup(plan.data);
       });
     tick();
@@ -114,7 +122,7 @@ export function PrintView({
       live = false;
       window.clearInterval(id);
     };
-  }, [conferenceId, fetchShipping]);
+  }, [conferenceId, fetchShipping, applyStations]);
 
   const base = `/admin/conference/${conferenceId}`;
   const sheet = (path: string) => `${base}${path}${path.includes("?") ? "&" : "?"}embed=1`;
@@ -389,7 +397,7 @@ export function PrintView({
           <a href={`${base}/check-in/print-station`} className="text-xs font-medium text-gray-600 hover:text-gray-900">
             {station.stations === 0
               ? "Set up a print station ▸"
-              : `${station.online ? "Station online" : "Station offline"}${station.queued ? ` · ${station.queued} waiting` : ""} ▸`}
+              : `${(liveOnline ?? station.online) ? "Station online" : "Station offline"}${station.queued ? ` · ${station.queued} waiting` : ""} ▸`}
           </a>
         </div>
         {station.swap ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{station.swap}.</p> : null}

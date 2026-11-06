@@ -175,7 +175,7 @@ export default function PrintStationClient({
           </li>
           <li>Plug the Brother QL into the laptop by USB, with the 62 mm continuous roll loaded.</li>
           <li>Open <strong>CSC Print Station</strong> and paste the key.</li>
-          <li>Leave it running, plugged in and awake. It shows online here within a few seconds.</li>
+          <li>Leave it running and plugged in (it keeps the laptop awake). It shows online here within a few seconds.</li>
         </ol>
       </section>
 

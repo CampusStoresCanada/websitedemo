@@ -6,6 +6,7 @@ import { stationOnline } from "@/lib/conference/badges/print-station";
 import { loadRollSwap } from "@/lib/conference/waiting-on-us";
 import { meetingsSoFar } from "@/lib/conference/checklist-checks";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
+import { StationStatusItem, StatusItem } from "./StationStatusItem";
 
 /**
  * The staff checklists, checked and arranged, once per request: the status
@@ -41,18 +42,6 @@ export const loadPrintStationState = cache(async (conferenceId: string) => {
     swap: rollSwap?.message ?? null,
   };
 });
-
-/** One piece of the status line: a fact, coloured by how much it matters, linking to where you fix it. */
-function StatusItem({ tone, href, children }: { tone: "alert" | "warn" | "ok" | "quiet"; href: string; children: ReactNode }) {
-  const dot =
-    tone === "alert" ? "bg-red-600" : tone === "warn" ? "bg-amber-500" : tone === "ok" ? "bg-green-600" : "bg-gray-300";
-  return (
-    <a href={href} className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-gray-700 hover:text-gray-950">
-      <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden="true" />
-      {children}
-    </a>
-  );
-}
 
 /** The frame the line sits in, so the page holds its place while it streams. */
 export function StatusLineFrame({ children }: { children: ReactNode }) {
@@ -94,14 +83,7 @@ export default async function StatusLine({
       <StatusItem tone={urgentCount > 0 ? "alert" : waitingCount > 0 ? "warn" : "quiet"} href="?tab=waiting">
         {waitingCount === 0 ? "Nobody waiting on us" : `${waitingCount} waiting on us${urgentCount ? `, ${urgentCount} urgent` : ""}`}
       </StatusItem>
-      {/* The station's own page: setup, its key and the app download. */}
-      <StatusItem
-        tone={station.stations === 0 ? "quiet" : station.online ? "ok" : "alert"}
-        href={`/admin/conference/${conferenceId}/check-in/print-station`}
-      >
-        {station.stations === 0 ? "No print station" : station.online ? "Print station online" : "Print station offline"}
-        {station.queued ? ` · ${station.queued} waiting` : ""}
-      </StatusItem>
+      <StationStatusItem conferenceId={conferenceId} stations={station.stations} online={station.online} queued={station.queued} />
       {nextList ? (
         <StatusItem
           tone={daysAway !== null && daysAway < 0 ? "alert" : daysAway !== null && daysAway <= 7 ? "warn" : "quiet"}

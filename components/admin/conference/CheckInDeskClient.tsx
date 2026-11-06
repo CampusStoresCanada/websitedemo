@@ -1568,6 +1568,10 @@ export default function CheckInDeskClient({
     const pollId = window.setInterval(() => {
       void loadRows();
       void loadTestCounts();
+      // Online/offline as it is now, not as it was when the page opened.
+      void listPrintStations(conferenceId).then((res) => {
+        if (res.success) setPrintStations(res.data);
+      });
     }, POLL_MS);
     const clockId = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => {
@@ -1575,7 +1579,7 @@ export default function CheckInDeskClient({
       window.clearInterval(clockId);
       stopCameraScanner();
     };
-  }, [loadRows, refreshCameraDevices, stopCameraScanner]);
+  }, [conferenceId, loadRows, refreshCameraDevices, stopCameraScanner]);
 
   useEffect(() => {
     const raw = window.localStorage.getItem(pendingScanStorageKey);

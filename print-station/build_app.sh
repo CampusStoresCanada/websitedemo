@@ -30,4 +30,10 @@ LIBUSB="$(brew --prefix libusb)/lib/libusb-1.0.0.dylib"
   --exclude-module pymupdf.layout \
   --exclude-module onnxruntime \
   "$PWD/print_station_app.py"
-echo "Built: $OUT/dist/CSC Print Station.app"
+# ⛔ Opt out of App Nap: with the screen off, macOS paused the station's loop
+# for three hours (2026-11-06) and it resumed only when someone clicked the
+# window. Editing Info.plist breaks PyInstaller's signature, so sign again.
+APP="$OUT/dist/CSC Print Station.app"
+/usr/libexec/PlistBuddy -c "Add :NSAppSleepDisabled bool true" "$APP/Contents/Info.plist"
+codesign --force --deep --sign - "$APP"
+echo "Built: $APP"

@@ -67,6 +67,12 @@ SHIPPING_MODEL = "QL-1110NWB"
 DPI = 300
 POLL_SECONDS = 3
 
+# What the window shows, and what it watches: wall-clock times of the last
+# answer from the website and of the loop's last turn. ⛔ The website's
+# "online" only says heartbeats arrived; on 2026-11-06 the loop stopped for
+# three hours with the screen off and nothing on the laptop said so.
+HEALTH = {"contact": None, "loop": None, "error": None}
+
 
 _log_sink = None
 
@@ -333,10 +339,16 @@ def picture_sticker(browser: str, html: str, width_mm: float, height_mm: float) 
 class Station:
     def __init__(self, config: dict):
         self.server = config["server"]
-        self.session = requests.Session()
-        self.session.headers["Authorization"] = f"Bearer {config['key']}"
+        self.key = config["key"]
+        self.reconnect()
         self.printer_status = None
         self.printer_media = None
+
+    def reconnect(self) -> None:
+        """A fresh connection: one kept open across a sleep or a network
+        change can be dead without saying so."""
+        self.session = requests.Session()
+        self.session.headers["Authorization"] = f"Bearer {self.key}"
 
     def url(self, path: str) -> str:
         return f"{self.server}{path}"
@@ -534,11 +546,13 @@ def run(config: dict, stop=None) -> None:
 
     checked_at = 0.0
     while not (stop and stop.is_set()):
+        HEALTH["loop"] = time.time()
         try:
             if time.monotonic() - checked_at >= PRINTER_CHECK_SECONDS:
                 check_printer(station, printer)
                 checked_at = time.monotonic()
             station.heartbeat()
+            HEALTH["contact"], HEALTH["error"] = time.time(), None
             job = station.claim()
             if job:
                 if job.get("kind") == "document":
@@ -549,7 +563,9 @@ def run(config: dict, stop=None) -> None:
                     run_job(station, browser, printer, job)
                 continue  # straight on to the next one
         except requests.RequestException as error:
+            HEALTH["error"] = "The website isn't answering"
             log(f"Website not reachable ({error}); trying again.")
+            station.reconnect()
         if stop:
             stop.wait(POLL_SECONDS)
         else:
