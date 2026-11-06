@@ -21,14 +21,52 @@ const STATUS_LABEL: Record<string, string> = {
   dismissed: "Not a problem",
 };
 
-export default function IssueQueue({ issues }: { issues: SurveyFlag[] }) {
+/**
+ * Where to send somebody to see the question a report was about.
+ *
+ * ⛔ NOT /benchmarking/survey, which is what the card linked to. That opens the
+ * reader's OWN store's live form: a committee member following the link lands
+ * in their institution's submission, and walking it writes. The admin preview
+ * redirects into the real survey as the TEST store, which is the same questions
+ * with nothing of anyone's at stake.
+ *
+ * The `#field-` fragment is best effort, since it has to survive that redirect.
+ * The field name is printed on the card either way, so the row still says which
+ * question it was even when the anchor does not land.
+ */
+function whereTheyWere(issue: SurveyFlag): string {
+  if (!issue.pageUrl.startsWith("/benchmarking/survey")) return issue.pageUrl;
+  return issue.fieldKey
+    ? `/benchmarking/admin/preview#field-${issue.fieldKey}`
+    : "/benchmarking/admin/preview";
+}
+
+export default function IssueQueue({
+  issues,
+  focusId,
+}: {
+  issues: SurveyFlag[];
+  /**
+   * The one report a Butler notification was about, from `?flag=<id>`.
+   *
+   * ⛔ Three notifications used to land on the same unordered list, so there was
+   * no way to tell which row any of them meant. This brings it to the top of its
+   * group and rings it.
+   */
+  focusId?: string | null;
+}) {
   const [rows, setRows] = useState(issues);
   const [editing, setEditing] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const open = rows.filter((r) => r.status === "open");
-  const closed = rows.filter((r) => r.status !== "open");
+  // The notified row first within its own group. Deliberately NOT lifted out of
+  // its group: a resolved report jumping above the open ones would misreport the
+  // state of the queue to make one link tidy.
+  const first = (a: SurveyFlag, b: SurveyFlag) =>
+    Number(b.id === focusId) - Number(a.id === focusId);
+  const open = rows.filter((r) => r.status === "open").sort(first);
+  const closed = rows.filter((r) => r.status !== "open").sort(first);
 
   async function decide(
     issue: SurveyFlag,
@@ -54,7 +92,15 @@ export default function IssueQueue({ issues }: { issues: SurveyFlag[] }) {
   }
 
   const card = (issue: SurveyFlag) => (
-    <li key={issue.id} className="rounded-lg border border-gray-200 bg-white p-4">
+    <li
+      key={issue.id}
+      id={`flag-${issue.id}`}
+      className={`rounded-lg border bg-white p-4 ${
+        issue.id === focusId
+          ? "border-[#163D6D] ring-2 ring-[#163D6D]/20"
+          : "border-gray-200"
+      }`}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-gray-900">
@@ -65,6 +111,16 @@ export default function IssueQueue({ issues }: { issues: SurveyFlag[] }) {
             {issue.flaggerName ? ` · ${issue.flaggerName}` : ""}
             {issue.priority === "high" ? " · urgent" : ""}
           </p>
+          {/*
+            The field they were standing on. ⛔ The one thing that tells two
+            reports from the same store on the same section apart, and it was
+            already on the row, unread.
+          */}
+          {issue.fieldKey && (
+            <p className="mt-0.5 font-mono text-[11px] text-gray-400">
+              {issue.fieldKey}
+            </p>
+          )}
         </div>
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -81,7 +137,7 @@ export default function IssueQueue({ issues }: { issues: SurveyFlag[] }) {
         {issue.note ?? "No description given."}
       </p>
       <a
-        href={issue.pageUrl}
+        href={whereTheyWere(issue)}
         className="mt-1 inline-block text-xs text-[#163D6D] underline underline-offset-4"
       >
         Go to where they were

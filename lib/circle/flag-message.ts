@@ -60,7 +60,15 @@ export function buildFlagDm(input: {
    * lines, so it is printed whole rather than as one clipped line.
    */
   conferenceAsk?: boolean;
-  issuesUrl: string;
+  /**
+   * The queue entry for THIS flag, not the queue.
+   *
+   * ⛔ Was the bare queue URL. Sean Bell had three Butler messages about three
+   * different questions, and all three links opened the same undifferentiated
+   * list, so there was no way to tell which row any of them meant. "I can click
+   * the links but it isn't bringing me to something that I can work with."
+   */
+  issueLink: string;
   reviewLink: string;
 }): string {
   if (input.conferenceAsk) {
@@ -83,8 +91,66 @@ export function buildFlagDm(input: {
 
   return input.survey
     ? `${input.priorityLabel} — ${input.who} raised this while filling the benchmarking survey.${said}${lookingAt}\n\n` +
-      `Reply here and we can sort it out. The queue, for the record: ${input.issuesUrl}`
+      `Reply here and we can sort it out. This one in the queue: ${input.issueLink}`
     : `${input.priorityLabel} — ${input.who} raised this on the site.${said}${lookingAt}\n\n` +
       `Reply here and we can sort it out. What they were looking at: ${input.reviewLink}`;
 }
 
+/**
+ * What the room hears when somebody decides a flag.
+ *
+ * ⛔ Nothing used to say this. decideSurveyFlag wrote the row and returned, so
+ * a member who flagged something was told it had been raised and then never
+ * told anything again. Steve fixed Jackie Nguyen's question and had to message
+ * Sean by hand to say so, because, in his words, "Butler ghost has no idea".
+ *
+ * ⛔ The resolution note is NOT in here, deliberately. The box that collects it
+ * says "The store does not see this", and the reporter is in this room, so
+ * putting it in the message would publish an internal note to the person it was
+ * written about. This announces the OUTCOME; the note stays in the queue.
+ *
+ * ⛔ Addressed to the reporter, not to the responders. They are the one waiting
+ * to hear, and a decision announced over their head is the shape that made
+ * every flag feel like a form submission.
+ *
+ * Pure, so the wording can be asserted without a Circle client.
+ */
+export function buildFlagDecisionDm(input: {
+  status: "acknowledged" | "resolved" | "dismissed";
+  /** The reporter's first name where we have it, for a message aimed at them. */
+  who: string;
+  /** Who made the call, so this reads as a person rather than a status change. */
+  actor: string | null;
+  elementContent: string | null;
+}): string | null {
+  const on = input.elementContent
+    ? `\n\nOn: "${oneLine(input.elementContent, 160)}"`
+    : "";
+  /*
+    ⛔ "We" when nobody is named, never an empty prefix. Dropping the actor left
+    the sentence as "marked it resolved", with no subject at all. A test caught
+    it; a member would have read it.
+  */
+  const didIt = (verb: string) => (input.actor ? `${input.actor} ${verb}` : `We ${verb}`);
+
+  switch (input.status) {
+    case "acknowledged":
+      return (
+        `${input.who}, we have your flag and it is with the committee.${on}\n\n` +
+        `${didIt("picked it up")}. Nothing needed from you for now.`
+      );
+    case "resolved":
+      return (
+        `${input.who}, that one is sorted.${on}\n\n` +
+        `${didIt("marked it resolved")}. If it still looks wrong from where ` +
+        `you are sitting, say so here and we will open it back up.`
+      );
+    case "dismissed":
+      return (
+        `${input.who}, we looked at this one and we are leaving the question ` +
+        `as it stands.${on}\n\n` +
+        `${didIt("made that call")}. If that does not sit right, reply here ` +
+        `and we will go round again.`
+      );
+  }
+}

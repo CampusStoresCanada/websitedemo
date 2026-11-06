@@ -15,7 +15,7 @@ import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isBenchmarkingSurveyFlag, isConferenceAskFlag } from "@/lib/circle/flag-routing";
-import { buildAskStaffNote, buildFlagDm, oneLine } from "@/lib/circle/flag-message";
+import { buildAskStaffNote, buildFlagDecisionDm, buildFlagDm, oneLine } from "@/lib/circle/flag-message";
 import { createClient } from "@/lib/supabase/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -114,28 +114,33 @@ async function benchmarkingRecipients(): Promise<string[]> {
   return emails.filter((e): e is string => !!e);
 }
 
-export async function sendFlagNotification(
-  params: FlagNotificationParams
-): Promise<{ success: boolean; method?: "circle_dm" | "email" | "none"; error?: string }> {
-  const { flagId, pageUrl, elementContent, note, priority, organizationId } = params;
-
-  // ── 1. Find recipient(s) ─────────────────────────────────────────────────
-
+/**
+ * Who answers for this flag.
+ *
+ * ⛔ Extracted so the DECISION notification routes identically. Circle keys a
+ * group DM to its participants, so a resolution sent to even a slightly
+ * different set opens a SECOND room and the member never sees the answer in the
+ * thread where they raised it. Sharing this function is the mechanism, not
+ * tidiness: two copies that drift produce two rooms.
+ *
+ * ⛔ A flag raised inside the benchmarking survey goes to the COMMITTEE, never
+ * to the store's own admins.
+ *
+ * Everywhere else on the site a flag means "this page says something wrong
+ * about you", so the store that owns the page is exactly who should hear it.
+ * In the survey it is the reverse: the store is the one reporting, and routing
+ * by organization_id would have mailed their complaint back to themselves and
+ * told CSC nothing.
+ */
+async function flagRecipients(
+  pageUrl: string,
+  organizationId: string | null,
+): Promise<string[]> {
   const adminClient = createAdminClient();
   const supabase = await createClient();
 
   let recipientEmails: string[] = [];
 
-  /*
-    ⛔ A flag raised inside the benchmarking survey goes to the COMMITTEE, never
-    to the store's own admins.
-
-    Everywhere else on the site a flag means "this page says something wrong
-    about you", so the store that owns the page is exactly who should hear it.
-    In the survey it is the reverse: the store is the one reporting, and routing
-    by organization_id would have mailed their complaint back to themselves and
-    told CSC nothing.
-  */
   if (isBenchmarkingSurveyFlag(pageUrl)) {
     recipientEmails = await benchmarkingRecipients();
   } else if (isConferenceAskFlag(pageUrl)) {
@@ -176,6 +181,55 @@ export async function sendFlagNotification(
     }
   }
 
+  return recipientEmails;
+}
+
+/**
+ * The room a flag lives in: the reporter plus whoever answers.
+ *
+ * ⛔ Butler is the sender and is in the room by virtue of sending, so it is not
+ * listed. Circle keys the room to its participants, which is why both the
+ * opening message and the decision must pass through here — the same set is
+ * what makes them one thread instead of two.
+ */
+function flagRoom(reporterEmail: string | null, recipientEmails: string[]): string[] {
+  const responders = recipientEmails.filter((e) => e !== reporterEmail);
+  return [...new Set([...(reporterEmail ? [reporterEmail] : []), ...responders])];
+}
+
+/**
+ * Send one message to a room, honouring the dev intercept.
+ *
+ * ⛔ The same intercept lib/email/send.ts honours. Butler's DM ignored it once
+ * already and messaged real staff from a local server, because every local
+ * server shares the live database and the live Circle.
+ */
+async function sendRoomDm(
+  intendedRoom: string[],
+  text: string,
+): Promise<{ sent: boolean; error?: string }> {
+  const ghostClient = isCircleConfigured() ? getCircleGhostClient() : null;
+  if (!ghostClient || intendedRoom.length === 0) return { sent: false, error: "No room" };
+
+  const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const room = intercept ? [intercept] : intendedRoom;
+  const sentText = intercept
+    ? `[DEV — would have gone to: ${intendedRoom.join(", ")}]\n\n${text}`
+    : text;
+
+  const result = await ghostClient.sendGroupDirectMessage(room, sentText);
+  return { sent: result.success, error: result.error };
+}
+
+export async function sendFlagNotification(
+  params: FlagNotificationParams
+): Promise<{ success: boolean; method?: "circle_dm" | "email" | "none"; error?: string }> {
+  const { flagId, pageUrl, elementContent, note, priority, organizationId } = params;
+
+  // ── 1. Find recipient(s) ─────────────────────────────────────────────────
+
+  const recipientEmails = await flagRecipients(pageUrl, organizationId);
+
   if (recipientEmails.length === 0) {
     console.warn("[flag-notify] No recipients found for flag", flagId);
     return { success: false, error: "No recipients found" };
@@ -191,7 +245,7 @@ export async function sendFlagNotification(
   const conferenceAsk = isConferenceAskFlag(pageUrl);
   const dmText = buildFlagDm({
     priorityLabel, who, note, elementContent, survey, conferenceAsk,
-    issuesUrl: `${APP_URL}/benchmarking/admin/issues`,
+    issueLink: `${APP_URL}/benchmarking/admin/issues?flag=${flagId}`,
     reviewLink,
   });
 
@@ -251,43 +305,32 @@ export async function sendFlagNotification(
     continuing thread with whoever currently answers — and nothing exists until
     the first flag.
   */
-  const ghostClient = isCircleConfigured() ? getCircleGhostClient() : null;
   const responders = recipientEmails.filter((e) => e !== params.reporterEmail);
-  const intendedRoom = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
-
-  /*
-    ⛔ The same dev intercept email already honours (lib/email/send.ts). Butler's
-    DM ignored it, so a flag raised on a local server — every one shares the
-    live database and Circle — messaged real staff. With it set, the room is
-    the dev address alone, and the message says who it would have reached.
-  */
-  const intercept = process.env.DEV_EMAIL_INTERCEPT;
-  const room = intercept ? [intercept] : intendedRoom;
-  const sentText = intercept ? `[DEV — would have gone to: ${intendedRoom.join(", ")}]\n\n${dmText}` : dmText;
+  const intendedRoom = flagRoom(params.reporterEmail, recipientEmails);
 
   let anyDm = false;
   let anyEmail = false;
 
-  if (ghostClient && room.length > 0) {
-    const result = await ghostClient.sendGroupDirectMessage(room, sentText);
-    if (result.success) anyDm = true;
-    else console.warn("[flag-notify] Circle group DM failed:", result.error);
+  const opened = await sendRoomDm(intendedRoom, dmText);
+  if (opened.sent) anyDm = true;
+  else if (opened.error !== "No room") {
+    console.warn("[flag-notify] Circle group DM failed:", opened.error);
+  }
 
-    /*
-      An Ask CSC room has the asker in it, so it carries only their question
-      (Stephen, 2026-10-22: "We need that information, they don't"). The rest —
-      priority, their details, the War Room link — goes to CSC staff alone.
+  /*
+    An Ask CSC room has the asker in it, so it carries only their question
+    (Stephen, 2026-10-22: "We need that information, they don't"). The rest —
+    priority, their details, the War Room link — goes to CSC staff alone.
 
-      Sent whether or not the room went: if the asker's address is not on
-      Circle and the room failed, this is how staff still hear in Circle.
-    */
-    if (conferenceAsk && responders.length > 0) {
-      const staffRoom = intercept ? [intercept] : responders;
-      const note = buildAskStaffNote({ priorityLabel, who, note: params.note, details: elementContent, reviewLink });
-      const staffText = intercept ? `[DEV — would have gone to: ${responders.join(", ")}]\n\n${note}` : note;
-      const staff = await ghostClient.sendGroupDirectMessage(staffRoom, staffText);
-      if (staff.success) anyDm = true;
-      else console.warn("[flag-notify] Circle staff note failed:", staff.error);
+    Sent whether or not the room went: if the asker's address is not on
+    Circle and the room failed, this is how staff still hear in Circle.
+  */
+  if (conferenceAsk && responders.length > 0) {
+    const note = buildAskStaffNote({ priorityLabel, who, note: params.note, details: elementContent, reviewLink });
+    const staff = await sendRoomDm(responders, note);
+    if (staff.sent) anyDm = true;
+    else if (staff.error !== "No room") {
+      console.warn("[flag-notify] Circle staff note failed:", staff.error);
     }
   }
 
@@ -311,4 +354,76 @@ export async function sendFlagNotification(
   const success = anyDm || anyEmail;
   const method = anyDm ? "circle_dm" : anyEmail ? "email" : "none";
   return { success, method };
+}
+
+/**
+ * Tell the room a flag has been decided.
+ *
+ * ⛔ The missing half of the round trip. A flag opened a Circle room and then
+ * nothing ever closed it: decideSurveyFlag wrote status, resolved_by and
+ * resolved_at and returned. So Stephen fixed the question Jackie Nguyen raised,
+ * and Sean Bell, who had been asked to work the queue, had no way to know. In
+ * Stephen's words to him on 2026-11-06: "I should have sent you a message
+ * because I resolved it. Butler ghost has no idea."
+ *
+ * ⛔ Routed through flagRecipients and flagRoom, the same two functions the
+ * opening message uses. Circle keys a group DM to its participants, so this
+ * lands in the thread the flag already has. Build the room any other way and
+ * the member gets a second, orphaned conversation containing only the answer.
+ *
+ * Best-effort by contract. The decision is already written and must not roll
+ * back because Circle is unreachable, so this reports and never throws.
+ */
+export async function sendFlagDecisionNotification(input: {
+  flagId: string;
+  status: "acknowledged" | "resolved" | "dismissed";
+  /** Who made the call, so the member hears from a person. */
+  actorName: string | null;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = createAdminClient();
+    const { data: flag } = await db
+      .from("flags")
+      .select("id, page_url, organization_id, flagger_email, flagger_name, element_content")
+      .eq("id", input.flagId)
+      .maybeSingle();
+
+    if (!flag) return { success: false, error: "Flag not found" };
+
+    const row = flag as unknown as {
+      page_url: string | null;
+      organization_id: string | null;
+      flagger_email: string | null;
+      flagger_name: string | null;
+      element_content: string | null;
+    };
+
+    const recipientEmails = await flagRecipients(row.page_url ?? "", row.organization_id);
+    const room = flagRoom(row.flagger_email, recipientEmails);
+    if (room.length === 0) return { success: false, error: "No room" };
+
+    /*
+      First name only. The message is addressed TO them in a room they are in,
+      and "Jackie Nguyen, that one is sorted" reads like a letter from a bank.
+    */
+    const who = row.flagger_name?.trim().split(/\s+/)[0] || "Thanks";
+
+    const text = buildFlagDecisionDm({
+      status: input.status,
+      who,
+      actor: input.actorName?.trim() || null,
+      elementContent: row.element_content,
+    });
+    if (!text) return { success: false, error: "No message for that status" };
+
+    const result = await sendRoomDm(room, text);
+    if (!result.sent) {
+      console.warn("[flag-notify] Decision DM failed:", result.error);
+      return { success: false, error: result.error };
+    }
+    return { success: true };
+  } catch (err) {
+    console.error("[flag-notify] Decision DM threw:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown" };
+  }
 }

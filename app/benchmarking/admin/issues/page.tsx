@@ -15,12 +15,27 @@ export const metadata = {
  * lock — submissions and flags once carried no check of their own and inherited
  * whoever the shell let in.
  */
-export default async function BenchmarkingIssuesPage() {
+export default async function BenchmarkingIssuesPage({
+  searchParams,
+}: {
+  /**
+   * `?flag=<id>` is what a Butler notification links to.
+   *
+   * ⛔ The DM used to link here with nothing on it, so three reports about three
+   * different questions produced three identical links into one list. The id
+   * brings that row to the top and marks it, which is the difference between a
+   * notification and a nudge towards a page.
+   */
+  searchParams: Promise<{ flag?: string }>;
+}) {
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/issues"));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking/admin");
 
-  const issues = await loadSurveyFlags();
+  const [issues, { flag: focusId }] = await Promise.all([
+    loadSurveyFlags(),
+    searchParams,
+  ]);
 
   return (
     <div>
@@ -32,7 +47,7 @@ export default async function BenchmarkingIssuesPage() {
         telling us costs effort and changes nothing, and the next time it meets a question
         it cannot answer it guesses instead.
       </p>
-      <IssueQueue issues={issues} />
+      <IssueQueue issues={issues} focusId={focusId ?? null} />
     </div>
   );
 }

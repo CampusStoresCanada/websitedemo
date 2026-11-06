@@ -21,7 +21,7 @@ const base = {
   note: "Jess isn't at UofT anymore, should update the admin to be April",
   elementContent: "jscott@uoftbookstore.com",
   survey: false,
-  issuesUrl: "https://www.campusstores.ca/benchmarking/admin/issues",
+  issueLink: "https://www.campusstores.ca/benchmarking/admin/issues?flag=f1",
   reviewLink: "https://www.campusstores.ca/org/university-of-toronto?flag=abc",
 };
 
@@ -69,8 +69,9 @@ describe("the message a flag sends", () => {
     expect(dm).not.toContain("\n      ");
   });
 
-  it("sends a survey flag to the queue, and anything else to the page it is about", () => {
-    expect(buildFlagDm({ ...base, survey: true })).toContain(base.issuesUrl);
+  it("sends a survey flag to its own queue row, and anything else to the page it is about", () => {
+    // ⛔ Was the bare queue URL, so three reports gave three identical links.
+    expect(buildFlagDm({ ...base, survey: true })).toContain(base.issueLink);
     expect(buildFlagDm(base)).toContain(base.reviewLink);
   });
 

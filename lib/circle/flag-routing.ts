@@ -35,3 +35,24 @@ export function isBenchmarkingSurveyFlag(pageUrl: string): boolean {
 export function isConferenceAskFlag(pageUrl: string): boolean {
   return /^\/admin\/conference\/[^/?#]+\/war-room(?:[?#]|$)/.test(pageUrl);
 }
+
+/**
+ * The survey field a toolkit selector points at.
+ *
+ * ⛔ Lives here, not beside the queue loader that uses it, for the reason
+ * written at the top of this file: lib/actions/benchmarking-flags.ts now
+ * reaches flag-notify.ts and therefore lib/email/send.ts, which builds a Resend
+ * client at module scope and throws without an API key. Anything exported from
+ * there cannot be imported by a test. I put this function in that file first and
+ * hit precisely that error.
+ *
+ * The survey renders each field as `id="field-<name>"` (DynamicSurveySection),
+ * so when the member flagged a field the name is recoverable. When they flagged
+ * a section or a label the toolkit falls back to a positional path like
+ * `div:nth-child(2) > ...`, which identifies nothing durable: one inserted div
+ * and it points somewhere else. That returns null rather than a guess.
+ */
+export function fieldKeyFromSelector(selector: string | null): string | null {
+  const m = selector?.match(/^#field-([A-Za-z0-9_]+)$/);
+  return m ? m[1] : null;
+}
