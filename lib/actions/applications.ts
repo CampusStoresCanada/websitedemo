@@ -628,7 +628,7 @@ export async function verifyApplicationEmail(
   );
 
   // Send to admin notification email (configured or fallback)
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || "admin@campusstores.ca";
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || "info@campusstores.ca";
   await sendEmail({
     to: adminEmail,
     subject: adminContent.subject,
