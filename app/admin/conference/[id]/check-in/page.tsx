@@ -4,6 +4,7 @@ import { requireConferenceDeskAccess } from "@/lib/auth/guards";
 import CheckInDeskClient from "@/components/admin/conference/CheckInDeskClient";
 import { loadCheckInFacts } from "@/lib/conference/badges/checkin";
 import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
+import { loadSelfCheckInSettings } from "@/lib/conference/self-check-in-server";
 
 export const metadata = {
   title: "Conference Check-in Desk | Admin",
@@ -51,7 +52,7 @@ export default async function ConferenceCheckInDeskPage({
   // the roster poll — see loadCheckInFacts for why. A failure here must not take
   // the desk down with it: a desk that shows a name and no entitlement still
   // checks people in, and a desk that will not load does not.
-  const [conferenceResult, peopleResult, facts] = await Promise.all([
+  const [conferenceResult, peopleResult, facts, selfCheckIn] = await Promise.all([
     getConference(id),
     listConferencePeople(id),
     loadCheckInFacts(id).catch(() => ({
@@ -61,6 +62,7 @@ export default async function ConferenceCheckInDeskPage({
       doorEvents: [],
       timeZone: "America/Toronto",
     })),
+    loadSelfCheckInSettings(id),
   ]);
 
   if (!conferenceResult.success || !conferenceResult.data) {
@@ -85,6 +87,7 @@ export default async function ConferenceCheckInDeskPage({
         doorEvents={facts.doorEvents}
         timeZone={facts.timeZone}
         doorNow={asOf && asOfTime ? zonedWallTimeToUtcIso(asOf, asOfTime, facts.timeZone) : null}
+        kioskAllowed={selfCheckIn.kiosk}
       />
     </>
   );

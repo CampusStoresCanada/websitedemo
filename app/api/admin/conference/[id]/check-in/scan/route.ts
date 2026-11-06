@@ -23,6 +23,7 @@ export async function POST(
     test_mode?: boolean;
     as_of?: string | null;
     entity_id?: string | null;
+    self_service?: boolean;
   };
 
   try {
@@ -33,6 +34,7 @@ export async function POST(
       test_mode?: boolean;
       as_of?: string | null;
       entity_id?: string | null;
+      self_service?: boolean;
     };
   } catch {
     return NextResponse.json(
@@ -61,6 +63,8 @@ export async function POST(
     asOf: payload.as_of ?? null,
     // The event this device is at (door mode), or none for badge pickup.
     entityId: typeof payload.entity_id === "string" && payload.entity_id ? payload.entity_id : null,
+    // A desk device in self check-in (kiosk) mode.
+    selfService: payload.self_service === true,
   });
 
   if (!result.success) {
@@ -81,5 +85,8 @@ export async function POST(
     checked_in_at: result.data?.checkedInAt ?? null,
     // What they must accept at the desk before they are checked in.
     owed: result.data?.owed ?? [],
+    // Kiosk only: what the attendee is told once they are in.
+    outcome: result.data?.outcome ?? null,
+    note: result.data?.note ?? null,
   });
 }

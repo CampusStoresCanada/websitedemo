@@ -9,7 +9,6 @@ import {
   requireConferenceDeskAccess,
   requireConferenceOpsAccess,
 } from "@/lib/auth/guards";
-import { logAuditEventSafe } from "@/lib/ops/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 // Imported via relative path (not the "@/" alias) so the Vitest suite, which
 // has no path-alias resolution, can load this module in unit tests.
@@ -22,7 +21,13 @@ import {
   type PolicyAcceptBy,
 } from "../constants/conference";
 import { requiredPolicyEntityIds, type Registrant } from "../conference/legal-policies";
-import { loadPolicyTargeting, computeMissingLegal, loadCurrentLegalVersions, personOwedAgreements } from "../conference/legal-acceptance";
+import {
+  loadPolicyTargeting,
+  computeMissingLegal,
+  loadCurrentLegalVersions,
+  personOwedAgreements,
+} from "../conference/legal-acceptance";
+import { recordOwedAgreements } from "@/lib/conference/check-in-agreements";
 import type { Database } from "@/lib/database.types";
 
 type LegalVersionRow = Database["public"]["Tables"]["conference_legal_versions"]["Row"];
@@ -674,47 +679,21 @@ export async function acceptAgreementsAtDesk(params: {
   conferenceId: string;
   personId: string;
   versionIds: string[];
+  /**
+   * The desk device is in self check-in (kiosk) mode: the attendee is alone
+   * with it, so the acceptance is theirs ("self"), on a staff member's device.
+   */
+  selfService?: boolean;
 }): Promise<{ success: true; data: { stillOwed: number } } | { success: false; error: string }> {
   const auth = await requireConferenceDeskAccess(params.conferenceId);
   if (!auth.ok) return { success: false, error: auth.error };
-  const db = createAdminClient();
-  const { data: person } = await db
-    .from("conference_people")
-    .select("id, user_id, canonical_person_id")
-    .eq("conference_id", params.conferenceId)
-    .eq("id", params.personId)
-    .maybeSingle();
-  if (!person) return { success: false, error: "That person is not on this conference." };
-  const contactId = (person.canonical_person_id as string | null) ?? null;
-  const userId = (person.user_id as string | null) ?? null;
-  if (!contactId && !userId) {
-    return { success: false, error: "There is no record to attach their acceptance to. Please see a staff lead." };
-  }
-
-  const owed = await personOwedAgreements(db, params.conferenceId, params.personId);
-  const toAccept = owed.filter((o) => params.versionIds.includes(o.versionId));
-  for (const doc of toAccept) {
-    const { error } = await db.from("legal_acceptances").insert({
-      user_id: userId,
-      contact_id: contactId,
-      legal_version_id: doc.versionId,
-      accepted_via: "desk",
-      recorded_by: auth.ctx.userId,
-    });
-    // Already accepted (a race, or by their login meanwhile) is not a failure.
-    if (error && error.code !== "23505") return { success: false, error: error.message };
-  }
-  if (toAccept.length > 0) {
-    await logAuditEventSafe({
-      action: "conference_agreements_accepted_at_desk",
-      entityType: "conference_people",
-      entityId: params.personId,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: { conferenceId: params.conferenceId, documents: toAccept.map((d) => d.documentType) },
-    });
-  }
-  return { success: true, data: { stillOwed: owed.length - toAccept.length } };
+  return recordOwedAgreements({
+    conferenceId: params.conferenceId,
+    personId: params.personId,
+    versionIds: params.versionIds,
+    via: params.selfService ? "self" : "desk",
+    recordedBy: auth.ctx.userId,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────

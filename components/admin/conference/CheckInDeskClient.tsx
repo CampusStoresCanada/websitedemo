@@ -20,8 +20,14 @@ import DeskSellPanel, { type DeskSellContext } from "@/components/admin/conferen
 import { DeskPinCheck, DeskPinSetup, endHandOver, readHandOver } from "@/components/admin/conference/DeskPinPad";
 import { getDeskPinState } from "@/lib/actions/desk-pin";
 import { acceptAgreementsAtDesk } from "@/lib/actions/conference-legal";
+import AgreementSheet from "@/components/conference/AgreementSheet";
+import SelfCheckInKiosk, { type KioskResult } from "@/components/admin/conference/SelfCheckInKiosk";
+import {
+  selfCheckInOutcomeText,
+  selfCheckInRefusalText,
+  type SelfCheckInOutcome,
+} from "@/lib/conference/self-check-in";
 import type { OwedAgreement } from "@/lib/conference/legal-acceptance";
-import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "@/lib/constants/conference";
 import { shortDay } from "@/lib/conference/desk-offers";
 import {
   doorChoiceStillValid,
@@ -337,6 +343,8 @@ interface CheckInDeskClientProps {
   timeZone: string;
   /** Rehearsal only: pretend it is this instant for the door picker. */
   doorNow: string | null;
+  /** The conference lets a desk device run as a self check-in kiosk. */
+  kioskAllowed: boolean;
 }
 
 export default function CheckInDeskClient({
@@ -351,6 +359,7 @@ export default function CheckInDeskClient({
   doorEvents,
   timeZone,
   doorNow,
+  kioskAllowed,
 }: CheckInDeskClientProps) {
   const [rows, setRows] = useState<ConferencePerson[]>(initialRows);
   const [facts, setFacts] = useState<Record<string, CheckInFacts>>(initialFacts);
@@ -442,6 +451,31 @@ export default function CheckInDeskClient({
     then: () => Promise<void>;
   } | null>(null);
   const agreementOpenRef = useRef(false);
+  // ⛔ Self check-in (kiosk) mode survives a reload: an attendee who refreshes
+  // the page must land back on the kiosk, not on the staff desk. Read lazily;
+  // nothing renders it until the PIN state has loaded on the client.
+  const kioskKey = `csc-desk-kiosk:${conferenceId}`;
+  const [kiosk, setKiosk] = useState<boolean>(() => {
+    if (!kioskAllowed || typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(`csc-desk-kiosk:${conferenceId}`) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const kioskRef = useRef(kiosk);
+  useEffect(() => {
+    kioskRef.current = kiosk;
+    try {
+      if (kiosk) window.localStorage.setItem(kioskKey, "1");
+      else window.localStorage.removeItem(kioskKey);
+    } catch {
+      // best effort: private mode
+    }
+  }, [kiosk, kioskKey]);
+  const [kioskResult, setKioskResult] = useState<KioskResult | null>(null);
+  const [kioskBusy, setKioskBusy] = useState(false);
+  const [kioskExitPin, setKioskExitPin] = useState(false);
   useEffect(() => {
     agreementOpenRef.current = agreementGate !== null;
   }, [agreementGate]);
@@ -766,18 +800,31 @@ export default function CheckInDeskClient({
     async (
       scan: PendingScan,
       allowQueue: boolean
-    ): Promise<{ state: string; personId: string | null; owed?: OwedAgreement[] }> => {
+    ): Promise<{
+      state: string;
+      personId: string | null;
+      owed?: OwedAgreement[];
+      outcome?: SelfCheckInOutcome | null;
+      note?: string | null;
+    }> => {
       try {
         const response = await fetch(`/api/admin/conference/${conferenceId}/check-in/scan`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...scan, test_mode: testMode, as_of: testMode ? asOf : null }),
+          body: JSON.stringify({
+            ...scan,
+            test_mode: testMode,
+            as_of: testMode ? asOf : null,
+            self_service: kioskRef.current,
+          }),
         });
         const payload = (await response.json()) as {
           state?: string;
           error?: string;
           person_id?: string | null;
           owed?: OwedAgreement[];
+          outcome?: SelfCheckInOutcome | null;
+          note?: string | null;
         };
         if (!response.ok) {
           return { state: payload.error ?? "scan_failed", personId: null };
@@ -786,6 +833,8 @@ export default function CheckInDeskClient({
           state: payload.state ?? "invalid_token",
           personId: payload.person_id ?? null,
           owed: payload.owed ?? [],
+          outcome: payload.outcome ?? null,
+          note: payload.note ?? null,
         };
       } catch {
         if (allowQueue) {
@@ -803,6 +852,7 @@ export default function CheckInDeskClient({
 
   const submitToken = useCallback(
     async (token: string) => {
+      if (kioskRef.current) setKioskBusy(true);
       const result = await submitScan(
         {
           qr_token: token,
@@ -812,6 +862,7 @@ export default function CheckInDeskClient({
         },
         true
       );
+      if (kioskRef.current) setKioskBusy(false);
       if (result.state === "legal_not_accepted" && result.personId && result.owed?.length) {
         // Not checked in yet: show them what they owe, then scan again.
         setAgreementGate({
@@ -821,10 +872,41 @@ export default function CheckInDeskClient({
         });
         return;
       }
+      if (kioskRef.current) {
+        // The attendee is alone with the device: plain words, no staff cards.
+        const name = rows.find((row) => row.id === result.personId)?.display_name?.split(" ")[0] ?? null;
+        if (result.outcome && (result.state === "valid" || result.state === "already_checked_in")) {
+          let message = selfCheckInOutcomeText(result.outcome);
+          // ⛔ Print only on the scan that checked them in: a second scan of the
+          // same code must not print a second set of stickers.
+          if (result.outcome.kind === "spare_stickers" && result.personId) {
+            if (result.state === "valid") {
+              const printed = await printBadge({
+                conferenceId,
+                personId: result.personId,
+                reason: "ops_override",
+                note: "Self check-in (kiosk)",
+                stockInHand: "spare",
+                stationId: deskPrinterRef.current,
+              }).catch(() => null);
+              if (!printed?.success || !printed.data.queued) {
+                message = "Your stickers could not be printed. Please see the registration desk.";
+              }
+            } else {
+              message = "You were already checked in. If you still need your badge, please see the registration desk.";
+            }
+          }
+          setKioskResult({ kind: "in", name, message, note: result.note ?? null });
+        } else {
+          setKioskResult({ kind: "refused", message: selfCheckInRefusalText(result.state) });
+        }
+        await loadRows();
+        return;
+      }
       pushScanCard(result.state, result.personId);
       await loadRows();
     },
-    [loadRows, pushScanCard, selectedCameraId, submitScan]
+    [conferenceId, loadRows, pushScanCard, rows, selectedCameraId, submitScan]
   );
   // ⛔ The camera reads the LATEST submitToken through this ref. It used to be
   // a dependency of startCameraScanner, and submitToken changes whenever the
@@ -1711,21 +1793,58 @@ export default function CheckInDeskClient({
           }}
         />
       ) : null}
+      {kiosk && pinState?.hasPin && !handOverOrderId ? (
+        kioskExitPin ? (
+          <div className="fixed inset-0 z-[96]">
+            <DeskPinCheck
+              conferenceId={conferenceId}
+              title="Leave self check-in"
+              subtitle="Staff: enter your PIN to go back to the desk."
+              onCancel={() => setKioskExitPin(false)}
+              onPassed={() => {
+                setKioskExitPin(false);
+                setKioskResult(null);
+                setKiosk(false);
+              }}
+            />
+          </div>
+        ) : (
+          <SelfCheckInKiosk
+            result={kioskResult}
+            busy={kioskBusy}
+            onDone={() => setKioskResult(null)}
+            onStaff={() => setKioskExitPin(true)}
+          />
+        )
+      ) : null}
       {agreementGate ? (
         <AgreementSheet
           personName={rows.find((row) => row.id === agreementGate.personId)?.display_name ?? null}
           owed={agreementGate.owed}
           onAccept={async (versionIds) => {
             const gate = agreementGate;
-            const res = await acceptAgreementsAtDesk({ conferenceId, personId: gate.personId, versionIds });
+            const res = await acceptAgreementsAtDesk({
+              conferenceId,
+              personId: gate.personId,
+              versionIds,
+              selfService: kioskRef.current,
+            });
             if (!res.success) return res.error;
             setAgreementGate(null);
             await gate.then();
             return null;
           }}
+          notNowLabel={kiosk ? "Not now (see the registration desk)" : undefined}
           onNotNow={() => {
             const gate = agreementGate;
             setAgreementGate(null);
+            if (kioskRef.current) {
+              setKioskResult({
+                kind: "refused",
+                message: "You are not checked in yet. Please see the registration desk.",
+              });
+              return;
+            }
             pushScanCard("legal_not_accepted", gate.personId);
           }}
         />
@@ -2486,6 +2605,20 @@ export default function CheckInDeskClient({
               label="Sell"
               onClick={() => openSell({ doorEventId: doorEntityRef.current })}
             />
+            {kioskAllowed ? (
+              <ToolButton
+                size="lg"
+                showLabel
+                icon={<CameraIcon />}
+                label="Self check-in (kiosk)"
+                onClick={() => {
+                  setDeskMenuOpen(false);
+                  setLookupOpen(false);
+                  setKioskResult(null);
+                  setKiosk(true);
+                }}
+              />
+            ) : null}
             {doorEvents.length > 0 ? (
               <ToolButton
                 size="lg"
@@ -2627,87 +2760,6 @@ function wallTime(hhmm: string): string {
  * event's window is open; reopened from the toolkit, where every event is
  * listed (reconciling afterwards, or an uncapped one like an AGM).
  */
-/**
- * The agreements an attendee owes, shown to them on the desk's device before
- * they are checked in. Each one is read and accepted on its own; Continue
- * records them (acceptAgreementsAtDesk) and checks them in. Rendered like the
- * attendee welcome page's acceptance (AssigneeAcceptance): the same admin-
- * authored HTML.
- */
-function AgreementSheet({
-  personName,
-  owed,
-  onAccept,
-  onNotNow,
-}: {
-  personName: string | null;
-  owed: OwedAgreement[];
-  onAccept: (versionIds: string[]) => Promise<string | null>;
-  onNotNow: () => void;
-}) {
-  const [accepted, setAccepted] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const allAccepted = owed.every((doc) => accepted.has(doc.versionId));
-  return (
-    <div className="fixed inset-0 z-[95] overflow-y-auto bg-white px-5 py-8 text-gray-900">
-      <div className="mx-auto w-full max-w-2xl space-y-4">
-        <div>
-          <p className="text-2xl font-bold">{personName ? `${personName}, before your badge` : "Before your badge"}</p>
-          <p className="mt-1 text-base text-gray-600">
-            Please read and accept {owed.length === 1 ? "this agreement" : "these agreements"} for the conference.
-          </p>
-        </div>
-        {owed.map((doc) => {
-          const done = accepted.has(doc.versionId);
-          return (
-            <section key={doc.versionId} className="rounded-xl border border-gray-200 p-4">
-              <h2 className="text-lg font-semibold">
-                {LEGAL_DOCUMENT_LABELS[doc.documentType as LegalDocumentType] ?? doc.documentType}
-              </h2>
-              <div
-                className="prose prose-sm mt-2 max-h-72 max-w-none overflow-y-auto text-sm text-gray-700"
-                // Admin-authored agreement text, as the welcome page renders it.
-                dangerouslySetInnerHTML={{ __html: doc.content }}
-              />
-              <button
-                type="button"
-                disabled={done}
-                onClick={() => setAccepted((prev) => new Set([...prev, doc.versionId]))}
-                className={`mt-3 min-h-12 w-full rounded-lg px-4 text-base font-semibold ${
-                  done ? "bg-emerald-100 text-emerald-800" : "bg-gray-900 text-white"
-                }`}
-              >
-                {done ? "✓ Accepted" : "I accept"}
-              </button>
-            </section>
-          );
-        })}
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        <button
-          type="button"
-          disabled={!allAccepted || busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            const problem = await onAccept([...accepted]);
-            if (problem) {
-              setError(problem);
-              setBusy(false);
-            }
-          }}
-          className="min-h-14 w-full rounded-xl bg-emerald-500 px-5 text-lg font-bold text-black disabled:opacity-40"
-        >
-          {busy ? "…" : allAccepted ? "Continue to my badge" : "Accept each agreement to continue"}
-        </button>
-        <button type="button" onClick={onNotNow} className="w-full text-center text-sm text-gray-500 underline">
-          Not now (hand the device back to staff)
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** Which printer this desk device prints to. Kept on the device. */
 function PrinterPicker({
   stations,

@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { selfCheckInVariables } from "@/lib/conference/self-check-in-server";
 import { lookupUserEmailsByIds as lookupUserEmails } from "@/lib/supabase/user-lookup";
 import { deriveRecipientNameVariables, formatConferenceDates } from "./format";
 import { getConditionsByKeys } from "./conditions/store";
@@ -339,6 +340,12 @@ async function resolveConferenceAll(
   const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
   const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
   const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
+  // Empty unless the conference has self check-in on (selfCheckInVariables).
+  const checkInVarsByPersonId = await selfCheckInVariables(
+    supabase,
+    filters?.conference_instance_id,
+    (data ?? []).map((r) => r.id as string)
+  );
 
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
@@ -349,6 +356,7 @@ async function resolveConferenceAll(
       ...conferenceVars,
       ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
       ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+      ...checkInVarsByPersonId.get(row.id as string),
     },
   })).filter((r) => r.email !== "");
 }
@@ -398,7 +406,7 @@ async function resolveConferenceHolders(
 
   const { data: people, error: peopleError } = await supabase
     .from("conference_people")
-    .select("user_id, contact_email, display_name, organization_id")
+    .select("id, user_id, contact_email, display_name, organization_id")
     .in("id", [...personIds]);
   if (peopleError) {
     console.error("[comms/audience] resolveConferenceHolders people error:", peopleError);
@@ -408,6 +416,12 @@ async function resolveConferenceHolders(
   const conferenceVars = await loadConferenceVariables(supabase, conferenceId);
   const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (people ?? []).map((r) => r.organization_id));
   const personVarsByUserId = await batchLoadPersonVariables(supabase, (people ?? []).map((r) => r.user_id));
+  // Empty unless the conference has self check-in on (selfCheckInVariables).
+  const checkInVarsByPersonId = await selfCheckInVariables(
+    supabase,
+    conferenceId,
+    (people ?? []).map((r) => r.id as string)
+  );
 
   return (people ?? [])
     .map((row) => ({
@@ -419,6 +433,7 @@ async function resolveConferenceHolders(
         ...conferenceVars,
         ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
         ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+        ...checkInVarsByPersonId.get(row.id as string),
       },
     }))
     .filter((r) => r.email !== "");

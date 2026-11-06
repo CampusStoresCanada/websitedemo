@@ -19,6 +19,8 @@ import { DEFAULT_VARIANT } from "@/lib/conference/badges/template";
 import BadgeArrangementEditor from "@/components/admin/conference/BadgeArrangementEditor";
 import BadgeScanRulesEditor from "@/components/admin/conference/BadgeScanRulesEditor";
 import BadgePrintStockEditor from "@/components/admin/conference/BadgePrintStockEditor";
+import SelfCheckInEditor from "@/components/admin/conference/SelfCheckInEditor";
+import { loadSelfCheckInSettings } from "@/lib/conference/self-check-in-server";
 import { loadBadgeScanRuleOptions } from "@/lib/actions/badge-scan-rules";
 import { loadBadgePrintStockOptions } from "@/lib/actions/badge-print-stock";
 import {
@@ -122,6 +124,7 @@ export default async function ConferenceBadgeOpsPage({
   if (!conf) {
     return <main className="p-6 text-sm text-red-700">Conference not found.</main>;
   }
+  const selfCheckIn = await loadSelfCheckInSettings(conferenceId);
 
   // An unreadable roster must not render as an empty one. Badge Ops showing a
   // clean "0 delegates, 0 exhibitors" while the query was in fact rejected is
@@ -885,6 +888,16 @@ export default async function ConferenceBadgeOpsPage({
               </div>
             </div>
           ) : null}
+
+          {/* How the badges are picked up: a policy decided once, like stock. */}
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              1c. Self check-in
+            </p>
+            <div className="mt-2">
+              <SelfCheckInEditor conferenceId={conferenceId} initial={selfCheckIn} />
+            </div>
+          </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">

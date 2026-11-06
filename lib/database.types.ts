@@ -4780,6 +4780,7 @@ export type Database = {
           registration_close_at: string | null
           registration_open_at: string | null
           schedule_freeze_at: string | null
+          self_check_in: Json | null
           shipping_origin: Json | null
           shipping_pickup: Json | null
           start_date: string | null
@@ -4830,6 +4831,7 @@ export type Database = {
           registration_close_at?: string | null
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
+          self_check_in?: Json | null
           shipping_origin?: Json | null
           shipping_pickup?: Json | null
           start_date?: string | null
@@ -4880,6 +4882,7 @@ export type Database = {
           registration_close_at?: string | null
           registration_open_at?: string | null
           schedule_freeze_at?: string | null
+          self_check_in?: Json | null
           shipping_origin?: Json | null
           shipping_pickup?: Json | null
           start_date?: string | null
