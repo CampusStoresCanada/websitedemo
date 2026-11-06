@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { loginWithNext } from "@/lib/auth/login-redirect";
 import { loadSurveyFlags } from "@/lib/actions/benchmarking-flags";
 import IssueQueue from "@/components/benchmarking/admin/IssueQueue";
@@ -30,7 +31,19 @@ export default async function BenchmarkingIssuesPage({
 }) {
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/issues"));
-  if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking/admin");
+  /*
+    ⛔ The gate the sibling submissions page already uses. This page required
+    isGlobalAdmin alone, while the reports it lists are ROUTED to whoever holds
+    benchmarking.qa_verify — and four of those six are global_role "user". So
+    Butler invited them here and the page bounced them, which is the one rule
+    this repo states twice: never gate the door you start the thing through.
+  */
+  if (
+    !isGlobalAdmin(auth.ctx.globalRole) &&
+    !opensBenchmarkingAdmin(auth.ctx.capabilities)
+  ) {
+    redirect("/benchmarking/admin");
+  }
 
   const [issues, { flag: focusId }] = await Promise.all([
     loadSurveyFlags(),

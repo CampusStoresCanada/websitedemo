@@ -24,21 +24,28 @@ const STATUS_LABEL: Record<string, string> = {
 /**
  * Where to send somebody to see the question a report was about.
  *
- * ⛔ NOT /benchmarking/survey, which is what the card linked to. That opens the
- * reader's OWN store's live form: a committee member following the link lands
- * in their institution's submission, and walking it writes. The admin preview
- * redirects into the real survey as the TEST store, which is the same questions
- * with nothing of anyone's at stake.
+ * ⛔ The RESPONDENT's submission, at the field, not a generic copy of the form.
+ * The point of following a report is seeing the figure that provoked it in the
+ * state that store left it in, so `?org=` names their store — the same pin
+ * /benchmarking/compare and the worksheet use — and `#field-` lands on the
+ * question.
  *
- * The `#field-` fragment is best effort, since it has to survive that redirect.
- * The field name is printed on the card either way, so the row still says which
- * question it was even when the anchor does not land.
+ * ⛔ Bare /benchmarking/survey, which is what this linked to, opens the
+ * READER's own store instead: a committee member following it landed in their
+ * own institution's form rather than the one being reported on.
+ *
+ * Opening another store does not write. resolveActingOrg marks the viewer
+ * isActingAsOther and the survey page then refuses to create a draft row, so a
+ * store that had not started is not started by being looked at.
+ *
+ * Without the org we cannot pin it, and sending them to their own form would be
+ * worse than sending them nowhere — so the card drops the link and says why.
  */
-function whereTheyWere(issue: SurveyFlag): string {
+function whereTheyWere(issue: SurveyFlag): string | null {
   if (!issue.pageUrl.startsWith("/benchmarking/survey")) return issue.pageUrl;
-  return issue.fieldKey
-    ? `/benchmarking/admin/preview#field-${issue.fieldKey}`
-    : "/benchmarking/admin/preview";
+  if (!issue.organizationId) return null;
+  const anchor = issue.fieldKey ? `#field-${issue.fieldKey}` : "";
+  return `/benchmarking/survey?org=${issue.organizationId}${anchor}`;
 }
 
 export default function IssueQueue({
@@ -65,8 +72,19 @@ export default function IssueQueue({
   // state of the queue to make one link tidy.
   const first = (a: SurveyFlag, b: SurveyFlag) =>
     Number(b.id === focusId) - Number(a.id === focusId);
-  const open = rows.filter((r) => r.status === "open").sort(first);
-  const closed = rows.filter((r) => r.status !== "open").sort(first);
+  /*
+    ⛔ "acknowledged" counted as dealt with, because the split was `status ===
+    "open"` against everything else. So a report somebody had merely picked up
+    was filed under Dealt with with no decision recorded against it, and the
+    Open count under-reported what was actually outstanding. Acknowledged means
+    a person has it, not that it is finished.
+  */
+  const outstanding = rows
+    .filter((r) => r.status === "open" || r.status === "acknowledged")
+    .sort(first);
+  const closed = rows
+    .filter((r) => r.status === "resolved" || r.status === "dismissed")
+    .sort(first);
 
   async function decide(
     issue: SurveyFlag,
@@ -126,7 +144,9 @@ export default function IssueQueue({
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
             issue.status === "open"
               ? "bg-amber-100 text-amber-900"
-              : "bg-gray-100 text-gray-600"
+              : issue.status === "acknowledged"
+                ? "bg-blue-100 text-blue-900"
+                : "bg-gray-100 text-gray-600"
           }`}
         >
           {STATUS_LABEL[issue.status] ?? issue.status}
@@ -136,12 +156,38 @@ export default function IssueQueue({
       <p className="mt-2 whitespace-pre-line text-sm text-gray-800">
         {issue.note ?? "No description given."}
       </p>
-      <a
-        href={whereTheyWere(issue)}
-        className="mt-1 inline-block text-xs text-[#163D6D] underline underline-offset-4"
-      >
-        Go to where they were
-      </a>
+      {whereTheyWere(issue) ? (
+        <a
+          href={whereTheyWere(issue)!}
+          className="mt-1 inline-block text-xs text-[#163D6D] underline underline-offset-4"
+        >
+          Go to where they were
+        </a>
+      ) : (
+        <p className="mt-1 text-xs text-gray-400">
+          No store on this report, so there is no submission to open.
+        </p>
+      )}
+
+      {/*
+        ⛔ resolved_by and resolved_at have been written by decideSurveyFlag
+        since it shipped and displayed nowhere, so the queue could say a report
+        was resolved and not who resolved it or when. That is the whole question
+        a second responder asks before touching it.
+      */}
+      {issue.status !== "open" && (issue.resolvedByName || issue.resolvedAt) && (
+        <p className="mt-2 text-xs text-gray-500">
+          {STATUS_LABEL[issue.status] ?? issue.status}
+          {issue.resolvedByName ? ` by ${issue.resolvedByName}` : ""}
+          {issue.resolvedAt
+            ? ` on ${new Date(issue.resolvedAt).toLocaleDateString("en-CA", {
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+              })}`
+            : ""}
+        </p>
+      )}
 
       {issue.resolutionNotes && (
         <p className="mt-2 rounded bg-gray-50 p-2 text-xs text-gray-700">
@@ -200,15 +246,15 @@ export default function IssueQueue({
       {error && <p className="mb-3 text-sm text-red-700">{error}</p>}
 
       <h2 className="text-sm font-semibold text-gray-900">
-        Open ({open.length})
+        Outstanding ({outstanding.length})
       </h2>
-      {open.length === 0 ? (
+      {outstanding.length === 0 ? (
         <p className="mt-2 text-sm text-gray-500">
           Nothing outstanding. That is either very good news or nobody has been asked to
           fill the survey yet.
         </p>
       ) : (
-        <ul className="mt-3 space-y-3">{open.map(card)}</ul>
+        <ul className="mt-3 space-y-3">{outstanding.map(card)}</ul>
       )}
 
       {closed.length > 0 && (

@@ -12,7 +12,7 @@ import RespondentNotes from "@/components/benchmarking/RespondentNotes";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
 import { hasCapability } from "@/lib/auth/capabilities";
-import { CAPABILITIES } from "@/lib/auth/capability-names";
+import { CAPABILITIES, opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -37,7 +37,7 @@ export default async function BenchmarkingSurveyPage({
   if (!auth.ok) {
     redirect(loginWithNext("/benchmarking/survey", params));
   }
-  const { supabase, userId, globalRole } = auth.ctx;
+  const { supabase, userId, globalRole, capabilities } = auth.ctx;
 
   // `?org=` decides WHICH store this page is about, so it has to be known
   // before the org is resolved rather than at render time. Resolved above the
@@ -48,7 +48,23 @@ export default async function BenchmarkingSurveyPage({
   const isPreview = params?.preview === "1";
 
   // 2. Get user profile and org
-  const isAdmin = isGlobalAdmin(globalRole);
+  /*
+    Who may open a store other than their own.
+    
+    ⛔ Interpretation is included, not just global admins. A flag links into the
+    submission it was raised in, and four of the six qa_verify holders are
+    global_role "user" — so without this the link bounces exactly the people the
+    report was sent to. opensBenchmarkingAdmin is the existing name for this set
+    and its comment already describes the grant: these holders may "open every
+    member store's submission and rule on flagged figures".
+
+    ⚠️ This is the same canFile bypass a global admin gets (survey-access.ts),
+    so an Interpretation holder can open and edit a store's live submission.
+    What it does NOT do is create one: resolveActingOrg marks them
+    isActingAsOther and the draft step below refuses to insert a row, so opening
+    a store that has not started still leaves nothing behind.
+  */
+  const isAdmin = isGlobalAdmin(globalRole) || opensBenchmarkingAdmin(capabilities);
 
   // 3. Find user's member org where they're org_admin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

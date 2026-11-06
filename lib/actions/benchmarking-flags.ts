@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { sendFlagDecisionNotification } from "@/lib/circle/flag-notify";
 import { fieldKeyFromSelector } from "@/lib/circle/flag-routing";
 
@@ -27,6 +28,22 @@ export interface SurveyFlag {
   organizationName: string | null;
   createdAt: string;
   /**
+   * The store whose survey this was raised in.
+   *
+   * ⛔ Derived from the reporter, not read from flags.organization_id, which is
+   * NULL on every survey flag ever raised: that column means "the page is about
+   * this org", and a survey page is about whoever is filling it. So the queue
+   * showed "Unknown store" for all of them, and there was no way to build a link
+   * into the submission the report came from.
+   *
+   * Derived at READ time deliberately, so the reports already sitting in the
+   * queue gain it too. Backfilling the column would have fixed only new ones.
+   */
+  organizationId: string | null;
+  /** Who decided it, by name, so the queue says more than that somebody did. */
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  /**
    * The survey field they were standing on, e.g. `cm_sell_through_pct`.
    *
    * ⛔ Written to the row since the toolkit shipped and read by nothing. Three
@@ -41,18 +58,67 @@ export interface SurveyFlag {
 /** Flags raised from inside the survey, newest first. */
 export async function loadSurveyFlags(): Promise<SurveyFlag[]> {
   const auth = await requireAuthenticated();
-  if (!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)) return [];
+  /*
+    ⛔ The same gate /benchmarking/admin/[year]/submissions uses, not
+    isGlobalAdmin alone. Interpretation is the squad these reports are sent TO —
+    flag-notify routes them by benchmarking.qa_verify — and four of the six
+    holders are global_role "user", so the notification invited them to a list
+    that returned empty. opensBenchmarkingAdmin already means exactly this set;
+    its own comment says these holders may "open every member store's submission
+    and rule on flagged figures".
+  */
+  if (!auth.ok) return [];
+  if (!isGlobalAdmin(auth.ctx.globalRole) && !opensBenchmarkingAdmin(auth.ctx.capabilities)) {
+    return [];
+  }
 
   const db = createAdminClient();
   const { data } = await db
     .from("flags")
     .select(
-      "id, page_url, note, priority, status, resolution_notes, flagger_name, element_selector, element_content, created_at, organizations(name)",
+      "id, page_url, note, priority, status, resolution_notes, flagger_id, flagger_name, element_selector, element_content, created_at, resolved_by, resolved_at, organizations(name)",
     )
     .like("page_url", "%/benchmarking/%")
     .order("created_at", { ascending: false });
 
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map((r) => ({
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+
+  /*
+    The reporter's member store, and whoever decided each report. Two lookups
+    for the whole queue rather than one per row.
+
+    ⛔ Member stores only. A CSC staffer is attached to the Staff org as well,
+    and "the store whose survey this is" is never that one — the same filter
+    resolveActingOrg applies, and the bug it exists to prevent.
+  */
+  const flaggerIds = [...new Set(rows.map((r) => r.flagger_id as string | null).filter(Boolean))] as string[];
+  const resolverIds = [...new Set(rows.map((r) => r.resolved_by as string | null).filter(Boolean))] as string[];
+
+  const [links, resolvers] = await Promise.all([
+    flaggerIds.length
+      ? db
+          .from("user_organizations")
+          .select("user_id, organizations!inner(id, type)")
+          .in("user_id", flaggerIds)
+          .eq("status", "active")
+      : Promise.resolve({ data: [] }),
+    resolverIds.length
+      ? db.from("profiles").select("id, display_name").in("id", resolverIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const orgByUser = new Map<string, string>();
+  for (const l of (links.data ?? []) as unknown as Record<string, unknown>[]) {
+    const org = l.organizations as { id?: string; type?: string } | null;
+    if (org?.type === "Member" && org.id) orgByUser.set(l.user_id as string, org.id);
+  }
+
+  const nameById = new Map<string, string>();
+  for (const pr of (resolvers.data ?? []) as unknown as Record<string, unknown>[]) {
+    if (pr.display_name) nameById.set(pr.id as string, pr.display_name as string);
+  }
+
+  return rows.map((r) => ({
     id: r.id as string,
     pageUrl: (r.page_url as string) ?? "",
     /*
@@ -69,6 +135,9 @@ export async function loadSurveyFlags(): Promise<SurveyFlag[]> {
     organizationName:
       ((r.organizations as { name?: string } | null)?.name as string) ?? null,
     createdAt: (r.created_at as string) ?? "",
+    organizationId: orgByUser.get((r.flagger_id as string) ?? "") ?? null,
+    resolvedByName: nameById.get((r.resolved_by as string) ?? "") ?? null,
+    resolvedAt: (r.resolved_at as string | null) ?? null,
     fieldKey: fieldKeyFromSelector(r.element_selector as string | null),
   }));
 }
@@ -79,7 +148,10 @@ export async function decideSurveyFlag(input: {
   resolutionNotes?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAuthenticated();
-  if (!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)) {
+  // Same gate as the queue that renders the buttons. ⛔ A page whose controls
+  // render for someone the action then refuses is worse than no controls.
+  if (!auth.ok) return { success: false, error: "Not your call." };
+  if (!isGlobalAdmin(auth.ctx.globalRole) && !opensBenchmarkingAdmin(auth.ctx.capabilities)) {
     return { success: false, error: "Not your call." };
   }
 
