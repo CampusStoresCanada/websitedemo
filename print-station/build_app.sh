@@ -4,6 +4,10 @@
 # Needs: Homebrew python3 with Tk (brew install python-tk@3.14) and libusb
 # (brew install libusb). The result is in ~/csc-print-station-build/dist/.
 #
+# PyMuPDF only renders Purolator's label PDFs here. Its optional layout
+# add-on (onnxruntime and ~50 MB of models) took the zip to 110 MB, past the
+# 50 MB storage limit for the download (2026-11-05), so it is left out.
+#
 # ⛔ Built OUTSIDE the repo: an .app bundle or a venv inside the website's
 # folder makes `next build` fail ("Invalid file type Directory", 2026-11-04).
 set -euo pipefail
@@ -22,6 +26,8 @@ LIBUSB="$(brew --prefix libusb)/lib/libusb-1.0.0.dylib"
   --add-binary "$LIBUSB:." \
   --collect-submodules brother_ql \
   --collect-submodules usb \
-  --collect-all pymupdf \
+  --collect-binaries pymupdf \
+  --exclude-module pymupdf.layout \
+  --exclude-module onnxruntime \
   "$PWD/print_station_app.py"
 echo "Built: $OUT/dist/CSC Print Station.app"
