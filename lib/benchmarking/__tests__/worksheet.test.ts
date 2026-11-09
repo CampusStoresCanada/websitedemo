@@ -386,3 +386,116 @@ describe("the sheet prints what we already hold", () => {
     expect(block.extraBlankRows).toBeGreaterThan(4);
   });
 });
+
+describe("figures that only changed grain still print", () => {
+  /*
+    Square footage and opening hours used to be store-level columns and are now
+    asked per location. So we hold a real answer at the wrong grain rather than
+    no answer, and the sheet printed blank grids beside sections that carried
+    last year's figures — which a store reported, correctly, as "last year's is
+    not coming up".
+
+    ⛔ The fix is one clearly-labelled prior-year row, never a figure spread
+    across invented location rows. A store with 9,623 sq ft over four shops did
+    not tell us 2,406 each.
+  */
+  const prior: PriorRow = {
+    fiscal_year: 2025,
+    num_store_locations: 4,
+    sqft_salesfloor: 6275,
+    sqft_storage: 1195,
+    sqft_office: 1528,
+    sqft_other: 140,
+    weekday_hours_open: "09:00:00",
+    weekday_hours_close: "16:00:00",
+  };
+
+  const sheet = buildWorksheet({
+    organizationName: "Test Store",
+    fiscalYear: 2026,
+    closesAt: null,
+    config: DEFAULT_FIELD_CONFIG,
+    priorRows: [prior],
+    organizationSlug: "test-store",
+  });
+
+  const listOn = (w: typeof sheet, startsWith: string) =>
+    w.sections
+      .find((s) => s.id === "institution_profile")!
+      .lists.find((l) => l.title.startsWith(startsWith))!;
+
+  const noHistory = buildWorksheet({
+    organizationName: "New Store",
+    fiscalYear: 2026,
+    closesAt: null,
+    config: DEFAULT_FIELD_CONFIG,
+    priorRows: [],
+    organizationSlug: "new-store",
+  });
+
+  it("carries last year's square footage as one row, not one per location", () => {
+    const locations = listOn(sheet, "Your locations");
+    expect(locations.rowCells).toHaveLength(1);
+    // [name, kind, sales floor, storage, office, other]
+    expect(locations.rowCells![0]).toEqual([
+      "2025: all 4 locations",
+      "",
+      "6,275",
+      "1,195",
+      "1,528",
+      "140",
+    ]);
+  });
+
+  it("says which year the row is and that it was a store-level total", () => {
+    const intro = listOn(sheet, "Your locations").intro;
+    expect(intro).toContain("2025");
+    expect(intro).toContain("store-level total");
+  });
+
+  it("leaves room to enter this year per location underneath", () => {
+    expect(listOn(sheet, "Your locations").blankRows).toBeGreaterThan(0);
+  });
+
+  it("prints weekday hours a reader recognises, not a Postgres time", () => {
+    const hours = listOn(sheet, "Opening hours");
+    expect(hours.rowCells).toEqual([
+      ["monday", "9:00 am", "4:00 pm"],
+      ["tuesday", "9:00 am", "4:00 pm"],
+      ["wednesday", "9:00 am", "4:00 pm"],
+      ["thursday", "9:00 am", "4:00 pm"],
+      ["friday", "9:00 am", "4:00 pm"],
+      // Never answered, so never asserted — blank means closed OR unasked.
+      ["saturday", "", ""],
+      ["sunday", "", ""],
+    ]);
+  });
+
+  it("gives a store with no history the blank grid, not a row of empty cells", () => {
+    expect(listOn(noHistory, "Your locations").rowCells).toBeUndefined();
+    const hours = listOn(noHistory, "Opening hours");
+    expect(hours.rowCells).toBeUndefined();
+    expect(hours.rowLabels).toContain("monday");
+  });
+
+  it("promises nothing in the intro when there is nothing to carry", () => {
+    expect(listOn(noHistory, "Your locations").intro).not.toContain("2025");
+    expect(listOn(noHistory, "Opening hours").intro).not.toContain("gave us");
+  });
+
+  /*
+    ⛔ The clean break holds. §2 and §3 arrive empty ON PURPOSE: the categories
+    are CSC's own, put to the community to adopt, and mapping the old flat sales
+    columns onto them would be us deciding a store's cuts for it. A prior row
+    that leaks in here is a regression, not a feature.
+  */
+  it("still prints the new categories empty, even for a store with history", () => {
+    for (const id of ["general_merchandise", "course_materials"]) {
+      const grid = sheet.sections
+        .find((s) => s.id === id)!
+        .lists.find((l) => l.title.startsWith("Sales and margin"))!;
+      expect(grid.rowCells).toBeUndefined();
+      expect(grid.intro).toContain("nothing to carry forward");
+    }
+  });
+});

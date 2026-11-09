@@ -148,6 +148,94 @@ export interface Worksheet {
 
 export type PriorRow = Record<string, unknown> & { fiscal_year: number };
 
+/** The newest prior submission, handed to the lists that can carry it. */
+interface PriorSnapshot {
+  year: number;
+  row: PriorRow;
+}
+
+/** A stored figure as a printable string, or "" for a cell we do not hold. */
+function priorCell(row: PriorRow, key: string): string {
+  const v = row[key];
+  if (v === null || v === undefined || v === "") return "";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toLocaleString("en-CA") : String(v).trim();
+}
+
+/**
+ * A stored `time` as something a person reads. Postgres hands back "09:00:00".
+ *
+ * Deliberately not `toLocaleTimeString` on a Date: these are wall-clock store
+ * hours with no date and no zone, and routing them through a Date is how a
+ * 9am opening prints as 2am. See feedback_supabase_timestamps.
+ */
+function priorTime(row: PriorRow, key: string): string {
+  const raw = row[key];
+  if (typeof raw !== "string") return "";
+  const m = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return "";
+  const h = Number(m[1]);
+  const suffix = h < 12 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m[2]} ${suffix}`;
+}
+
+/**
+ * Last year's square footage as a single prior-year row for Your locations.
+ *
+ * Returns null when we hold none of it, so a store with no history gets the
+ * blank grid it had before rather than a row of empty cells under a heading
+ * that promises a figure.
+ */
+function priorLocationRow(prior: PriorSnapshot | null): string[][] | null {
+  if (!prior) return null;
+  const cells = [
+    "sqft_salesfloor",
+    "sqft_storage",
+    "sqft_office",
+    "sqft_other",
+  ].map((k) => priorCell(prior.row, k));
+  if (cells.every((c) => c === "")) return null;
+
+  const count = priorCell(prior.row, "num_store_locations");
+  const name = count
+    ? `${prior.year}: all ${count} locations`
+    : `${prior.year}: whole store`;
+
+  // Kind is left blank on purpose — a store-level total is not of any one kind.
+  return [[name, "", ...cells]];
+}
+
+/**
+ * Last year's opening hours, one row per day.
+ *
+ * FY2025 and earlier asked a single weekday pair plus Saturday and Sunday for
+ * the whole store, so Monday to Friday all carry the same figure. That is what
+ * the store told us, not an assumption we are adding.
+ */
+function priorHoursRows(prior: PriorSnapshot | null): string[][] | null {
+  if (!prior) return null;
+  const weekday = [
+    priorTime(prior.row, "weekday_hours_open"),
+    priorTime(prior.row, "weekday_hours_close"),
+  ];
+  const saturday = [
+    priorTime(prior.row, "saturday_hours_open"),
+    priorTime(prior.row, "saturday_hours_close"),
+  ];
+  const sunday = [
+    priorTime(prior.row, "sunday_hours_open"),
+    priorTime(prior.row, "sunday_hours_close"),
+  ];
+  if ([weekday, saturday, sunday].every(([o, c]) => !o && !c)) return null;
+
+  return DAYS.map((day) => {
+    const hours =
+      day === "saturday" ? saturday : day === "sunday" ? sunday : weekday;
+    return [day, ...hours];
+  });
+}
+
 function formatValue(value: unknown, type: FieldConfig["type"]): string | null {
   if (value === null || value === undefined || value === "") return null;
 
@@ -229,10 +317,31 @@ function isGatherable(field: FieldConfig): boolean {
  */
 function listsForSection(
   sectionId: string,
-  known: { people: KnownPerson[]; dates: KnownDate[]; orgPath: string | null },
+  known: {
+    people: KnownPerson[];
+    dates: KnownDate[];
+    orgPath: string | null;
+    /**
+     * The newest prior submission, for the lists that can carry one.
+     *
+     * ⛔ Not every list can, and the two biggest cannot: General Merchandise
+     * and Course Materials arrive empty on purpose, because the categories are
+     * CSC's own and mapping the old flat columns onto them would be us deciding
+     * a store's cuts for it. See project_csc_categorization_is_a_clean_break.
+     *
+     * What CAN carry is the handful of figures that only changed GRAIN. Square
+     * footage and opening hours used to be store-level columns and are now
+     * asked per location, so we hold a real answer at the wrong grain rather
+     * than no answer. Printing it as one clearly-labelled prior-year row is
+     * honest; splitting it across invented location rows would not be.
+     */
+    prior: PriorSnapshot | null;
+  },
 ): WorksheetList[] {
   switch (sectionId) {
-    case "institution_profile":
+    case "institution_profile": {
+      const priorLocations = priorLocationRow(known.prior);
+      const priorHours = priorHoursRows(known.prior);
       return [
         {
           /*
@@ -266,17 +375,31 @@ function listsForSection(
         },
         {
           title: "Your locations",
+          /*
+            Last year's square footage, printed at the grain we actually hold
+            it: one store-level total, because until this year that is what the
+            survey asked for and there are no prior per-location rows to carry.
+
+            ⛔ It goes in as ONE row labelled with the year, not spread across
+            four invented location rows. A store with 9,623 sq ft over four
+            shops did not tell us 2,406 each, and writing that down would be us
+            inventing a figure and then asking them to confirm it.
+          */
           intro:
-            "One row per place you operate. The web store is not a location. Square footage is asked per location and the survey adds it up for you, so you never type a total.",
+            "One row per place you operate. The web store is not a location. Square footage is asked per location and the survey adds it up for you, so you never type a total." +
+            (priorLocations
+              ? ` The first row is what you reported for ${known.prior!.year}, when we asked for one store-level total rather than a figure per location. Use it to check the parts still add up, then fill a row per shop below it.`
+              : ""),
           choices: LOCATION_KINDS.map((k) => ({ label: k.label, note: k.help })),
+          nameColumn: "Name",
           columns: [
-            "Name",
             "Kind",
             "Sales floor (sq ft)",
             "Storage (sq ft)",
             "Office (sq ft)",
             "Other space (sq ft, and what it is)",
           ],
+          rowCells: priorLocations ?? undefined,
           blankRows: 4,
         },
         {
@@ -287,10 +410,14 @@ function listsForSection(
           */
           title: "Opening hours, for each permanent location with a sales floor",
           intro:
-            "Term-time hours. Leave a day blank if you are closed. Asked per location, so copy this grid for each permanent shop. Not asked for seasonal or warehouse space.",
+            "Term-time hours. Leave a day blank if you are closed. Asked per location, so copy this grid for each permanent shop. Not asked for seasonal or warehouse space." +
+            (priorHours
+              ? ` The times printed in are what you gave us for ${known.prior!.year}, when we asked one set of weekday hours for the whole store. Correct them per shop rather than confirming them.`
+              : ""),
           nameColumn: "Location:",
           columns: ["Opens", "Closes"],
-          rowLabels: [...DAYS],
+          rowCells: priorHours ?? undefined,
+          rowLabels: priorHours ? undefined : [...DAYS],
         },
         {
           title: "Services you run",
@@ -325,6 +452,7 @@ function listsForSection(
           blankRows: 4,
         },
       ];
+    }
 
     case "general_merchandise": {
       const departments = departmentsFor("general_merchandise").map((d) => {
@@ -627,6 +755,7 @@ export function buildWorksheet(input: {
         people: knownPeople,
         dates: knownDates,
         orgPath: organizationSlug ? `campusstores.ca/org/${organizationSlug}` : null,
+        prior: priors[0] ? { year: priors[0].fiscal_year, row: priors[0] } : null,
       }),
     }))
     /*

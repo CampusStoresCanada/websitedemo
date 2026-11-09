@@ -49,12 +49,41 @@ export default async function BenchmarkingWorksheetPage({
   // newest survey regardless of status, including `draft`.
   const db = createAdminClient();
 
-  const { data: survey } = await db
+  /*
+    The survey this sheet is FOR, which is the one a store can file.
+
+    ⛔ Not simply the newest row. A survey for next year is created as a `draft`
+    long before it opens — there is one for FY2027 right now — and taking the
+    newest of any status pointed every store's worksheet a year into the future:
+    headed FY2027, no closing date, and its first prior-year column was the
+    store's own empty FY2026 draft. A column of dashes beside the real figures
+    reads as "last year did not print", which is exactly how it was reported.
+
+    Still falls back to the newest of any status, because this page is
+    deliberately usable before the doors open: briefing 4 sends it to beta
+    stores days ahead so they can gather first. It needs a survey to describe,
+    not an open one.
+  */
+  const SURVEY_FIELDS = "id, fiscal_year, closes_at, field_config";
+
+  const { data: liveSurvey } = await db
     .from("benchmarking_surveys")
-    .select("id, fiscal_year, closes_at, field_config")
+    .select(SURVEY_FIELDS)
+    .in("status", ["beta", "open"])
     .order("fiscal_year", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  const survey =
+    liveSurvey ??
+    (
+      await db
+        .from("benchmarking_surveys")
+        .select(SURVEY_FIELDS)
+        .order("fiscal_year", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ).data;
 
   if (!survey) redirect("/benchmarking");
 
