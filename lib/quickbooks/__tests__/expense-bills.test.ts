@@ -4,7 +4,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
 vi.mock("@/lib/ops/alerts", () => ({ raiseAlertIfNotOpen: vi.fn() }));
 vi.mock("@/lib/data", () => ({ isFeatureEnabled: vi.fn() }));
 
-import { expenseBillLines, expenseVendorName } from "../expense-bills";
+import { expenseBillLines, expenseBillTax, expenseVendorName } from "../expense-bills";
 
 const categories = [
   { key: "hotel", label: "Hotel", measure: "amount", rateCentsPerKm: null },
@@ -37,6 +37,38 @@ describe("the payable's lines", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].Description).toBe("Mileage: 812 km at $0.73/km (Lethbridge to Calgary)");
     expect(lines[0].AccountBasedExpenseLineDetail.TaxCodeRef).toEqual({ value: "3" });
+  });
+});
+
+describe("the payable's tax, with a tax code", () => {
+  // A round-trip flight: $847.45 before tax, $31.81 GST on the receipt, which
+  // is not 5% of the fare (Ewa's example, 2026-11-06).
+  const claimed = [
+    { categoryKey: "airfare", amountCents: 84745, taxCents: 3181, distanceKm: null, description: null },
+    { categoryKey: "mileage", amountCents: 5840, taxCents: 0, distanceKm: 80, description: null },
+  ];
+
+  it("posts each expense before tax and no tax line, so QuickBooks never taxes the tax", () => {
+    const lines = expenseBillLines({ categories, lines: claimed, accountId: "77", taxCodeId: "3" });
+    expect(lines.map((l) => [l.Description, l.Amount])).toEqual([
+      ["Airfare", 847.45],
+      ["Mileage: 80 km at $0.73/km", 58.4],
+    ]);
+  });
+
+  it("states the tax the receipts show, on what was taxed", () => {
+    expect(expenseBillTax(claimed, { id: "9", percent: 5 })).toEqual({
+      TotalTax: 31.81,
+      TaxLine: [{
+        DetailType: "TaxLineDetail",
+        Amount: 31.81,
+        TaxLineDetail: { TaxRateRef: { value: "9" }, PercentBased: true, TaxPercent: 5, NetAmountTaxable: 847.45 },
+      }],
+    });
+  });
+
+  it("states nothing when no tax was paid", () => {
+    expect(expenseBillTax([claimed[1]], { id: "9", percent: 5 })).toBeNull();
   });
 });
 

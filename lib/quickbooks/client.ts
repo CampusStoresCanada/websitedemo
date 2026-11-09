@@ -428,6 +428,12 @@ export async function createQBInvoice(input: QBInvoiceInput): Promise<QBInvoice>
   return res.Invoice;
 }
 
+/** Read a posted invoice back, for what is still open on it. */
+export async function getQBInvoice(id: string): Promise<QBInvoice> {
+  const res = await qbRequest<{ Invoice: QBInvoice }>("GET", `/invoice/${id}`);
+  return res.Invoice;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Payment operations
 // ─────────────────────────────────────────────────────────────────
@@ -531,6 +537,20 @@ export interface QBBillLine {
   };
 }
 
+export interface QBTxnTaxDetail {
+  TotalTax: number;
+  TaxLine: Array<{
+    DetailType: "TaxLineDetail";
+    Amount: number;
+    TaxLineDetail: {
+      TaxRateRef: { value: string };
+      PercentBased: boolean;
+      TaxPercent: number;
+      NetAmountTaxable: number;
+    };
+  }>;
+}
+
 export interface QBBillInput {
   VendorRef: { value: string };
   Line: QBBillLine[];
@@ -539,6 +559,8 @@ export interface QBBillInput {
   PrivateNote?: string;
   CurrencyRef?: { value: string };
   GlobalTaxCalculation?: "TaxExcluded" | "TaxInclusive" | "NotApplicable";
+  /** The tax as the receipts show it, overriding what QuickBooks would work out. */
+  TxnTaxDetail?: QBTxnTaxDetail;
 }
 
 /** A vendor by exact DisplayName. QuickBooks keeps one name list across
@@ -601,6 +623,22 @@ export interface QBTaxCode {
   Name: string;
   Description?: string;
   Active: boolean;
+}
+
+/**
+ * The one purchase tax rate a tax code applies, for stating a bill's tax
+ * outright. Null when the code has no purchase rate or more than one (a
+ * combined code), where one amount cannot say how it splits.
+ */
+export async function fetchQBPurchaseTaxRate(taxCodeId: string): Promise<{ id: string; percent: number } | null> {
+  const code = await qbRequest<{
+    TaxCode: { PurchaseTaxRateList?: { TaxRateDetail?: Array<{ TaxRateRef: { value: string } }> } };
+  }>("GET", `/taxcode/${taxCodeId}`);
+  const rates = code.TaxCode.PurchaseTaxRateList?.TaxRateDetail ?? [];
+  if (rates.length !== 1) return null;
+  const id = rates[0].TaxRateRef.value;
+  const rate = await qbRequest<{ TaxRate: { RateValue?: number } }>("GET", `/taxrate/${id}`);
+  return { id, percent: rate.TaxRate.RateValue ?? 0 };
 }
 
 export async function fetchQBTaxCodes(): Promise<QBTaxCode[]> {

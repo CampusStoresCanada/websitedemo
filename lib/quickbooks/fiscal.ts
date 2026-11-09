@@ -119,3 +119,25 @@ export function elapsedBudgetMonths(fiscalYear: FiscalYear, asOf: string): strin
   void asOfDate; // suppress unused warning
   return months;
 }
+
+// The Stripe account's own timezone (Dashboard > Settings > Business), so the
+// date QuickBooks records is the date on the customer's Stripe invoice.
+const STRIPE_ACCOUNT_TIMEZONE = "America/Edmonton";
+
+/** The calendar day, YYYY-MM-DD, of an instant in the Stripe account's timezone. */
+export function stripeAccountDay(at: Date): string {
+  return at.toLocaleDateString("en-CA", { timeZone: STRIPE_ACCOUNT_TIMEZONE });
+}
+
+/**
+ * The day a document is recorded on: its own day, unless that falls on or
+ * before the bookkeeper's closing date, in a quarter she has already filed.
+ * Then the first day after it, so a late document lands in the open quarter
+ * instead of changing a filed return (Ewa, 2026-11-06).
+ */
+export function openBooksDay(day: string, closeDate: string | null): string {
+  if (!closeDate || day > closeDate) return day;
+  const next = new Date(closeDate + "T12:00:00Z");
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}

@@ -8,8 +8,10 @@
 // approval.
 //
 // The Bill pays whoever the claimant declared (the organization, themselves,
-// or someone else). Each line is posted twice over: the amount before tax and
-// the tax paid, as separate lines, so the books show the tax on its own.
+// or someone else), every dollar claimed (Ewa, 2026-11-06). With a tax code on
+// the program, each expense posts before tax under that code and the Bill
+// states the tax the receipts show, since a flight or a hotel rarely carries
+// a flat rate on its whole amount. Without one, the tax paid is its own line.
 // Paying the Bill (cheque or otherwise) happens in QuickBooks.
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -22,10 +24,14 @@ import {
   createQBVendor,
   findQBDocumentByDocNumber,
   findQBVendor,
+  fetchQBBookCloseDate,
+  fetchQBPurchaseTaxRate,
   qboDocNumber,
   type QBBillLine,
+  type QBTxnTaxDetail,
   type QBVendorInput,
 } from "./client";
+import { openBooksDay, stripeAccountDay } from "./fiscal";
 import { adoptExistingReceipt, failQueueRow, releaseUnprocessedRows, startRunBudget } from "./queue";
 import type { QBConferenceExportJobResult } from "./conference-export";
 
@@ -53,7 +59,11 @@ export function expenseVendorName(name: string): string {
   return `${name.trim()} (Expense claims)`.slice(0, 100);
 }
 
-/** The Bill's lines: per expense, the amount before tax, then the tax. */
+/**
+ * The Bill's lines. With a tax code, one line per expense before tax, under
+ * that code; the tax goes on the Bill as a whole (expenseBillTax). Without
+ * one, the tax paid is a line of its own, so nothing is lost.
+ */
 export function expenseBillLines(params: {
   categories: Array<{ key: string; label: string; measure: string; rateCentsPerKm: number | null }>;
   lines: Array<{ categoryKey: string; amountCents: number; taxCents: number; distanceKm: number | null; description: string | null }>;
@@ -76,11 +86,38 @@ export function expenseBillLines(params: {
     if (line.amountCents > 0) {
       out.push({ DetailType: "AccountBasedExpenseLineDetail", Amount: line.amountCents / 100, Description: `${what}${note}`, AccountBasedExpenseLineDetail: detail });
     }
-    if (line.taxCents > 0) {
+    if (!params.taxCodeId && line.taxCents > 0) {
       out.push({ DetailType: "AccountBasedExpenseLineDetail", Amount: line.taxCents / 100, Description: `${category.label}: tax paid`, AccountBasedExpenseLineDetail: detail });
     }
   }
   return out;
+}
+
+/**
+ * The Bill's tax, stated as the claimant entered it from the receipts rather
+ * than worked out by QuickBooks at the code's rate. Taxable is what the taxed
+ * expenses came to before tax; mileage carries none.
+ */
+export function expenseBillTax(
+  lines: Array<{ amountCents: number; taxCents: number }>,
+  rate: { id: string; percent: number }
+): QBTxnTaxDetail | null {
+  const taxCents = lines.reduce((s, l) => s + l.taxCents, 0);
+  if (taxCents === 0) return null;
+  const taxableCents = lines.filter((l) => l.taxCents > 0).reduce((s, l) => s + l.amountCents, 0);
+  return {
+    TotalTax: taxCents / 100,
+    TaxLine: [{
+      DetailType: "TaxLineDetail",
+      Amount: taxCents / 100,
+      TaxLineDetail: {
+        TaxRateRef: { value: rate.id },
+        PercentBased: true,
+        TaxPercent: rate.percent,
+        NetAmountTaxable: taxableCents / 100,
+      },
+    }],
+  };
 }
 
 /** The vendor this claim pays, found or created, and remembered. */
@@ -145,23 +182,37 @@ async function postClaim(db: Db, row: QueueRow): Promise<void> {
   }
 
   const { lines } = await loadLinesAndReceipts(db, claim.id);
+  const filled = lines.filter(lineIsFilled);
   const billLines = expenseBillLines({
     categories: program.categories,
-    lines: lines.filter(lineIsFilled),
+    lines: filled,
     accountId: program.qboExpenseAccountId,
     taxCodeId: program.qboTaxCodeId,
   });
   if (billLines.length === 0) throw new Error("The claim has nothing to pay.");
 
+  let txnTaxDetail: QBTxnTaxDetail | null = null;
+  if (program.qboTaxCodeId) {
+    const rate = await fetchQBPurchaseTaxRate(program.qboTaxCodeId);
+    if (!rate) {
+      throw new Error(
+        `The QuickBooks tax code set for ${program.name} has no single purchase rate to state the tax under. ` +
+        `Pick a GST or HST code on /admin/expenses.`
+      );
+    }
+    txnTaxDetail = expenseBillTax(filled, rate);
+  }
+
   const vendorId = await resolveVendor(db, claim);
   const bill = await createQBBill({
     VendorRef: { value: vendorId },
     Line: billLines,
-    TxnDate: new Date().toISOString().slice(0, 10),
+    TxnDate: openBooksDay(stripeAccountDay(new Date()), await fetchQBBookCloseDate()),
     DocNumber: docNumber,
     PrivateNote: `CSC expense claim ${claim.id} (${program.name})`,
     CurrencyRef: { value: "CAD" },
     ...(program.qboTaxCodeId ? { GlobalTaxCalculation: "TaxExcluded" as const } : {}),
+    ...(txnTaxDetail ? { TxnTaxDetail: txnTaxDetail } : {}),
   });
   await markPosted(db, row, bill.Id);
 }

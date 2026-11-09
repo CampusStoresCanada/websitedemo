@@ -11,7 +11,9 @@ import {
   qboDocNumber,
   findQBDocumentByDocNumber,
   fetchQBBookCloseDate,
+  getQBInvoice,
 } from "./client";
+import { openBooksDay, stripeAccountDay } from "./fiscal";
 import { parseSupabaseTimestamp } from "@/lib/time/supabase-timestamp";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
@@ -80,9 +82,9 @@ async function resolveManualConferenceInvoiceItemId(
  * records it the day it goes out to the customer, and again from the Stripe
  * webhook when it is paid. The bookkeeper's rule (Ewa, 2026-11-03): an invoice
  * is recorded on the date it goes out, and its tax is reported then, paid or
- * not. Invoices issued before this rule shipped first reach QuickBooks on the
- * paid event; the closed-period hold below catches the ones dated into a
- * quarter already filed.
+ * not. Invoices issued before this rule shipped reach QuickBooks on the paid
+ * event or in the Dec 1 sweep (sweepPreRuleInvoices), dated the day they post.
+ * Anything dated into a quarter already filed moves to the first open day.
  *
  * An invoice already posted unpaid is opened again when it is paid, so the
  * worker posts its payment. Without that, the paid event's insert hits the
@@ -297,6 +299,7 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
 
   const db = createAdminClient();
   const now = new Date();
+  await sweepPreRuleInvoices(db, stripeAccountDay(now));
 
   // Reclaim stale leases before claiming new rows. next_retry_at must be set
   // here (not left null) — the claim query below only picks up "retrying"
@@ -384,6 +387,47 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
 // Per-row processing
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Invoices issued before invoices went to QuickBooks at issue reach it later,
+ * dated the day they post: on payment, or in the sweep below. Dated by issue,
+ * they would land in August, in a quarter already filed.
+ */
+export const POST_AT_ISSUE_SINCE = "2026-11-10";
+
+/**
+ * The day every pre-rule invoice still open goes to QuickBooks, dated that day
+ * (agreed with Ewa, 2026-11-06). Void the ones that won't be paid before it.
+ */
+export const PRE_RULE_SWEEP_ON = "2026-12-01";
+const PRE_RULE_SWEEP_DONE_KEY = "qbo_pre_rule_sweep_done";
+
+/**
+ * Queue every membership or partnership invoice issued before the rule that is
+ * still open, once, on PRE_RULE_SWEEP_ON. Voided ones are not open, so they are
+ * left out; the worker posts the rest dated the day it runs.
+ */
+async function sweepPreRuleInvoices(db: ReturnType<typeof createAdminClient>, today: string): Promise<void> {
+  if (today < PRE_RULE_SWEEP_ON) return;
+  const { data: done } = await db.from("app_settings").select("value").eq("key", PRE_RULE_SWEEP_DONE_KEY).maybeSingle();
+  if (done?.value) return;
+
+  const { data: open, error } = await db
+    .from("invoices")
+    .select("id")
+    .eq("status", "invoiced")
+    .in("type", ["membership", "partnership"])
+    .lt("created_at", POST_AT_ISSUE_SINCE);
+  if (error) {
+    console.error("[qbo] pre-rule sweep: could not list open invoices:", error);
+    return;
+  }
+  for (const inv of open ?? []) await enqueueQBExport(inv.id);
+  await db.from("app_settings").upsert(
+    { key: PRE_RULE_SWEEP_DONE_KEY, value: JSON.stringify({ on: today, queued: (open ?? []).map((i) => i.id) }) },
+    { onConflict: "key" }
+  );
+}
+
 /** Returns the reason when the row was held for the bookkeeper, else null. */
 async function processExportRow(
   db: ReturnType<typeof createAdminClient>,
@@ -416,27 +460,17 @@ async function processExportRow(
     return null;
   }
 
-  // The dates each document would carry, and the bookkeeper's closing date.
-  // Anything on or before it lands in a period she has already filed, so it
-  // waits for her instead of changing a filed return.
+  // The day each document is recorded on. An invoice carries the day Stripe
+  // issued it; one issued before the rule, the day it posts. Anything on or
+  // before the bookkeeper's closing date moves to the first day after it.
   const issueDate = await invoiceIssueDate(invoice);
   const needsInvoice = !row.qbo_invoice_id;
   const needsPayment = !row.qbo_payment_id && invoice.status === "paid" && !!invoice.paid_at;
-  const paymentDate = needsPayment ? stripeAccountDay(parseSupabaseTimestamp(invoice.paid_at!)) : null;
+  const paidDay = needsPayment ? stripeAccountDay(parseSupabaseTimestamp(invoice.paid_at!)) : null;
   const closeDate = needsInvoice || needsPayment ? await fetchQBBookCloseDate() : null;
-  if (closeDate) {
-    const late = [
-      needsInvoice && issueDate <= closeDate ? `the invoice is dated ${issueDate}` : null,
-      paymentDate && paymentDate <= closeDate ? `the payment is dated ${paymentDate}` : null,
-    ].filter(Boolean);
-    if (late.length > 0) {
-      const reason =
-        `Held for the bookkeeper: ${late.join(" and ")}, on or before the QuickBooks closing date ` +
-        `${closeDate}. Enter or redate it in QuickBooks and Skip this row, or move the closing date and Retry.`;
-      await holdRow(db, row, reason);
-      return reason;
-    }
-  }
+  const postsOn = issueDate < POST_AT_ISSUE_SINCE ? (paidDay ?? stripeAccountDay(new Date())) : issueDate;
+  const invoiceDate = openBooksDay(postsOn, closeDate);
+  const paymentDate = paidDay ? openBooksDay(paidDay, closeDate) : null;
 
   // Find or create QB customer
   const billingEmail = await resolveQBBillingEmail(db, org.id, org.email);
@@ -456,6 +490,11 @@ async function processExportRow(
       .eq("id", org.id);
   }
 
+  const meta = (invoice.metadata as Record<string, unknown> | null) ?? {};
+  if (meta.correction_type === "tax_only" && typeof meta.corrects_invoice_id === "string") {
+    return postTaxCorrection(db, row, invoice, meta.corrects_invoice_id, customer.Id, paymentDate);
+  }
+
   // Already posted? The stored id covers a retry after the write-back landed.
   // If QBO created the invoice and we crashed before recording it, the row
   // still looks unposted and a retry would post a second one, so ask QBO
@@ -467,7 +506,6 @@ async function processExportRow(
     // An invoice may name its own item and tax code (the CANCOLL invoice: the
     // registration's item at the conference's HST). Otherwise the type's item
     // and the buyer's province, as before.
-    const meta = (invoice.metadata as Record<string, unknown> | null) ?? {};
     const itemId =
       typeof meta.qbo_item_id === "string" && meta.qbo_item_id
         ? meta.qbo_item_id
@@ -476,7 +514,11 @@ async function processExportRow(
       typeof meta.qbo_tax_code_ref === "string" && meta.qbo_tax_code_ref
         ? meta.qbo_tax_code_ref
         : await resolveMembershipTaxCode(db, org);
-    const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef, issueDate);
+    const contact = await resolveInvoiceContactName(db, org.id, billingEmail);
+    const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef, invoiceDate, {
+      issuedOn: issueDate,
+      contact,
+    });
     qbInvoiceId = (await createQBInvoice(invoiceInput)).Id;
   }
 
@@ -484,32 +526,105 @@ async function processExportRow(
   // dated the day it was paid.
   let qbPaymentId: string | null = row.qbo_payment_id;
   if (needsPayment && paymentDate) {
-    const depositAccountId = await resolveStripeDepositAccountId(db);
-    const payment = await createQBPayment({
-      CustomerRef: { value: customer.Id },
-      TotalAmt: invoice.total_cents / 100,
-      Line: [{
-        Amount: invoice.total_cents / 100,
-        LinkedTxn: [{ TxnId: qbInvoiceId, TxnType: "Invoice" }],
-      }],
-      TxnDate: paymentDate,
-      CurrencyRef: { value: invoice.currency ?? "CAD" },
-      DepositToAccountRef: { value: depositAccountId },
-    });
-    qbPaymentId = payment.Id;
+    qbPaymentId = await postPayment(db, customer.Id, qbInvoiceId, invoice.total_cents, invoice.currency, paymentDate);
   }
 
   await markComplete(db, row, qbInvoiceId, qbPaymentId);
   return null;
 }
 
-// The Stripe account's own timezone (Dashboard > Settings > Business), so the
-// date QuickBooks records is the date on the customer's Stripe invoice.
-const STRIPE_ACCOUNT_TIMEZONE = "America/Edmonton";
+async function postPayment(
+  db: ReturnType<typeof createAdminClient>,
+  customerId: string,
+  qbInvoiceId: string,
+  totalCents: number,
+  currency: string | null,
+  txnDate: string
+): Promise<string> {
+  const depositAccountId = await resolveStripeDepositAccountId(db);
+  const payment = await createQBPayment({
+    CustomerRef: { value: customerId },
+    TotalAmt: totalCents / 100,
+    Line: [{
+      Amount: totalCents / 100,
+      LinkedTxn: [{ TxnId: qbInvoiceId, TxnType: "Invoice" }],
+    }],
+    TxnDate: txnDate,
+    CurrencyRef: { value: currency ?? "CAD" },
+    DepositToAccountRef: { value: depositAccountId },
+  });
+  return payment.Id;
+}
 
-/** The calendar day, YYYY-MM-DD, of an instant in the Stripe account's timezone. */
-export function stripeAccountDay(at: Date): string {
-  return at.toLocaleDateString("en-CA", { timeZone: STRIPE_ACCOUNT_TIMEZONE });
+/**
+ * A tax-only correction (the August GST/HST fix: dues invoiced without tax,
+ * then the tax invoiced on its own) is not a sale. The original QuickBooks
+ * invoice already carries the tax as owing, so the correction posts no invoice
+ * of its own: its payment pays down the original. Posted as an invoice it
+ * came through as membership income with tax charged on the tax (Ewa,
+ * 2026-11-06), which she then zeroed out by hand.
+ *
+ * The row records the original's QuickBooks id, so the paid event reopens it
+ * for the payment like any other invoice posted unpaid.
+ */
+async function postTaxCorrection(
+  db: ReturnType<typeof createAdminClient>,
+  row: QBExportQueueRow,
+  invoice: { id: string; total_cents: number; currency: string | null },
+  correctsInvoiceId: string,
+  customerId: string,
+  paymentDate: string | null
+): Promise<string | null> {
+  const { data: original } = await db
+    .from("qbo_export_queue")
+    .select("qbo_invoice_id")
+    .eq("invoice_id", correctsInvoiceId)
+    .maybeSingle();
+  if (!original?.qbo_invoice_id) {
+    throw new Error(`The invoice this tax correction is for (${correctsInvoiceId}) is not in QuickBooks yet.`);
+  }
+
+  if (!row.qbo_payment_id && paymentDate) {
+    const posted = await getQBInvoice(original.qbo_invoice_id);
+    const owing = Math.round(posted.Balance * 100);
+    if (owing < invoice.total_cents) {
+      const reason =
+        `Held for the bookkeeper: this tax correction is $${(invoice.total_cents / 100).toFixed(2)} but QuickBooks ` +
+        `invoice ${original.qbo_invoice_id} has $${(owing / 100).toFixed(2)} open. Add the tax to that invoice in ` +
+        `QuickBooks and Retry, or record the payment there and Skip.`;
+      await holdRow(db, row, reason);
+      return reason;
+    }
+    const paymentId = await postPayment(db, customerId, original.qbo_invoice_id, invoice.total_cents, invoice.currency, paymentDate);
+    await markComplete(db, row, original.qbo_invoice_id, paymentId);
+    return null;
+  }
+
+  await markComplete(db, row, original.qbo_invoice_id, row.qbo_payment_id);
+  return null;
+}
+
+/**
+ * The person an invoice is for, written into its memo so a search in
+ * QuickBooks still finds them: the customer is the institution, because that
+ * is the name on the cheque or the Stripe payout (Ewa, 2026-11-06).
+ */
+async function resolveInvoiceContactName(
+  db: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  email: string | null
+): Promise<string | null> {
+  const { data: contacts } = await db
+    .from("contacts")
+    .select("name, first_name, last_name, email, work_email, is_primary")
+    .eq("organization_id", orgId)
+    .is("archived_at", null);
+  const lower = email?.toLowerCase() ?? null;
+  const person =
+    (lower && contacts?.find((c) => c.email?.toLowerCase() === lower || c.work_email?.toLowerCase() === lower)) ||
+    contacts?.find((c) => c.is_primary);
+  if (!person) return null;
+  return [person.first_name, person.last_name].filter(Boolean).join(" ") || person.name || null;
 }
 
 /**
@@ -533,7 +648,14 @@ async function invoiceIssueDate(invoice: { stripe_invoice_id: string | null; cre
 // Invoice mapping
 // ─────────────────────────────────────────────────────────────────
 
-function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, taxCodeRef: string, txnDate: string) {
+function mapToQBInvoice(
+  invoice: Invoice,
+  customerQBId: string,
+  itemId: string,
+  taxCodeRef: string,
+  txnDate: string,
+  note: { issuedOn: string; contact: string | null }
+) {
   // A quantity and unit price when the invoice carries them (CANCOLL: N
   // registrations at $299.00), else one unit of the whole amount.
   const meta = ((invoice as { metadata?: unknown }).metadata as Record<string, unknown> | null) ?? {};
@@ -561,7 +683,11 @@ function mapToQBInvoice(invoice: Invoice, customerQBId: string, itemId: string, 
         },
       },
     ],
-    PrivateNote: `CSC Invoice ID: ${invoice.id}`,
+    PrivateNote: [
+      `CSC Invoice ID: ${invoice.id}`,
+      note.contact ? `For: ${note.contact}` : null,
+      note.issuedOn !== txnDate ? `Issued in Stripe ${note.issuedOn}; recorded ${txnDate}` : null,
+    ].filter(Boolean).join(". "),
   };
 }
 
