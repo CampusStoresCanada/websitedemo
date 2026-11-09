@@ -404,7 +404,8 @@ const PRE_RULE_SWEEP_DONE_KEY = "qbo_pre_rule_sweep_done";
 /**
  * Queue every membership or partnership invoice issued before the rule that is
  * still open, once, on PRE_RULE_SWEEP_ON. Voided ones are not open, so they are
- * left out; the worker posts the rest dated the day it runs.
+ * left out (and one voided in Stripe alone is skipped by the worker); the
+ * worker posts the rest dated the day it runs.
  */
 async function sweepPreRuleInvoices(db: ReturnType<typeof createAdminClient>, today: string): Promise<void> {
   if (today < PRE_RULE_SWEEP_ON) return;
@@ -463,8 +464,13 @@ async function processExportRow(
   // The day each document is recorded on. An invoice carries the day Stripe
   // issued it; one issued before the rule, the day it posts. Anything on or
   // before the bookkeeper's closing date moves to the first day after it.
-  const issueDate = await invoiceIssueDate(invoice);
+  const { issueDate, stripeStatus } = await invoiceIssueDate(invoice);
   const needsInvoice = !row.qbo_invoice_id;
+  // Voided in Stripe though our row never heard: still nothing to record.
+  if (needsInvoice && (stripeStatus === "void" || stripeStatus === "uncollectible")) {
+    await markSkipped(db, row, `Not posted: the invoice is ${stripeStatus} in Stripe.`);
+    return null;
+  }
   const needsPayment = !row.qbo_payment_id && invoice.status === "paid" && !!invoice.paid_at;
   const paidDay = needsPayment ? stripeAccountDay(parseSupabaseTimestamp(invoice.paid_at!)) : null;
   const closeDate = needsInvoice || needsPayment ? await fetchQBBookCloseDate() : null;
@@ -632,16 +638,20 @@ async function resolveInvoiceContactName(
  * printed on the customer's invoice. An invoice with no Stripe invoice (or one
  * Stripe has no finalize time for) falls back to when we created it.
  */
-async function invoiceIssueDate(invoice: { stripe_invoice_id: string | null; created_at: string }): Promise<string> {
+async function invoiceIssueDate(
+  invoice: { stripe_invoice_id: string | null; created_at: string }
+): Promise<{ issueDate: string; stripeStatus: string | null }> {
   if (invoice.stripe_invoice_id) {
     // Loaded here, not at the top: the Stripe client throws at import without
     // its key, and much of the app imports this file only to enqueue.
     const { stripe } = await import("@/lib/stripe/client");
     const stripeInvoice = await stripe.invoices.retrieve(invoice.stripe_invoice_id);
     const finalizedAt = stripeInvoice.status_transitions?.finalized_at;
-    if (finalizedAt) return stripeAccountDay(new Date(finalizedAt * 1000));
+    const stripeStatus = stripeInvoice.status ?? null;
+    if (finalizedAt) return { issueDate: stripeAccountDay(new Date(finalizedAt * 1000)), stripeStatus };
+    return { issueDate: stripeAccountDay(parseSupabaseTimestamp(invoice.created_at)), stripeStatus };
   }
-  return stripeAccountDay(parseSupabaseTimestamp(invoice.created_at));
+  return { issueDate: stripeAccountDay(parseSupabaseTimestamp(invoice.created_at)), stripeStatus: null };
 }
 
 // ─────────────────────────────────────────────────────────────────

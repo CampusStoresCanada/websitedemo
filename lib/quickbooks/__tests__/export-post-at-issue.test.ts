@@ -22,6 +22,7 @@ let queueRow: Row;
 let invoice: Record<string, unknown>;
 let closeDate: string | null;
 let finalizedAt: number | null;
+let stripeStatus: string;
 let updates: Array<{ table: string; values: Record<string, unknown> }>;
 let originalRow: { qbo_invoice_id: string | null } | null;
 let originalBalance: number;
@@ -121,7 +122,7 @@ vi.mock("../client", () => ({
 vi.mock("@/lib/stripe/client", () => ({
   stripe: {
     invoices: {
-      retrieve: async () => ({ status_transitions: { finalized_at: finalizedAt } }),
+      retrieve: async () => ({ status: stripeStatus, status_transitions: { finalized_at: finalizedAt } }),
     },
   },
 }));
@@ -141,6 +142,7 @@ beforeEach(() => {
   sweepDone = "done";
   openInvoices = [];
   closeDate = "2026-08-31";
+  stripeStatus = "open";
   // 2026-11-21 05:30 UTC is still November 20 in the Stripe account's timezone.
   finalizedAt = Date.UTC(2026, 10, 21, 5, 30) / 1000;
   queueRow = { id: "row-1", invoice_id: "inv-1", qbo_invoice_id: null, qbo_payment_id: null, status: "pending", retry_count: 0, max_retries: 3 };
@@ -226,6 +228,13 @@ describe("quickbooksExportRun, posting at issue", () => {
 
   it("closes the row without posting when the invoice was voided first", async () => {
     invoice.status = "voided";
+    await quickbooksExportRun();
+    expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(queueUpdate()).toMatchObject({ status: "skipped" });
+  });
+
+  it("skips an invoice voided in Stripe that our row still shows open", async () => {
+    stripeStatus = "void";
     await quickbooksExportRun();
     expect(createQBInvoice).not.toHaveBeenCalled();
     expect(queueUpdate()).toMatchObject({ status: "skipped" });
