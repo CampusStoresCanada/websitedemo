@@ -23,11 +23,13 @@ export default async function SelfCheckInPage({ params }: { params: Promise<{ to
 
   if (!ctx || ctx.phoneClosedReason === "off") {
     return (
-      <Shell title={ctx ? "Check in at the registration desk" : "This check-in link does not work"}>
+      <Shell title={!ctx ? "This check-in link does not work" : ctx.settings.kiosk ? "Check in when you arrive" : "Check in at the registration desk"}>
         <p className="text-slate-600">
-          {ctx
-            ? "Bring this email to the registration desk and staff will check you in."
-            : "It may have been replaced by a newer one. Please see the registration desk."}
+          {!ctx
+            ? "It may have been replaced by a newer one. Please see the registration desk."
+            : ctx.settings.kiosk
+              ? "Hold the QR code in this email up to a self check-in kiosk, or bring it to the registration desk."
+              : "Bring this email to the registration desk and staff will check you in."}
         </p>
       </Shell>
     );
