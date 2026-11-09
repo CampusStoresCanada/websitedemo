@@ -87,6 +87,8 @@ export type TemplateKey =
   // Conference
   | "conference_registration_confirmation"
   | "conference_payment_confirmation"
+  /** A registration on the order changed by staff (changeRegistration): the updated receipt, to the buyer. */
+  | "conference_order_updated"
   | "conference_schedule_ready"
   | "conference_swap_confirmation"
   | "conference_missing_travel_data"

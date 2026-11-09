@@ -8,6 +8,8 @@
 import { triggerAutomation } from "./automation";
 import { formatConferenceDates } from "./format";
 import { formatCents } from "@/lib/utils";
+import { escapeHtml, orderLinesAfterChanges, receiptLinesHtml } from "@/lib/conference/order-receipt-lines";
+import { loadRegistrationChanges } from "@/lib/conference/registration-changes";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -25,6 +27,11 @@ export async function triggerConferenceRegistrationConfirmation(params: {
   attendeeEmail: string;
   orgName: string;
   registrationRole: string;
+  /**
+   * Once per person by default. A registration changed by staff sends it again
+   * with the new registration, keyed to that change (changeRegistration).
+   */
+  triggerEventKey?: string;
 }): Promise<void> {
   const { db, conferenceId, personId, attendeeName, attendeeEmail, orgName, registrationRole } = params;
 
@@ -46,7 +53,7 @@ export async function triggerConferenceRegistrationConfirmation(params: {
 
   await triggerAutomation({
     triggerSource: "conference",
-    triggerEventKey: `conference_registration_confirmation:${personId}`,
+    triggerEventKey: params.triggerEventKey ?? `conference_registration_confirmation:${personId}`,
     templateKey: "conference_registration_confirmation",
     automationMode: "auto_send",
     campaignName: `Registration Confirmation: ${attendeeName}`,
@@ -112,6 +119,95 @@ export async function triggerConferencePaymentConfirmation(params: {
       conference_year: String(conference.year),
       amount_paid: formatCents(order.total_cents ?? 0),
       order_ref: orderId.slice(0, 8).toUpperCase(),
+      my_conference_url: `${appUrl}/me#conference_checklist`,
+    },
+  });
+}
+
+
+/**
+ * The updated receipt, after staff changed a registration on an order
+ * (changeRegistration). Goes to the same person the order's payment
+ * confirmation went to, listing the order as it stands now. Idempotent per
+ * change.
+ */
+export async function triggerConferenceOrderUpdated(params: {
+  db: AdminClient;
+  orderId: string;
+  changeId: string;
+  /** "Lisa Febbraio is now on the Wednesday Day Pass instead of the Tuesday Day Pass." */
+  changeSentence: string;
+}): Promise<void> {
+  const { db, orderId, changeId, changeSentence } = params;
+
+  const { data: order } = await db
+    .from("conference_orders")
+    .select("id, conference_id, organization_id, user_id, tax_cents, total_cents")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (!order?.user_id) {
+    console.error(`triggerConferenceOrderUpdated: order ${orderId} has no buyer`);
+    return;
+  }
+
+  const [{ data: conference }, { data: items }, { data: userRecord }, { data: profile }, changes] = await Promise.all([
+    db.from("conference_instances").select("year").eq("id", order.conference_id).maybeSingle(),
+    db.from("conference_order_items").select("id, offer_entity_id, quantity, unit_price_cents").eq("order_id", orderId),
+    db.auth.admin.getUserById(order.user_id),
+    db.from("profiles").select("display_name").eq("id", order.user_id).maybeSingle(),
+    loadRegistrationChanges(db, { conferenceId: order.conference_id, organizationId: order.organization_id }),
+  ]);
+  const buyerEmail = userRecord?.user?.email;
+  if (!conference || !items || !buyerEmail) {
+    console.error(`triggerConferenceOrderUpdated: missing data for order ${orderId}`);
+    return;
+  }
+
+  const itemIds = items.map((i) => i.id);
+  const entityIds = [
+    ...new Set([
+      ...items.map((i) => i.offer_entity_id).filter((id): id is string => Boolean(id)),
+      ...(changes ?? []).map((c) => c.to_entity_id),
+    ]),
+  ];
+  const [{ data: purchases }, { data: entities }] = await Promise.all([
+    itemIds.length
+      ? db.from("entity_purchases").select("id, order_item_id").in("order_item_id", itemIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; order_item_id: string | null }> }),
+    entityIds.length
+      ? db.from("conference_entities").select("id, name").in("id", entityIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
+  ]);
+  const purchaseByItem = new Map((purchases ?? []).map((p) => [p.order_item_id as string, p.id]));
+  const nameById = new Map((entities ?? []).map((e) => [e.id, e.name]));
+
+  const lines = orderLinesAfterChanges(
+    items.map((i) => ({
+      purchaseId: purchaseByItem.get(i.id) ?? null,
+      name: (i.offer_entity_id && nameById.get(i.offer_entity_id)) || "Conference item",
+      quantity: i.quantity,
+      unitPriceCents: i.unit_price_cents,
+    })),
+    (changes ?? [])
+      .filter((c): c is typeof c & { from_purchase_id: string } => Boolean(c.from_purchase_id))
+      .map((c) => ({ fromPurchaseId: c.from_purchase_id, toPurchaseId: c.to_purchase_id, toName: nameById.get(c.to_entity_id) ?? "Registration" }))
+  );
+  const orderLines = receiptLinesHtml(lines, order.tax_cents ?? 0, order.total_cents ?? 0);
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  await triggerAutomation({
+    triggerSource: "conference",
+    triggerEventKey: `conference_order_updated:${changeId}`,
+    templateKey: "conference_order_updated",
+    automationMode: "auto_send",
+    campaignName: `Updated Receipt: ${orderId.slice(0, 8).toUpperCase()}`,
+    audience: { type: "custom_emails", filters: { emails: [buyerEmail], conference_instance_id: order.conference_id } },
+    variableValues: {
+      contact_name: profile?.display_name ?? buyerEmail,
+      conference_year: String(conference.year),
+      change_line: `${escapeHtml(changeSentence)} The price is the same, so there is nothing more to pay.`,
+      order_ref: orderId.slice(0, 8).toUpperCase(),
+      order_lines: orderLines,
       my_conference_url: `${appUrl}/me#conference_checklist`,
     },
   });
