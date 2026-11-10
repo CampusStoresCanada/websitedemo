@@ -154,7 +154,7 @@ export default async function BenchmarkingWorksheetPage({
       .order("name"),
     db
       .from("organization_key_dates")
-      .select("kind, label, occurs_on, ends_on, position")
+      .select("kind, label, occurs_on, ends_on, position, academic_year")
       .eq("organization_id", organization.id)
       .order("position"),
   ]);
@@ -174,6 +174,7 @@ export default async function BenchmarkingWorksheetPage({
       label: (d.label as string) ?? "",
       occursOn: (d.occurs_on as string | null) ?? null,
       endsOn: (d.ends_on as string | null) ?? null,
+      academicYear: (d.academic_year as number | null) ?? null,
     })),
     organizationSlug: organization.slug,
   });

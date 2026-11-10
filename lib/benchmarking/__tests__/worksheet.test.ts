@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildWorksheet, type PriorRow } from "../worksheet";
+import { buildWorksheet, type PriorRow, type KnownDate } from "../worksheet";
 import { DEFAULT_FIELD_CONFIG, type SurveyFieldConfig } from "../default-field-config";
 
 const config: SurveyFieldConfig = {
@@ -310,7 +310,14 @@ describe("the sheet prints what we already hold", () => {
       { name: "Sam Reid", roleTitle: null },
     ],
     knownDates: [
-      { kind: "adoption_deadline", label: "Fall adoption deadline", occursOn: "2026-06-15", endsOn: null },
+      {
+        kind: "adoption_deadline",
+        label: "Fall adoption deadline",
+        occursOn: "2026-06-15",
+        endsOn: null,
+        // Declared by the store, so it files under the year being reported.
+        academicYear: 2026,
+      },
     ],
     organizationSlug: "test-store",
   });
@@ -541,29 +548,121 @@ describe("key dates belong to the year being reported", () => {
     expect(keyDates.title).not.toContain("year ahead");
   });
 
-  it("asks a store to check what we already hold against the reported year", () => {
-    const withDates = buildWorksheet({
+  it("prints the year ahead as its own block", () => {
+    const ahead = datesSheet.sections
+      .find((s) => s.id === "institution_profile")!
+      .lists.find((l) => l.title.startsWith("And the year ahead"))!;
+
+    expect(ahead.title).toBe("And the year ahead, FY2027");
+    expect(ahead.extraBlankRows).toBeGreaterThan(0);
+  });
+});
+
+/*
+  Steve, 2026-11-10: "Any one who has already filled it in, we should port
+  their answers over as if they were following the written directions."
+
+  The written directions said the year ahead, so a row carrying no year files
+  under the year ahead. ⛔ Never read off the date itself: 37 of the 63 stored
+  rows had already happened, so "is it in the future" would overrule half of
+  what stores actually entered. The row keeps its NULL and the store is offered
+  the correction, which is the difference between a grouping and a guess.
+*/
+describe("dates entered before the question named a year", () => {
+  const legacy = (over: Partial<KnownDate> = {}): KnownDate => ({
+    kind: "adoption_deadline",
+    label: "Fall adoption deadline",
+    occursOn: "2026-06-15",
+    endsOn: null,
+    ...over,
+  });
+
+  const sheetWith = (dates: KnownDate[]) =>
+    buildWorksheet({
       organizationName: "Test Store",
       fiscalYear: 2026,
       closesAt: null,
       config: DEFAULT_FIELD_CONFIG,
       priorRows: [],
       organizationSlug: "test-store",
-      knownDates: [
-        {
-          kind: "adoption_deadline",
-          label: "Fall adoption deadline",
-          occursOn: "2026-06-15",
-          endsOn: null,
-        },
-      ],
+      knownDates: dates,
     });
 
-    const list = withDates.sections
-      .find((s) => s.id === "institution_profile")!
-      .lists.find((l) => l.title.startsWith("Your key dates"))!;
+  const listsOf = (dates: KnownDate[]) => {
+    const lists = sheetWith(dates).sections.find(
+      (s) => s.id === "institution_profile",
+    )!.lists;
+    return {
+      reported: lists.find((l) => l.title.startsWith("Your key dates"))!,
+      ahead: lists.find((l) => l.title.startsWith("And the year ahead"))!,
+    };
+  };
 
-    // Not "confirm these": half of them may belong to the wrong year.
-    expect(list.intro).toContain("check each one against FY2026");
+  it("files a year-less row under the year ahead, as the directions said", () => {
+    const { reported, ahead } = listsOf([legacy()]);
+    expect(ahead.rowCells).toHaveLength(1);
+    expect(ahead.rowCells![0][0]).toBe("Fall adoption deadline");
+    expect(reported.rowCells).toHaveLength(0);
+  });
+
+  it("says why they are there rather than leaving it a surprise", () => {
+    const { ahead } = listsOf([legacy()]);
+    expect(ahead.intro).toContain("without saying so");
+    expect(ahead.intro).toContain("Move any that belong to FY2026");
+  });
+
+  /*
+    The sentence has to agree in number twice: how many rows we placed, and
+    whether that is all of them. It printed "The 1 we already have ... are
+    printed below" on a real sheet before this was pinned.
+  */
+  it("counts in words a person would actually write", () => {
+    const one = listsOf([legacy()]);
+    expect(one.ahead.intro).toContain("The date printed here was entered");
+    expect(one.ahead.intro).toContain("where it sits");
+
+    const two = listsOf([legacy(), legacy({ label: "Winter adoption" })]);
+    expect(two.ahead.intro).toContain("The dates printed here were entered");
+
+    const mixed = listsOf([legacy(), legacy({ academicYear: 2027 })]);
+    expect(mixed.ahead.intro).toContain("1 of the dates printed here was entered");
+
+    const declaredOne = listsOf([legacy({ academicYear: 2026 })]);
+    expect(declaredOne.reported.intro).toContain("The one we already have");
+    expect(declaredOne.reported.intro).toContain("is printed below");
+
+    const declaredTwo = listsOf([
+      legacy({ academicYear: 2026 }),
+      legacy({ academicYear: 2026, label: "Winter adoption" }),
+    ]);
+    expect(declaredTwo.reported.intro).toContain("The 2 we already have");
+    expect(declaredTwo.reported.intro).toContain("are printed below");
+  });
+
+  /*
+    A date in the past is still left where the directions put it. This is the
+    case that makes the rule look wrong and is exactly why it is not inferred:
+    McMaster's May 2025 semester would be stamped FY2027 by any date-based
+    guess, permanently.
+  */
+  it("does not reach for the date to overrule the store", () => {
+    const { ahead, reported } = listsOf([
+      legacy({ label: "Spring 2025", occursOn: "2025-05-01" }),
+    ]);
+    expect(ahead.rowCells).toHaveLength(1);
+    expect(reported.rowCells).toHaveLength(0);
+  });
+
+  it("leaves a declared row alone, and says nothing about legacy", () => {
+    const { reported, ahead } = listsOf([legacy({ academicYear: 2026 })]);
+    expect(reported.rowCells).toHaveLength(1);
+    expect(ahead.rowCells).toHaveLength(0);
+    expect(ahead.intro).not.toContain("without saying so");
+  });
+
+  it("keeps a declared year-ahead row in the ahead block, not as legacy", () => {
+    const { ahead } = listsOf([legacy({ academicYear: 2027 })]);
+    expect(ahead.rowCells).toHaveLength(1);
+    expect(ahead.intro).not.toContain("without saying so");
   });
 });

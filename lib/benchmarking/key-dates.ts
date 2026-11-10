@@ -113,3 +113,35 @@ export type Day = (typeof DAYS)[number];
 
 /** Per-day hours for one location. A null day means closed that day. */
 export type LocationHours = Partial<Record<Day, { open: string; close: string } | null>>;
+
+/**
+ * Which year a stored key date belongs to.
+ *
+ * ⛔ One answer, because the survey form and the printed worksheet both have
+ * to group the same rows the same way. Two copies of this rule is how they
+ * would come to disagree about where a store's own date went.
+ *
+ * `academic_year` was on the table from the start and nothing ever wrote it,
+ * which is why NULL has to mean something. It means "entered before we asked
+ * which year", and those rows file under the year AHEAD: that is what the
+ * question told stores to give us, so that is what they were answering.
+ *
+ * ⛔ Deliberately NOT read off the date itself. 37 of the 63 dated rows had
+ * already happened when this was written, and the oldest was April 2025, so
+ * "is it in the future" would overrule half of what stores actually entered.
+ * Only the store knows, and `legacy` is how the screen asks them.
+ */
+export type KeyDateYear = "reported" | "ahead";
+
+export function keyDateYear(
+  academicYear: number | null,
+  fiscalYear: number,
+): KeyDateYear {
+  if (academicYear === null) return "ahead";
+  return academicYear <= fiscalYear ? "reported" : "ahead";
+}
+
+/** A row entered before the question said which year it meant. */
+export function isLegacyKeyDate(academicYear: number | null): boolean {
+  return academicYear === null;
+}

@@ -47,7 +47,7 @@ import {
   sumFields,
 } from "@/lib/benchmarking/financial-lines";
 import type { KeyDate } from "@/lib/actions/benchmarking-profile";
-import type { ServiceStatus } from "@/lib/benchmarking/key-dates";
+import { keyDateYear, type ServiceStatus } from "@/lib/benchmarking/key-dates";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
 import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { parseUTC } from "@/lib/utils";
@@ -989,20 +989,39 @@ export default function BenchmarkingSurveyForm({
             )}
             {sections[activeSection]?.id === "institution_profile" && (
               <>
-                <KeyDatesEditor
-                  benchmarkingId={benchmarkingId}
-                  dates={keyDates}
-                  onDatesChange={setKeyDates}
-                  fiscalYear={fiscalYear}
-                  isReadOnly={isReadOnly}
-                  isSemesterBased={formData.is_semester_based === true}
-                  inventoryCountStyle={
-                    typeof formData.inventory_count_style === "string"
-                      ? formData.inventory_count_style
-                      : null
-                  }
-                  profileSuggestions={profileKeyDates}
-                />
+                {/*
+                  One editor, twice: the year being reported, then the year
+                  ahead. Both write the same table and are told apart by
+                  academic_year, so the split is a filter rather than a second
+                  store. keyDateYear is the only place that decides which
+                  group a row is in, because the printed worksheet has to
+                  agree with this screen.
+
+                  ⛔ Both are handed the SAME setKeyDates. The actions return
+                  the whole list back, so a row added in one block has to land
+                  in the state both blocks read or it vanishes from the other
+                  until a reload.
+                */}
+                {(["reported", "ahead"] as const).map((variant) => (
+                  <KeyDatesEditor
+                    key={variant}
+                    variant={variant}
+                    benchmarkingId={benchmarkingId}
+                    dates={keyDates.filter(
+                      (d) => keyDateYear(d.academicYear, fiscalYear) === variant,
+                    )}
+                    onDatesChange={setKeyDates}
+                    fiscalYear={fiscalYear}
+                    isReadOnly={isReadOnly}
+                    isSemesterBased={formData.is_semester_based === true}
+                    inventoryCountStyle={
+                      typeof formData.inventory_count_style === "string"
+                        ? formData.inventory_count_style
+                        : null
+                    }
+                    profileSuggestions={profileKeyDates}
+                  />
+                ))}
                 <CompetitorsEditor
                   benchmarkingId={benchmarkingId}
                   rows={competitors}

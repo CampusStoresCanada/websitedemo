@@ -7,7 +7,12 @@ import {
   removeKeyDate,
   type KeyDate,
 } from "@/lib/actions/benchmarking-profile";
-import { KEY_DATE_KINDS, type KeyDateKind } from "@/lib/benchmarking/key-dates";
+import {
+  KEY_DATE_KINDS,
+  isLegacyKeyDate,
+  type KeyDateKind,
+  type KeyDateYear,
+} from "@/lib/benchmarking/key-dates";
 
 /**
  * Best guess at what kind of date a profile entry is, from its own title.
@@ -67,6 +72,7 @@ export default function KeyDatesEditor({
   onDatesChange: setDates,
   /** The year being reported, because this question has to name it. */
   fiscalYear,
+  variant,
   isReadOnly,
   isSemesterBased,
   inventoryCountStyle,
@@ -76,6 +82,15 @@ export default function KeyDatesEditor({
   dates: KeyDate[];
   onDatesChange: Dispatch<SetStateAction<KeyDate[]>>;
   fiscalYear: number;
+  /**
+   * Which block this is.
+   *
+   * ⛔ Two shapes of one control, not two editors. The rows, the kinds, the
+   * actions and the save path are identical; only the heading and whether the
+   * prompts run differ. A second component would be two places to fix the next
+   * time a kind is added.
+   */
+  variant: KeyDateYear;
   isReadOnly: boolean;
   /** Semesters are only worth asking for where the year has them. */
   isSemesterBased: boolean;
@@ -98,6 +113,24 @@ export default function KeyDatesEditor({
 }) {
   const [error, setError] = useState<string | null>(null);
 
+  /*
+    The year a row added HERE belongs to. Derived, not a prop: the block's
+    identity already says it, and two ways to express the same thing is how
+    the "ahead" block would one day start writing the reported year.
+  */
+  const isAhead = variant === "ahead";
+  const academicYear = isAhead ? fiscalYear + 1 : fiscalYear;
+
+  /*
+    ⛔ The prompts and the count seeding run on the REPORTED block only.
+
+    Both of them add rows on the store's behalf. Rendered in both blocks they
+    would each fire once per block, so a bi-annual counter would silently get
+    four inventory count rows instead of two, half of them filed against a year
+    nobody asked about yet.
+  */
+  const promptsApply = !isAhead;
+
   const kinds = KEY_DATE_KINDS.filter(
     (k) => k.value !== "semester" || isSemesterBased,
   );
@@ -115,7 +148,7 @@ export default function KeyDatesEditor({
   const countDates = dates.filter((d) => d.kind === "inventory_count").length;
   const prompts: { kind: KeyDateKind; label: string; why: string }[] = [];
 
-  if (isSemesterBased && !have("semester")) {
+  if (promptsApply && isSemesterBased && !have("semester")) {
     prompts.push({
       kind: "semester",
       label: "Semester",
@@ -133,7 +166,7 @@ export default function KeyDatesEditor({
   */
   const seeding = useRef(false);
   useEffect(() => {
-    if (isReadOnly || seeding.current) return;
+    if (!promptsApply || isReadOnly || seeding.current) return;
     if (expectedCounts === null || countDates >= expectedCounts) return;
     seeding.current = true;
     const wanted = expectedCounts - countDates;
@@ -147,6 +180,7 @@ export default function KeyDatesEditor({
             expectedCounts === 2
               ? `Inventory count ${countDates + i + 1} of 2`
               : "Inventory count",
+          academicYear,
         });
         if (res.dates) latest = res.dates;
       }
@@ -154,7 +188,15 @@ export default function KeyDatesEditor({
       // to reveal a date we added for them can discard what they just typed.
       if (latest) setDates(latest);
     })();
-  }, [benchmarkingId, isReadOnly, expectedCounts, countDates, setDates]);
+  }, [
+    benchmarkingId,
+    isReadOnly,
+    expectedCounts,
+    countDates,
+    setDates,
+    promptsApply,
+    academicYear,
+  ]);
 
   /*
     Semester rows held by a store that has since said it does not run semesters.
@@ -162,6 +204,9 @@ export default function KeyDatesEditor({
     person's own answer because a different answer changed is not ours to do.
   */
   const orphanedSemesters = !isSemesterBased && have("semester");
+
+  /** Rows in this block that we placed by rule rather than by the store saying. */
+  const legacyCount = dates.filter((d) => isLegacyKeyDate(d.academicYear)).length;
 
   /*
     Which suggestions are still worth offering.
@@ -177,36 +222,57 @@ export default function KeyDatesEditor({
     offers the original again.
   */
   const taken = new Set(dates.map((d) => `${d.label}|${d.occursOn ?? ""}`));
-  const pendingSuggestions = profileSuggestions.filter(
-    (s) => !taken.has(`${s.title}|${s.date}`),
-  );
+  const pendingSuggestions = promptsApply
+    ? profileSuggestions.filter((s) => !taken.has(`${s.title}|${s.date}`))
+    : [];
 
   const patch = (id: string, fn: (d: KeyDate) => KeyDate) =>
     setDates((prev) => prev.map((d) => (d.id === id ? fn(d) : d)));
 
   async function add(kind: KeyDateKind, label: string) {
-    const res = await addKeyDate({ benchmarkingId, kind, label });
+    const res = await addKeyDate({ benchmarkingId, kind, label, academicYear });
     if (!res.success || !res.id) {
       setError(res.error ?? "Could not add that date.");
       return;
     }
     setDates((prev) => [
       ...prev,
-      { id: res.id!, kind, label, occursOn: null, endsOn: null },
+      { id: res.id!, kind, label, occursOn: null, endsOn: null, academicYear },
     ]);
+  }
+
+  /** Move a row the store entered before we asked, once they tell us which. */
+  async function assignYear(id: string, year: number) {
+    patch(id, (d) => ({ ...d, academicYear: year }));
+    const res = await updateKeyDate({
+      benchmarkingId,
+      keyDateId: id,
+      academicYear: year,
+    });
+    if (!res.success) setError(res.error ?? "Could not move that date.");
   }
 
   return (
     <div className="mb-6">
       <h3 className="text-sm font-medium text-gray-900">
-        Your key dates in FY{fiscalYear}
+        {isAhead ? `And the year ahead, FY${academicYear}` : `Your key dates in FY${fiscalYear}`}
       </h3>
       <p className="mt-1 text-xs text-gray-600">
-        The dates the year you are reporting turned on, not the year coming up. Semester
-        start and end, stock counts, adoption deadlines, buyback windows, returns cutoffs
-        and add/drop. They sit beside your figures so a reader can tell when your year
-        actually ran. These stay on your institution&apos;s profile, so next year you are
-        confirming them rather than typing them again.
+        {isAhead ? (
+          <>
+            The same dates for the year coming up, as far as you have them. This part is
+            not about your figures. It is so CSC knows when your rush is before it plans
+            around it, and so next year you are confirming these rather than typing them
+            again. Leave it empty if your calendar is not set.
+          </>
+        ) : (
+          <>
+            The dates the year you are reporting turned on, not the year coming up.
+            Semester start and end, stock counts, adoption deadlines, buyback windows,
+            returns cutoffs and add/drop. They sit beside your figures so a reader can
+            tell when your year actually ran.
+          </>
+        )}
       </p>
 
       {prompts.length > 0 && !isReadOnly && (
@@ -252,6 +318,7 @@ export default function KeyDatesEditor({
                       kind: guessKind(sug.title),
                       label: sug.title,
                       occursOn: sug.date,
+                      academicYear,
                     });
                     if (res.dates) {
                       setDates(res.dates);
@@ -274,6 +341,35 @@ export default function KeyDatesEditor({
           You have semester dates below, but you told us your year does not run in
           semesters. We have left them alone rather than deleting your own entries —
           remove any that no longer apply, or change that answer above.
+        </p>
+      )}
+
+      {/*
+        Rows entered before the question named a year.
+
+        They land here because the question asked for the year ahead at the
+        time, so that is what a store filling it in was answering. Said once
+        above the list rather than on every row, with the correction offered
+        per row underneath.
+      */}
+      {isAhead && legacyCount > 0 && (
+        <p className="mt-3 rounded bg-amber-50 p-3 text-xs text-amber-900">
+          {legacyCount === 1 ? (
+            <>
+              One of these was entered when this question asked for the year ahead
+              without saying so, so we have put it here. If it is an FY{fiscalYear} date
+              instead, move it with the button on the row and it will sit beside your
+              figures where it belongs.
+            </>
+          ) : (
+            <>
+              {legacyCount === dates.length ? "These" : `${legacyCount} of these`} were
+              entered when this question asked for the year ahead without saying so, so we
+              have put them here. If any of them are dates from FY{fiscalYear} instead,
+              move them with the button on the row and they will sit beside your figures
+              where they belong.
+            </>
+          )}
         </p>
       )}
 
@@ -343,6 +439,20 @@ export default function KeyDatesEditor({
                       className="mt-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
                     />
                   </div>
+                )}
+
+                {/*
+                  The correction, offered only on a row we placed by rule
+                  rather than by the store's own answer. Once they click it the
+                  row carries a year they declared, and it stops being a guess.
+                */}
+                {!isReadOnly && isAhead && isLegacyKeyDate(d.academicYear) && (
+                  <button
+                    onClick={() => void assignYear(d.id, fiscalYear)}
+                    className="pb-1.5 text-xs text-[#163D6D] underline hover:text-[#0f2a4c]"
+                  >
+                    This is an FY{fiscalYear} date
+                  </button>
                 )}
 
                 {!isReadOnly && (

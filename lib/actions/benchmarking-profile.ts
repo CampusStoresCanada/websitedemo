@@ -19,6 +19,11 @@ export interface KeyDate {
   label: string;
   occursOn: string | null;
   endsOn: string | null;
+  /**
+   * The academic year this date belongs to, or null if it predates the
+   * question asking. See keyDateYear in lib/benchmarking/key-dates.
+   */
+  academicYear: number | null;
 }
 
 type Guard =
@@ -75,7 +80,7 @@ export async function loadKeyDates(organizationId: string): Promise<KeyDate[]> {
   const db = createAdminClient();
   const { data } = await db
     .from("organization_key_dates")
-    .select("id, kind, label, occurs_on, ends_on, position")
+    .select("id, kind, label, occurs_on, ends_on, position, academic_year")
     .eq("organization_id", organizationId)
     .order("position");
 
@@ -85,6 +90,7 @@ export async function loadKeyDates(organizationId: string): Promise<KeyDate[]> {
     label: (d.label as string) ?? "",
     occursOn: (d.occurs_on as string | null) ?? null,
     endsOn: (d.ends_on as string | null) ?? null,
+    academicYear: (d.academic_year as number | null) ?? null,
   }));
 }
 
@@ -143,6 +149,12 @@ export async function addKeyDate(input: {
   label: string;
   /** Prefilled when adopting a date we already hold on the profile. */
   occursOn?: string | null;
+  /**
+   * Which year this date is for. Always passed by the editor that owns the
+   * block, so a row added from here is never ambiguous the way the existing
+   * ones are.
+   */
+  academicYear: number;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -166,6 +178,7 @@ export async function addKeyDate(input: {
       kind: input.kind,
       label: input.label.trim(),
       occurs_on: input.occursOn ?? null,
+      academic_year: input.academicYear,
       position: count ?? 0,
     })
     .select("id")
@@ -194,6 +207,15 @@ export async function updateKeyDate(input: {
   label?: string;
   occursOn?: string | null;
   endsOn?: string | null;
+  /**
+   * Set when the STORE says which year a date belongs to.
+   *
+   * ⛔ Only ever from their own click. The rows entered before the question
+   * named a year are grouped by keyDateYear at read time, which is revisable;
+   * writing a year we inferred would be indistinguishable from one they
+   * declared, and we would have no way back.
+   */
+  academicYear?: number;
 }): Promise<{ success: boolean; error?: string }> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
@@ -202,6 +224,7 @@ export async function updateKeyDate(input: {
   if (input.label !== undefined) patch.label = input.label.trim();
   if (input.occursOn !== undefined) patch.occurs_on = input.occursOn || null;
   if (input.endsOn !== undefined) patch.ends_on = input.endsOn || null;
+  if (input.academicYear !== undefined) patch.academic_year = input.academicYear;
 
   const db = createAdminClient();
   const { error } = await db

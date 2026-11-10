@@ -10,7 +10,12 @@ import {
   COURSE_MATERIAL_FORMAT_NOTES,
   NON_PHYSICAL_FORMATS,
 } from "@/lib/benchmarking/categories";
-import { KEY_DATE_KINDS, DAYS } from "@/lib/benchmarking/key-dates";
+import {
+  KEY_DATE_KINDS,
+  DAYS,
+  keyDateYear,
+  isLegacyKeyDate,
+} from "@/lib/benchmarking/key-dates";
 import { STORE_SERVICES } from "@/lib/types/procurement";
 import { COMPETITOR_KINDS } from "@/lib/benchmarking/competitor-kinds";
 import { EMPLOYMENT_TYPES } from "@/lib/benchmarking/systems";
@@ -128,6 +133,8 @@ export interface KnownDate {
   label: string;
   occursOn: string | null;
   endsOn: string | null;
+  /** Null for rows entered before the question named a year. */
+  academicYear?: number | null;
 }
 
 export interface Worksheet {
@@ -315,6 +322,86 @@ function isGatherable(field: FieldConfig): boolean {
  * printed survey: a store gathers the wrong figures and only finds out at the
  * keyboard.
  */
+/**
+ * The two key-date blocks, in the order the form shows them.
+ *
+ * Built here rather than inline so the grouping goes through keyDateYear once.
+ * The screen and the sheet disagreeing about which block a store's date is in
+ * is the exact confusion this whole change is undoing.
+ */
+/**
+ * "The date printed here was" / "2 of the dates printed here were".
+ *
+ * Split out because the sentence has to agree in number twice over: how many
+ * rows were placed by rule, and whether that is all of them. A printed sheet
+ * saying "The 1 dates printed here were" is the kind of thing a store reads as
+ * carelessness about its own figures.
+ */
+function legacySubject(legacyCount: number, aheadCount: number): string {
+  const all = legacyCount === aheadCount;
+  if (legacyCount === 1) {
+    return all ? "The date printed here was" : "1 of the dates printed here was";
+  }
+  return all
+    ? "The dates printed here were"
+    : `${legacyCount} of the dates printed here were`;
+}
+
+function keyDateLists(dates: KnownDate[], fiscalYear: number): WorksheetList[] {
+  const columns = ["Kind", "Date", "Ends (if a window)"];
+  const choices = KEY_DATE_KINDS.map((k) => ({ label: k.label, note: k.help }));
+  const row = (d: KnownDate) => [
+    d.label,
+    KEY_DATE_KINDS.find((k) => k.value === d.kind)?.label ?? d.kind,
+    d.occursOn ?? "",
+    d.endsOn ?? "",
+  ];
+
+  const reported = dates.filter(
+    (d) => keyDateYear(d.academicYear ?? null, fiscalYear) === "reported",
+  );
+  const ahead = dates.filter(
+    (d) => keyDateYear(d.academicYear ?? null, fiscalYear) === "ahead",
+  );
+  const legacy = ahead.filter((d) => isLegacyKeyDate(d.academicYear ?? null));
+
+  return [
+    {
+      title: `Your key dates in FY${fiscalYear}`,
+      intro:
+        (reported.length === 1
+          ? "The one we already have for this year is printed below. Check it and correct it in place. "
+          : reported.length > 1
+            ? `The ${reported.length} we already have for this year are printed below. Check each one and correct it in place. `
+            : "The dates the year you are reporting turned on, not the year coming up. ") +
+        "Add as many of each kind as you need: one adoption deadline per term, every buyback window, each semester.",
+      choices,
+      nameColumn: "What you call it",
+      columns,
+      rowCells: reported.map(row),
+      extraBlankRows: 6,
+    },
+    {
+      title: `And the year ahead, FY${fiscalYear + 1}`,
+      /*
+        The legacy count is named rather than glossed. A store that sees its
+        own dates under a heading it did not expect deserves to be told why
+        they are there, on the sheet as much as on the screen.
+      */
+      intro:
+        (legacy.length > 0
+          ? `${legacySubject(legacy.length, ahead.length)} entered when this question asked for the year ahead without saying so, so that is where ${legacy.length === 1 ? "it sits" : "they sit"}. Move any that belong to FY${fiscalYear} up to the block above. `
+          : "") +
+        "The same dates for the year coming up, as far as you have them. Not about your figures: it is so CSC knows when your rush is. Leave it empty if your calendar is not set.",
+      choices,
+      nameColumn: "What you call it",
+      columns,
+      rowCells: ahead.map(row),
+      extraBlankRows: 4,
+    },
+  ];
+}
+
 function listsForSection(
   sectionId: string,
   known: {
@@ -427,35 +514,17 @@ function listsForSection(
             "Tick what you offer now, and mark with a P anything you are planning to add and an S anything you are stopping. Each service you offer becomes an income line in Other Income.",
           choices: STORE_SERVICES.map((label) => ({ label })),
         },
-        {
-          /*
-            ⛔ Printed "for the year COMING, not the one you are reporting"
-            until 2026-11-10, which is the opposite of what this asks for. See
-            the note in KeyDatesEditor: the survey wants the year being
-            reported, for all six kinds.
+        /*
+          ⛔ Printed "for the year COMING, not the one you are reporting"
+          until 2026-11-10, which is the opposite of what the survey asks.
+          See the note in KeyDatesEditor.
 
-            The dates we already hold are still printed, but they are no longer
-            described as confirmed. Half the stores that answered read the old
-            wording and entered next year's dates, so a date on this sheet may
-            belong to either year and only the store can say which.
-          */
-          title: `Your key dates in FY${known.fiscalYear}`,
-          intro:
-            (known.dates.length > 0
-              ? `The ${known.dates.length} dates we already hold are printed below. We asked for the year COMING when some of them were entered, so check each one against FY${known.fiscalYear} and correct it in place. `
-              : `The dates the year you are reporting turned on, not the year coming up. `) +
-            "Add as many of each kind as you need: one adoption deadline per term, every buyback window, each semester.",
-          choices: KEY_DATE_KINDS.map((k) => ({ label: k.label, note: k.help })),
-          nameColumn: "What you call it",
-          columns: ["Kind", "Date", "Ends (if a window)"],
-          rowCells: known.dates.map((d) => [
-            d.label,
-            KEY_DATE_KINDS.find((k) => k.value === d.kind)?.label ?? d.kind,
-            d.occursOn ?? "",
-            d.endsOn ?? "",
-          ]),
-          extraBlankRows: 6,
-        },
+          Now two blocks, matching the screen and split by the same
+          keyDateYear, so a store gathering on paper fills in the same two
+          groups it will meet in the form. Printing one block while the form
+          shows two is how a worksheet stops being usable as a worksheet.
+        */
+        ...keyDateLists(known.dates, known.fiscalYear),
         {
           title: "Who competes with you",
           intro:
