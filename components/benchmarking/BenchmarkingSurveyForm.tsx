@@ -831,6 +831,7 @@ export default function BenchmarkingSurveyForm({
           <ReviewAllAnswers
             config={config}
             formData={formData}
+            fiscalYear={fiscalYear}
             lists={{
               gmCategories,
               cmCategories,
@@ -1010,6 +1011,7 @@ export default function BenchmarkingSurveyForm({
                     dates={keyDates.filter(
                       (d) => keyDateYear(d.academicYear, fiscalYear) === variant,
                     )}
+                    allDates={keyDates}
                     onDatesChange={setKeyDates}
                     fiscalYear={fiscalYear}
                     isReadOnly={isReadOnly}

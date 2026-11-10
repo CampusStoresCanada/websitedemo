@@ -69,6 +69,13 @@ export default function KeyDatesEditor({
     it. See the note on the state in BenchmarkingSurveyForm.
   */
   dates,
+  /**
+   * Every key date the store holds, both blocks.
+   *
+   * Only for deduping the profile suggestions, which are a fact about the
+   * organisation rather than about one year. Rendering uses `dates`.
+   */
+  allDates,
   onDatesChange: setDates,
   /** The year being reported, because this question has to name it. */
   fiscalYear,
@@ -80,6 +87,7 @@ export default function KeyDatesEditor({
 }: {
   benchmarkingId: string;
   dates: KeyDate[];
+  allDates: KeyDate[];
   onDatesChange: Dispatch<SetStateAction<KeyDate[]>>;
   fiscalYear: number;
   /**
@@ -221,7 +229,16 @@ export default function KeyDatesEditor({
     server-side — so the two agree, including that editing an adopted date
     offers the original again.
   */
-  const taken = new Set(dates.map((d) => `${d.label}|${d.occursOn ?? ""}`));
+  /*
+    ⛔ Built from EVERY date the store holds, not this block's.
+
+    `dates` is one block's worth since the split, and the server rule above
+    keys on the whole table. Deduping against the filtered list put a
+    suggestion back on offer the moment its adopted row sat in the other block
+    — which is every row entered before the question named a year, so it would
+    have hit exactly the stores that had already done the work.
+  */
+  const taken = new Set(allDates.map((d) => `${d.label}|${d.occursOn ?? ""}`));
   const pendingSuggestions = promptsApply
     ? profileSuggestions.filter((s) => !taken.has(`${s.title}|${s.date}`))
     : [];

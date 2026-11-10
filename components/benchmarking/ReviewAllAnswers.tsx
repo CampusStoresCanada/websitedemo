@@ -13,6 +13,7 @@ import type {
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
 import type { KeyDate } from "@/lib/actions/benchmarking-profile";
+import { keyDateYear } from "@/lib/benchmarking/key-dates";
 
 /**
  * Every answer on one screen, before anything is submitted.
@@ -99,6 +100,7 @@ function ListBlock({
 export default function ReviewAllAnswers({
   config,
   formData,
+  fiscalYear,
   lists,
   onJumpToField,
   onJumpToSection,
@@ -106,6 +108,12 @@ export default function ReviewAllAnswers({
 }: {
   config: SurveyFieldConfig;
   formData: Record<string, unknown>;
+  /**
+   * The year being reported, so the key dates can be shown in the two groups
+   * the form asked them in. One flat list here would put FY2026 and FY2027
+   * dates under a single heading, which is the ambiguity the split removed.
+   */
+  fiscalYear: number;
   /**
    * The parts of the submission that are lists rather than single answers.
    *
@@ -188,15 +196,37 @@ export default function ReviewAllAnswers({
                 right: l.kind ?? undefined,
               }))}
             />
+            {/*
+              Two blocks, grouped by the same keyDateYear the form and the
+              worksheet use. A single "Your key dates" list here spanned both
+              years under a heading that reads as the reported one, which is
+              the confusion the split was undoing.
+            */}
             <ListBlock
-              title="Your key dates"
+              title={`Your key dates in FY${fiscalYear}`}
               empty="No dates added."
               onJump={jump}
-              rows={lists.keyDates.map((d) => ({
-                key: d.id,
-                left: d.label,
-                right: d.occursOn ?? "No date",
-              }))}
+              rows={lists.keyDates
+                .filter(
+                  (d) => keyDateYear(d.academicYear, fiscalYear) === "reported",
+                )
+                .map((d) => ({
+                  key: d.id,
+                  left: d.label,
+                  right: d.occursOn ?? "No date",
+                }))}
+            />
+            <ListBlock
+              title={`And the year ahead, FY${fiscalYear + 1}`}
+              empty="None given."
+              onJump={jump}
+              rows={lists.keyDates
+                .filter((d) => keyDateYear(d.academicYear, fiscalYear) === "ahead")
+                .map((d) => ({
+                  key: d.id,
+                  left: d.label,
+                  right: d.occursOn ?? "No date",
+                }))}
             />
             <ListBlock
               title="Who competes with you"
