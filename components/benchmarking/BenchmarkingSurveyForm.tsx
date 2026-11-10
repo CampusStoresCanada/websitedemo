@@ -993,6 +993,7 @@ export default function BenchmarkingSurveyForm({
                   benchmarkingId={benchmarkingId}
                   dates={keyDates}
                   onDatesChange={setKeyDates}
+                  fiscalYear={fiscalYear}
                   isReadOnly={isReadOnly}
                   isSemesterBased={formData.is_semester_based === true}
                   inventoryCountStyle={

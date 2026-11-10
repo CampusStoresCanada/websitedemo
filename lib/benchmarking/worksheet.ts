@@ -321,6 +321,8 @@ function listsForSection(
     people: KnownPerson[];
     dates: KnownDate[];
     orgPath: string | null;
+    /** The year being reported, for the questions that have to name it. */
+    fiscalYear: number;
     /**
      * The newest prior submission, for the lists that can carry one.
      *
@@ -426,11 +428,22 @@ function listsForSection(
           choices: STORE_SERVICES.map((label) => ({ label })),
         },
         {
-          title: "Your year ahead",
+          /*
+            ⛔ Printed "for the year COMING, not the one you are reporting"
+            until 2026-11-10, which is the opposite of what this asks for. See
+            the note in KeyDatesEditor: the survey wants the year being
+            reported, for all six kinds.
+
+            The dates we already hold are still printed, but they are no longer
+            described as confirmed. Half the stores that answered read the old
+            wording and entered next year's dates, so a date on this sheet may
+            belong to either year and only the store can say which.
+          */
+          title: `Your key dates in FY${known.fiscalYear}`,
           intro:
             (known.dates.length > 0
-              ? `The ${known.dates.length} dates we already hold are printed below: check each one is still right for the year COMING and correct it in place. `
-              : "The dates your year turns on, for the year COMING, not the one you are reporting. ") +
+              ? `The ${known.dates.length} dates we already hold are printed below. We asked for the year COMING when some of them were entered, so check each one against FY${known.fiscalYear} and correct it in place. `
+              : `The dates the year you are reporting turned on, not the year coming up. `) +
             "Add as many of each kind as you need: one adoption deadline per term, every buyback window, each semester.",
           choices: KEY_DATE_KINDS.map((k) => ({ label: k.label, note: k.help })),
           nameColumn: "What you call it",
@@ -754,6 +767,7 @@ export function buildWorksheet(input: {
       lists: listsForSection(section.id, {
         people: knownPeople,
         dates: knownDates,
+        fiscalYear,
         orgPath: organizationSlug ? `campusstores.ca/org/${organizationSlug}` : null,
         prior: priors[0] ? { year: priors[0].fiscal_year, row: priors[0] } : null,
       }),

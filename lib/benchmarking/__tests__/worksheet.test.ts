@@ -361,7 +361,7 @@ describe("the sheet prints what we already hold", () => {
   it("pre-fills a known date across the row, not just its name", () => {
     const dates = withPeople.sections
       .find((s) => s.id === "institution_profile")!
-      .lists.find((l) => l.title === "Your year ahead")!;
+      .lists.find((l) => l.title.startsWith("Your key dates"))!;
     // [what you call it, kind, date, ends]
     expect(dates.rowCells![0]).toEqual([
       "Fall adoption deadline",
@@ -497,5 +497,73 @@ describe("figures that only changed grain still print", () => {
       expect(grid.rowCells).toBeUndefined();
       expect(grid.intro).toContain("nothing to carry forward");
     }
+  });
+});
+
+/*
+  Karin Stonehouse, 2026-11-10: "What dates are we using here? Dates that have
+  yet to happen, or dates from the fiscal year that the survey is for."
+
+  The sheet printed "for the year COMING, not the one you are reporting", and
+  the survey's own heading said "Your year ahead". The group settled it the
+  other way for all six kinds, so these pin the answer in place. Five of the
+  ten stores that had answered went forward on the old wording, which is the
+  cost of letting it drift back.
+*/
+describe("key dates belong to the year being reported", () => {
+  const datesSheet = buildWorksheet({
+    organizationName: "Test Store",
+    fiscalYear: 2026,
+    closesAt: null,
+    config: DEFAULT_FIELD_CONFIG,
+    priorRows: [],
+    organizationSlug: "test-store",
+  });
+
+  const keyDates = datesSheet.sections
+    .find((s) => s.id === "institution_profile")!
+    .lists.find((l) => l.title.startsWith("Your key dates"))!;
+
+  it("names the year being reported in the title", () => {
+    expect(keyDates.title).toBe("Your key dates in FY2026");
+  });
+
+  it("tells the store to look back, not ahead", () => {
+    expect(keyDates.intro).toContain("not the year coming up");
+  });
+
+  /*
+    The specific sentence that caused this. A store reading "the year COMING"
+    and entering next year's semesters was following instructions.
+  */
+  it("no longer asks for the year coming", () => {
+    expect(keyDates.intro).not.toContain("year COMING, not the one you are reporting");
+    expect(keyDates.title).not.toContain("year ahead");
+  });
+
+  it("asks a store to check what we already hold against the reported year", () => {
+    const withDates = buildWorksheet({
+      organizationName: "Test Store",
+      fiscalYear: 2026,
+      closesAt: null,
+      config: DEFAULT_FIELD_CONFIG,
+      priorRows: [],
+      organizationSlug: "test-store",
+      knownDates: [
+        {
+          kind: "adoption_deadline",
+          label: "Fall adoption deadline",
+          occursOn: "2026-06-15",
+          endsOn: null,
+        },
+      ],
+    });
+
+    const list = withDates.sections
+      .find((s) => s.id === "institution_profile")!
+      .lists.find((l) => l.title.startsWith("Your key dates"))!;
+
+    // Not "confirm these": half of them may belong to the wrong year.
+    expect(list.intro).toContain("check each one against FY2026");
   });
 });

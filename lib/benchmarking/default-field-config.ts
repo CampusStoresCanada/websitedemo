@@ -344,7 +344,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "How do you count inventory?",
           type: "select",
           helpText:
-            "Count dates go in Your year ahead below, so a reviewer can see when your figures were last verified against a shelf.",
+            "Count dates go in Your key dates below, so a reviewer can see when your figures were last verified against a shelf.",
           order: 10.2,
           visible: true,
           options: ["Annual", "Bi-annual", "Cycle Counts"],
@@ -368,7 +368,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Do you buy books back from students?",
           type: "boolean",
           helpText:
-            "If you do, add each buyback window to Your year ahead below. The dates matter as much as the fact.",
+            "If you do, add each buyback window to Your key dates below. The dates matter as much as the fact.",
           order: 10.4,
           visible: true,
         },

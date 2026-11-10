@@ -38,11 +38,21 @@ function countsExpected(style: string | null): number | null {
 }
 
 /**
- * The dates the year turns on, for the year AHEAD.
+ * The dates the year turns on, for the year BEING REPORTED.
  *
- * The only forward-looking question in the survey. Everything else asks what
- * happened; this asks what is coming, which is the part a store can act on and
- * the part CSC can plan around.
+ * ⛔ This used to ask for the year AHEAD, and said so in three places. Karin
+ * Stonehouse flagged it on 2026-11-10 asking the obvious question the copy
+ * could not answer: "dates that have yet to happen, or dates from the fiscal
+ * year that the survey is for?" The group settled it as the reported year, for
+ * all six kinds.
+ *
+ * She was not splitting hairs. Of the ten stores that had entered semester
+ * dates, five entered the year being reported and five entered the year ahead,
+ * so the column was already carrying both and nothing recorded which. Her own
+ * store is in the first group, which is how she came to ask.
+ *
+ * Every other answer in this survey is historical. A date column that ran the
+ * other way could not be read beside the figures it was supposed to explain.
  *
  * Saved against the ORGANISATION, so it is confirmed rather than retyped next
  * year, and other parts of the site can read it.
@@ -55,6 +65,8 @@ export default function KeyDatesEditor({
   */
   dates,
   onDatesChange: setDates,
+  /** The year being reported, because this question has to name it. */
+  fiscalYear,
   isReadOnly,
   isSemesterBased,
   inventoryCountStyle,
@@ -63,6 +75,7 @@ export default function KeyDatesEditor({
   benchmarkingId: string;
   dates: KeyDate[];
   onDatesChange: Dispatch<SetStateAction<KeyDate[]>>;
+  fiscalYear: number;
   isReadOnly: boolean;
   /** Semesters are only worth asking for where the year has them. */
   isSemesterBased: boolean;
@@ -95,8 +108,8 @@ export default function KeyDatesEditor({
     What their own answers imply we should have, and do not.
 
     Only ever a prompt — nothing here blocks the section. A store that counts
-    stock continuously has no count date to give, and a store that has not set
-    next year's semester dates yet should not be stuck on this screen for it.
+    stock continuously has no count date to give, and a store that cannot put
+    its hands on last year's calendar should not be stuck on this screen for it.
   */
   const expectedCounts = countsExpected(inventoryCountStyle);
   const countDates = dates.filter((d) => d.kind === "inventory_count").length;
@@ -106,7 +119,7 @@ export default function KeyDatesEditor({
     prompts.push({
       kind: "semester",
       label: "Semester",
-      why: "You told us your year runs in semesters. Add each one for the year ahead, with its first and last day.",
+      why: `You told us your year runs in semesters. Add each one that ran in FY${fiscalYear}, with its first and last day.`,
     });
   }
 
@@ -185,11 +198,15 @@ export default function KeyDatesEditor({
 
   return (
     <div className="mb-6">
-      <h3 className="text-sm font-medium text-gray-900">Your year ahead</h3>
+      <h3 className="text-sm font-medium text-gray-900">
+        Your key dates in FY{fiscalYear}
+      </h3>
       <p className="mt-1 text-xs text-gray-600">
-        The dates your year turns on. These stay on your institution&apos;s profile, so
-        next year you are confirming them rather than typing them again, and CSC can plan
-        around them instead of guessing.
+        The dates the year you are reporting turned on, not the year coming up. Semester
+        start and end, stock counts, adoption deadlines, buyback windows, returns cutoffs
+        and add/drop. They sit beside your figures so a reader can tell when your year
+        actually ran. These stay on your institution&apos;s profile, so next year you are
+        confirming them rather than typing them again.
       </p>
 
       {prompts.length > 0 && !isReadOnly && (
