@@ -52,6 +52,30 @@ export default function StaffingEditor({
   const patch = (id: string, fn: (s: StaffRow) => StaffRow) =>
     setStaff((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
 
+  /*
+    Show it, then put it back if the save did not land.
+
+    Both dropdowns used to call `void updateStaff(...)` and throw the result
+    away, having already moved the display. A refused save therefore left the
+    chosen value on screen with nothing said, and the store came back later to
+    a blank where it had answered — the one failure mode worse than an error,
+    because they believe they answered. Same shape as the terms tick on the
+    title page, which puts itself back rather than showing a tick we did not
+    record.
+  */
+  async function save(
+    s: StaffRow,
+    change: { employmentType: string | null } | { yearsInCampusRetail: number | null },
+  ) {
+    patch(s.id, (x) => ({ ...x, ...change }));
+    setError(null);
+    const res = await updateStaff({ benchmarkingId, staffId: s.id, ...change });
+    if (!res.success) {
+      patch(s.id, () => s);
+      setError(res.error ?? `Could not save that for ${s.name}.`);
+    }
+  }
+
   const counted = staff.filter((s) => s.employmentType);
   const experienced = staff.filter((s) => typeof s.yearsInCampusRetail === "number");
   const avgYears =
@@ -77,9 +101,7 @@ export default function StaffingEditor({
               value={s.employmentType ?? ""}
               disabled={isReadOnly}
               onChange={(e) => {
-                const v = e.target.value || null;
-                patch(s.id, (x) => ({ ...x, employmentType: v }));
-                void updateStaff({ benchmarkingId, staffId: s.id, employmentType: v });
+                void save(s, { employmentType: e.target.value || null });
               }}
               className="rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
             >
@@ -95,9 +117,10 @@ export default function StaffingEditor({
               value={s.yearsInCampusRetail ?? ""}
               disabled={isReadOnly}
               onChange={(e) => {
-                const v = e.target.value === "" ? null : Number(e.target.value);
-                patch(s.id, (x) => ({ ...x, yearsInCampusRetail: v }));
-                void updateStaff({ benchmarkingId, staffId: s.id, yearsInCampusRetail: v });
+                void save(s, {
+                  yearsInCampusRetail:
+                    e.target.value === "" ? null : Number(e.target.value),
+                });
               }}
               className="rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
               aria-label={`Years in campus retail for ${s.name}`}
@@ -114,8 +137,14 @@ export default function StaffingEditor({
             {!isReadOnly && (
               <button
                 onClick={async () => {
+                  setError(null);
                   const res = await removeStaff({ benchmarkingId, staffId: s.id });
-                  if (res.success) setStaff((p) => p.filter((x) => x.id !== s.id));
+                  if (res.success) {
+                    setStaff((p) => p.filter((x) => x.id !== s.id));
+                    return;
+                  }
+                  // Leaving the row sitting there is honest; saying nothing is not.
+                  setError(res.error ?? `Could not remove ${s.name}.`);
                 }}
                 className="text-xs text-gray-400 hover:text-red-700"
                 aria-label={`Remove ${s.name}`}

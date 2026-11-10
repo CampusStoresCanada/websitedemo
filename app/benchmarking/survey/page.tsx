@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import BenchmarkingSurveyForm from "@/components/benchmarking/BenchmarkingSurveyForm";
 import SurveyIntro from "@/components/benchmarking/SurveyIntro";
@@ -183,6 +184,58 @@ export default async function BenchmarkingSurveyPage({
         </div>
       );
     }
+
+    /*
+      At a member store, but not as an org admin.
+
+      This fell through to the bare redirect below, which put them on the
+      landing page with no reason given. It is not a rare corner. Adding
+      somebody to a store through Add Contact provisions them as `member`, so
+      every colleague an admin brings in specifically to help with the survey
+      arrives here and is silently turned around. Karin Stonehouse added two
+      people at McMaster on 2026-11-09, both signed in within the minute, and
+      both were bounced with nothing on screen to say why or what to ask for.
+
+      Named rather than generic, because "ask an administrator" is useless if
+      you do not know which store the site thinks you are at.
+    */
+    const blockedAt = (userOrgs ?? [])
+      .filter((uo) => {
+        const org = uo.organization as { type?: string } | null;
+        return org?.type === "Member" && uo.role !== "org_admin";
+      })
+      .map((uo) => (uo.organization as { name?: string } | null)?.name)
+      .filter((n): n is string => Boolean(n));
+
+    if (blockedAt.length > 0) {
+      return (
+        <div className="mx-auto max-w-2xl px-4 py-10">
+          <h1 className="text-2xl font-bold text-gray-900">
+            The benchmarking survey
+          </h1>
+          <p className="mt-3 text-sm text-gray-700">
+            Your store&apos;s survey is open, but your account cannot open it yet.
+          </p>
+          <p className="mt-3 text-sm text-gray-700">
+            We have you at {blockedAt.join(", ")}. Two kinds of account can fill in a
+            store&apos;s survey: an org admin, or the one person an org admin names as
+            the respondent.
+          </p>
+          <p className="mt-3 text-sm text-gray-700">
+            Ask whoever runs your store to do either one. They can make you an org
+            admin from your store&apos;s page, or open the survey and name you under
+            &ldquo;Who is filling this in&rdquo;. Both bring you straight here.
+          </p>
+          <Link
+            href="/benchmarking"
+            className="mt-6 inline-block text-sm text-gray-600 underline"
+          >
+            Back to benchmarking
+          </Link>
+        </div>
+      );
+    }
+
     redirect("/benchmarking");
   }
 

@@ -335,7 +335,20 @@ export async function loadStaff(benchmarkingId: string): Promise<StaffRow[]> {
     .from("benchmarking_staff")
     .select("id, contact_id, name, employment_type, years_in_campus_retail, position")
     .eq("benchmarking_id", benchmarkingId)
-    .order("position");
+    /*
+      created_at breaks ties, because position is not unique.
+
+      addStaff used to number a new row by counting the rows, so once a store
+      had removed anybody the next person added landed on a position someone
+      else already held — McMaster had three such pairs and McGill two. Ordering
+      by position alone leaves those pairs in whatever order the database
+      happens to return, which can change when any row in the pair is updated,
+      so a team list could reshuffle itself between visits. addStaff numbers
+      from the highest position now, but the rows already written keep their
+      collisions and this is what keeps them sitting still.
+    */
+    .order("position")
+    .order("created_at");
   return (data ?? []).map((r) => ({
     id: r.id as string,
     contactId: (r.contact_id as string | null) ?? null,
@@ -417,17 +430,30 @@ export async function addStaff(input: {
   if (!input.name.trim()) return { success: false, error: "Name them first." };
 
   const db = createAdminClient();
-  const { count } = await db
+
+  /*
+    One past the highest position, not the number of rows.
+
+    Counting was wrong the moment a store removed anybody: delete two of twelve
+    and the next person added is numbered 10, which two people already hold.
+    Karin Stonehouse hit exactly this at McMaster on 2026-11-09 — she pruned
+    four of the seeded names, then added five of her own, and three of them
+    landed on a position a seeded row was already using.
+  */
+  const { data: last } = await db
     .from("benchmarking_staff")
-    .select("id", { count: "exact", head: true })
-    .eq("benchmarking_id", input.benchmarkingId);
+    .select("position")
+    .eq("benchmarking_id", input.benchmarkingId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data, error } = await db
     .from("benchmarking_staff")
     .insert({
       benchmarking_id: input.benchmarkingId,
       name: input.name.trim(),
-      position: count ?? 0,
+      position: ((last?.position as number | null) ?? -1) + 1,
     })
     .select("id")
     .single();
