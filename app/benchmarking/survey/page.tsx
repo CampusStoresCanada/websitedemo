@@ -414,6 +414,42 @@ export default async function BenchmarkingSurveyPage({
     (currentRow as { disclosure_level_set_at?: string | null }).disclosure_level_set_at,
   );
 
+  /*
+    Pressing "Start the survey" IS the choice, so record it here.
+
+    Without this the gate never opened for anybody. DisclosureChoice returns
+    early when the option clicked is the one already selected, and the column
+    defaults to "full" — so a store happy to be named never called the action,
+    never got a disclosure_level_set_at, and was handed the title page again on
+    every single visit for the whole cycle. On 2026-11-10 that was 24 of the 26
+    FY2026 rows, three of them already submitted. The only two stores past it
+    had both picked aggregate_only, i.e. the one path that writes the stamp.
+
+    Stamped server-side on arrival at ?start=1 rather than in the button, so
+    the level recorded is the one on the ROW. The button cannot know it: the
+    live value sits in DisclosureChoice's own state, and passing the page-load
+    prop down would overwrite a choice made seconds earlier with the old one.
+
+    The store has been shown the consent question and the terms tick above the
+    button gates it, so proceeding is an affirmative act — but it is only ever
+    the store's own. ⛔ Never stamped while staff act as a store or walk the
+    preview: consent is the store's to give, and a staffer clicking Start is
+    not the store deciding. setDisclosureLevel checks the year's seal itself.
+  */
+  if (!hasChosen && skipIntro && !isActingAsOther && !isPreview) {
+    const { setDisclosureLevel } = await import("@/lib/actions/benchmarking-survey");
+    const level =
+      (currentRow as { disclosure_level?: string }).disclosure_level === "aggregate_only"
+        ? "aggregate_only"
+        : "full";
+    // Returns a result rather than throwing; a failure here must not take the
+    // form down, it just means the title page comes back once more.
+    const stamped = await setDisclosureLevel(currentRow!.id, level);
+    if (!stamped.success) {
+      console.error("[benchmarking/survey] could not record the disclosure choice:", stamped.error);
+    }
+  }
+
   if (!hasChosen && !skipIntro) {
     const { data: chairRow } = await db
       .from("site_content")
