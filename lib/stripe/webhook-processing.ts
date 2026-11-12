@@ -956,6 +956,17 @@ async function handleInvoicePaid(
      */
     if (!fulfilledConferenceOrder) {
       await enqueueQBExport(updatedInvoice.id);
+    } else {
+      // An order invoiced at the desk since invoices post at issue is already
+      // in QuickBooks as an Invoice: reopen its row so the payment goes against
+      // it. The receipt worker skips that order. One not posted at issue (it
+      // predates the rule, or its posting failed) is left to the receipt.
+      const { data: postedRow } = await db
+        .from("qbo_export_queue")
+        .select("qbo_invoice_id")
+        .eq("invoice_id", updatedInvoice.id)
+        .maybeSingle();
+      if (postedRow?.qbo_invoice_id) await enqueueQBExport(updatedInvoice.id);
     }
     }
   }

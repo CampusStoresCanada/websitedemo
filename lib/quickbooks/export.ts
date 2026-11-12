@@ -461,21 +461,22 @@ async function processExportRow(
     return null;
   }
 
-  // A conference order invoiced at the desk posts once, when paid, as the
-  // per-line Sales Receipt fulfilConferenceOrder queues (conference tax per
-  // line). The paid event never reopens this row for it, so posting a
-  // one-line Invoice here at issue would book the sale twice and leave that
-  // Invoice open forever.
+  // A conference order invoiced at the desk posts as its own per-line Invoice
+  // (the items and per-line tax its receipt would carry), not this invoice's
+  // one line. Only while unpaid: one paid first goes out as its receipt, and
+  // posting here too would book it twice.
+  let conferenceOrderId: string | null = null;
   if (!row.qbo_invoice_id) {
     const { data: order } = await db
       .from("conference_orders")
       .select("id")
       .eq("invoice_id", invoice.id)
       .maybeSingle();
-    if (order) {
-      await markSkipped(db, row, "Not posted: a conference order, recorded as a Sales Receipt when paid.");
+    if (order && invoice.status === "paid") {
+      await markSkipped(db, row, "Not posted: a conference order paid before it reached QuickBooks, recorded as its Sales Receipt.");
       return null;
     }
+    conferenceOrderId = order?.id ?? null;
   }
 
   // The day each document is recorded on. An invoice carries the day Stripe
@@ -524,6 +525,27 @@ async function processExportRow(
   // directly, by the DocNumber derived from this invoice's own id.
   let qbInvoiceId =
     row.qbo_invoice_id ?? (await findQBDocumentByDocNumber("Invoice", qboDocNumber(invoice.id)))?.Id ?? null;
+
+  if (!qbInvoiceId && conferenceOrderId) {
+    // Loaded here, not at the top: conference-export imports this file.
+    const { conferenceOrderInvoiceParts } = await import("./conference-export");
+    const parts = await conferenceOrderInvoiceParts(db, conferenceOrderId);
+    const contact = await resolveInvoiceContactName(db, org.id, billingEmail);
+    qbInvoiceId = (await createQBInvoice({
+      CustomerRef: { value: parts.customerId },
+      DocNumber: qboDocNumber(invoice.id),
+      TxnDate: invoiceDate,
+      DueDate: invoice.due_date ?? undefined,
+      CurrencyRef: { value: parts.currency },
+      Line: parts.lines,
+      PrivateNote: [
+        `CSC Invoice ID: ${invoice.id}`,
+        `Conference order ${conferenceOrderId}`,
+        contact ? `For: ${contact}` : null,
+        issueDate !== invoiceDate ? `Issued in Stripe ${issueDate}; recorded ${invoiceDate}` : null,
+      ].filter(Boolean).join(". "),
+    })).Id;
+  }
 
   if (!qbInvoiceId) {
     // An invoice may name its own item and tax code (the CANCOLL invoice: the

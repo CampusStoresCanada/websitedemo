@@ -1,4 +1,6 @@
 // QuickBooks conference commerce export worker.
+// (An order invoiced at the desk is the exception: it posts as an Invoice the
+// day it goes out, through ./export, and this worker skips its receipt.)
 // Conference orders (booths/registration/sponsorship) never touch the
 // `invoices` table — process_conference_order_paid() settles entirely inside
 // conference_orders/conference_order_items/entity_purchases — so they're
@@ -382,6 +384,39 @@ async function resolvePublicTicketTaxCode(db: Db): Promise<string> {
   );
 }
 
+/**
+ * A conference order invoiced at the desk, as a QuickBooks Invoice: the same
+ * customer and per-line items, pre-tax amounts and per-line tax codes its
+ * Sales Receipt would carry. Posted the day the invoice goes out (Ewa's rule,
+ * 2026-11-06); its payment is applied when paid, and the receipt is skipped.
+ */
+export async function conferenceOrderInvoiceParts(
+  db: Db,
+  conferenceOrderId: string
+): Promise<{ customerId: string; lines: QBLineItem[]; currency: string }> {
+  const order = await loadOrder(db, conferenceOrderId);
+  const customerId = await resolveQBCustomerId(db, order.organizationId);
+  const { codeRef } = await resolveConferenceTax(db, order.conferenceId);
+  const lines = await resolveConferenceLineItems(db, conferenceOrderId, order.organizationId, codeRef);
+  return { customerId, lines, currency: order.currency ?? "CAD" };
+}
+
+/** The QuickBooks Invoice an order's desk invoice was posted as at issue, if any. */
+export async function conferenceOrderPostedInvoiceId(db: Db, conferenceOrderId: string): Promise<string | null> {
+  const { data: order } = await db
+    .from("conference_orders")
+    .select("invoice_id")
+    .eq("id", conferenceOrderId)
+    .maybeSingle();
+  if (!order?.invoice_id) return null;
+  const { data: row } = await db
+    .from("qbo_export_queue")
+    .select("qbo_invoice_id")
+    .eq("invoice_id", order.invoice_id)
+    .maybeSingle();
+  return row?.qbo_invoice_id ?? null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Receipt worker
 // ─────────────────────────────────────────────────────────────────
@@ -460,6 +495,24 @@ export async function quickbooksConferenceReceiptExportRun(): Promise<QBConferen
         (await findQBDocumentByDocNumber("SalesReceipt", qboDocNumber(row.conference_order_id)))?.Id;
       if (alreadyPosted) {
         await adoptExistingReceipt(db, "qbo_conference_receipt_queue", row.id, alreadyPosted);
+        result.succeeded++;
+        continue;
+      }
+
+      // Invoiced at the desk and posted as an Invoice the day it went out: the
+      // payment is applied to that Invoice, so a receipt would book it twice.
+      const postedInvoiceId = await conferenceOrderPostedInvoiceId(db, row.conference_order_id);
+      if (postedInvoiceId) {
+        await db
+          .from("qbo_conference_receipt_queue")
+          .update({
+            status: "skipped",
+            processed_at: new Date().toISOString(),
+            lease_expires_at: null,
+            next_retry_at: null,
+            error_message: `Not posted: the order was recorded as QuickBooks invoice ${postedInvoiceId} when it was invoiced, and its payment goes against that.`,
+          })
+          .eq("id", row.id);
         result.succeeded++;
         continue;
       }

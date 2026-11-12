@@ -107,7 +107,7 @@ vi.mock("../queue", () => ({
   startRunBudget: () => () => false,
 }));
 
-type PostedInvoice = { TxnDate: string; PrivateNote?: string };
+type PostedInvoice = { TxnDate: string; PrivateNote?: string; Line?: Array<{ Description?: string; SalesItemLineDetail: { TaxCodeRef?: { value: string } } }> };
 type PostedPayment = { TxnDate: string; Line: Array<{ LinkedTxn: Array<{ TxnId: string }> }> };
 const createQBInvoice = vi.fn(async (_input: PostedInvoice) => ({ Id: "qb-inv-1" }));
 const createQBPayment = vi.fn(async (_input: PostedPayment) => ({ Id: "qb-pay-1" }));
@@ -127,6 +127,17 @@ vi.mock("@/lib/stripe/client", () => ({
       retrieve: async () => ({ status: stripeStatus, status_transitions: { finalized_at: finalizedAt } }),
     },
   },
+}));
+
+vi.mock("../conference-export", () => ({
+  conferenceOrderInvoiceParts: async () => ({
+    customerId: "cust-1",
+    currency: "CAD",
+    lines: [
+      { Amount: 4000, Description: "Booth", DetailType: "SalesItemLineDetail", SalesItemLineDetail: { ItemRef: { value: "booth" }, Qty: 1, TaxCodeRef: { value: "hst-on" } } },
+      { Amount: 2000, Description: "Meet & Greet", DetailType: "SalesItemLineDetail", SalesItemLineDetail: { ItemRef: { value: "sponsor" }, Qty: 1, TaxCodeRef: { value: "hst-on" } } },
+    ],
+  }),
 }));
 
 const { quickbooksExportRun } = await import("../export");
@@ -236,13 +247,41 @@ describe("quickbooksExportRun, posting at issue", () => {
     expect(queueUpdate()).toMatchObject({ status: "skipped" });
   });
 
-  it("posts nothing at issue for a conference order invoiced at the desk; its receipt posts when paid", async () => {
+  it("posts a conference order invoiced at the desk as its per-line Invoice at issue", async () => {
     invoice.type = "conference";
+    conferenceOrder = { id: "order-1" };
+    await quickbooksExportRun();
+    const posted = createQBInvoice.mock.calls[0][0];
+    expect(posted.Line?.map((l) => [l.Description, l.SalesItemLineDetail.TaxCodeRef?.value])).toEqual([
+      ["Booth", "hst-on"],
+      ["Meet & Greet", "hst-on"],
+    ]);
+    expect(posted.TxnDate).toBe("2026-11-20");
+    expect(posted.PrivateNote).toContain("Conference order order-1");
+    expect(createQBPayment).not.toHaveBeenCalled();
+    expect(queueUpdate()).toMatchObject({ status: "completed", qbo_invoice_id: "qb-inv-1", qbo_payment_id: null });
+  });
+
+  it("leaves a conference order paid before it posted to its receipt", async () => {
+    invoice.type = "conference";
+    invoice.status = "paid";
+    invoice.paid_at = "2026-11-25T16:00:00+00:00";
     conferenceOrder = { id: "order-1" };
     await quickbooksExportRun();
     expect(createQBInvoice).not.toHaveBeenCalled();
     expect(createQBPayment).not.toHaveBeenCalled();
     expect(queueUpdate()).toMatchObject({ status: "skipped" });
+  });
+
+  it("applies the payment to a conference order's Invoice once paid", async () => {
+    invoice.type = "conference";
+    invoice.status = "paid";
+    invoice.paid_at = "2026-11-25T16:00:00+00:00";
+    queueRow.qbo_invoice_id = "qb-inv-1";
+    conferenceOrder = { id: "order-1" };
+    await quickbooksExportRun();
+    expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(createQBPayment.mock.calls[0][0].Line[0].LinkedTxn[0].TxnId).toBe("qb-inv-1");
   });
 
   it("skips an invoice voided in Stripe that our row still shows open", async () => {

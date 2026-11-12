@@ -600,6 +600,27 @@ describe("processStripeWebhookEvent — invoice.paid (conference order)", () => 
     expect(enqueueQBExportMock).not.toHaveBeenCalled();
   });
 
+  it("reopens the invoice export when the order went to QuickBooks as an Invoice at issue", async () => {
+    // Posted as a per-line Invoice the day it went out: the payment is applied
+    // to that Invoice, and the receipt worker skips the order.
+    const { db } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-1" } },
+        { data: { id: "inv-1", organization_id: "org-1", billing_period_start: null, billing_period_end: null } },
+      ],
+      conference_orders: [
+        { data: { id: "order-1", conference_id: "conf-1", organization_id: "org-1", status: "pending" } },
+        { data: { status: "pending", expires_at: null } },
+      ],
+      conference_order_items: [{ data: [] }],
+      qbo_export_queue: [{ data: { qbo_invoice_id: "qb-inv-9" } }],
+    });
+
+    await processStripeWebhookEvent(invoicePaidEvent("in_conf_1", "pi_conf_1"), db as never);
+
+    expect(enqueueQBExportMock).toHaveBeenCalledExactlyOnceWith("inv-1");
+  });
+
   it("fulfils the order through the same RPC a card payment uses", async () => {
     // Same seat, same receipt, same badge — only the payment instrument
     // differs. The checkout session id stays null rather than being filled
