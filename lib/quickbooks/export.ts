@@ -392,7 +392,7 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
  * dated the day they post: on payment, or in the sweep below. Dated by issue,
  * they would land in August, in a quarter already filed.
  */
-export const POST_AT_ISSUE_SINCE = "2026-11-10";
+export const POST_AT_ISSUE_SINCE = "2026-11-13";
 
 /**
  * The day every pre-rule invoice still open goes to QuickBooks, dated that day
