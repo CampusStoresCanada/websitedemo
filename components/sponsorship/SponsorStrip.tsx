@@ -1,8 +1,9 @@
 import Link from "next/link";
-import type { ActiveSponsor } from "@/lib/sponsorship/types";
+import type { SponsorInSlot } from "@/lib/sponsorship/types";
 
 interface SponsorStripProps {
-  sponsors: ActiveSponsor[];
+  /** Only sponsors with a placement in the homepage_featured slot (sponsorsInSlot). */
+  sponsors: SponsorInSlot[];
 }
 
 /**
@@ -26,10 +27,10 @@ export default function SponsorStrip({ sponsors }: SponsorStripProps) {
               href={`/org/${sponsor.organizationSlug}`}
               className="group transition-opacity hover:opacity-70"
             >
-              {sponsor.organizationLogoUrl ? (
+              {sponsor.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={sponsor.organizationLogoUrl}
+                  src={sponsor.logoUrl}
                   alt={sponsor.organizationName}
                   className="h-10 w-auto object-contain max-w-[160px]"
                 />

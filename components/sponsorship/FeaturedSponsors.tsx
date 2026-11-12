@@ -1,8 +1,9 @@
 import Link from "next/link";
-import type { ActiveSponsor } from "@/lib/sponsorship/types";
+import type { SponsorInSlot } from "@/lib/sponsorship/types";
 
 interface FeaturedSponsorsProps {
-  sponsors: ActiveSponsor[];
+  /** Only sponsors with a placement in the partners_page_featured slot (sponsorsInSlot). */
+  sponsors: SponsorInSlot[];
 }
 
 /**
@@ -29,10 +30,10 @@ export default function FeaturedSponsors({ sponsors }: FeaturedSponsorsProps) {
               href={`/org/${sponsor.organizationSlug}`}
               className="flex items-center gap-2.5 group"
             >
-              {sponsor.organizationLogoUrl && (
+              {sponsor.logoUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={sponsor.organizationLogoUrl}
+                  src={sponsor.logoUrl}
                   alt=""
                   className="h-5 w-auto object-contain"
                 />

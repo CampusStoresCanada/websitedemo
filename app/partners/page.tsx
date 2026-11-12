@@ -6,6 +6,7 @@ import FeaturedSponsors from "@/components/sponsorship/FeaturedSponsors";
 import { getPartnersPageData } from "@/lib/homepage";
 import { getSiteContent } from "@/lib/data";
 import { getActiveSponsors } from "@/lib/actions/sponsorship";
+import { sponsorsInSlot } from "@/lib/sponsorship/types";
 
 export const revalidate = 60;
 
@@ -26,7 +27,7 @@ const activeSponsors = sponsorsResult.success ? sponsorsResult.data : [];
 
   return (
     <div>
-      <FeaturedSponsors sponsors={activeSponsors} />
+      <FeaturedSponsors sponsors={sponsorsInSlot(activeSponsors, "partners_page_featured")} />
       <MapHero
         organizations={mapOrgs}
         stories={[]}

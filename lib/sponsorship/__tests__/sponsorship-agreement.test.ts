@@ -31,6 +31,7 @@ vi.mock("../../membership/renewal-activation", async () => {
 
 import { createSponsorAgreementFromSponsorshipPurchase, sponsorshipTermEnd } from "../sponsorship-agreement";
 import { provisionAgreementPlacements } from "../provision";
+import { sponsorsInSlot, type ActiveSponsor } from "../types";
 
 /**
  * A sponsorship sold as its own item (Kivuto, 2026-11: $2,000, Meet & Greet
@@ -76,9 +77,13 @@ function fakeDb(seed: { tiers?: Row[]; agreements?: Row[]; slots?: Row[]; orgs?:
   return { tables, db: { from } };
 }
 
+// The live slot keys (sponsor_placement_slots, 2026-11-12). A fixture slot
+// named after the BENEFIT ("logo_partners_page") is how the logo benefits went
+// unprovisioned unnoticed: no such slot exists.
 const SLOTS = [
   { id: "slot-sponsors", key: "sponsors_page", is_active: true },
-  { id: "slot-partners", key: "logo_partners_page", is_active: true },
+  { id: "slot-partners", key: "partners_page_featured", is_active: true },
+  { id: "slot-home", key: "homepage_featured", is_active: true },
   { id: "slot-offsite", key: "conference_offsite", is_active: true },
   { id: "slot-email-h", key: "email_header", is_active: true },
   { id: "slot-email-f", key: "email_footer", is_active: true },
@@ -205,5 +210,67 @@ describe("provisionAgreementPlacements", () => {
 
     expect(await provisionAgreementPlacements(db, "agr")).toBe(0);
     expect(tables.sponsor_placements).toHaveLength(1);
+  });
+});
+
+describe("logo benefits fill the slots that exist", () => {
+  it("puts the homepage and partners logos into homepage_featured and partners_page_featured", async () => {
+    const { db, tables } = fakeDb({
+      tiers: [
+        {
+          id: "tier-celebrated",
+          benefits: [
+            { key: "logo_homepage_featured", label: "Home", config: {} },
+            { key: "logo_partners_page", label: "Partners", config: {} },
+          ],
+        },
+      ],
+      agreements: [{ id: "agr", tier_id: "tier-celebrated", organization_id: "kivuto", custom_benefits: [] }],
+      slots: SLOTS,
+      orgs: [ORG],
+    });
+
+    expect(await provisionAgreementPlacements(db, "agr")).toBe(2);
+    expect(tables.sponsor_placements.map((p) => p.slot_id).sort()).toEqual(["slot-home", "slot-partners"]);
+  });
+});
+
+describe("sponsorsInSlot", () => {
+  const sponsor = (id: string, name: string, placements: ActiveSponsor["placements"]): ActiveSponsor => ({
+    agreementId: id,
+    organizationId: id,
+    organizationName: name,
+    organizationSlug: name.toLowerCase(),
+    organizationLogoUrl: `https://${id}/logo`,
+    tier: { name: "Sponsor", slug: "custom", color: null, icon: null },
+    placements,
+  });
+  const at = (slotKey: string, displayOrder = 0, logoUrl: string | null = null) => ({
+    slotKey,
+    logoUrl,
+    linkUrl: null,
+    displayOrder,
+    config: {},
+  });
+
+  it("shows only sponsors who bought that display, not every active agreement", () => {
+    const sponsors = [
+      sponsor("a", "Kivuto", [at("partners_page_featured")]),
+      sponsor("b", "Ambassador", [at("homepage_featured")]),
+      sponsor("c", "No Logos", []),
+    ];
+    expect(sponsorsInSlot(sponsors, "homepage_featured").map((s) => s.organizationName)).toEqual(["Ambassador"]);
+    expect(sponsorsInSlot(sponsors, "partners_page_featured").map((s) => s.organizationName)).toEqual(["Kivuto"]);
+  });
+
+  it("uses the placement's logo over the org's, and the placement's order", () => {
+    const sponsors = [
+      sponsor("a", "Second", [at("homepage_featured", 2)]),
+      sponsor("b", "First", [at("homepage_featured", 1, "https://placement/logo")]),
+    ];
+    const shown = sponsorsInSlot(sponsors, "homepage_featured");
+    expect(shown.map((s) => s.organizationName)).toEqual(["First", "Second"]);
+    expect(shown[0].logoUrl).toBe("https://placement/logo");
+    expect(shown[1].logoUrl).toBe("https://a/logo");
   });
 });

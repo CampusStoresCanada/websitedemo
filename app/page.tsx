@@ -12,6 +12,7 @@ import { getHeroAreaSettings } from "@/lib/hero-settings";
 import { getSiteContent } from "@/lib/data";
 import { fieldProps } from "@/lib/editable-fields";
 import { getActiveSponsors } from "@/lib/actions/sponsorship";
+import { sponsorsInSlot } from "@/lib/sponsorship/types";
 import { getViewerContext } from "@/lib/visibility/viewer";
 
 // Revalidate every 60 seconds to pick up data changes
@@ -49,7 +50,7 @@ export default async function Home() {
         <LogoCarousel members={data.memberOrgs} partners={data.partnerOrgs} />
 
         {/* Sponsor strip — hidden when no active sponsors */}
-        <SponsorStrip sponsors={activeSponsors} />
+        <SponsorStrip sponsors={sponsorsInSlot(activeSponsors, "homepage_featured")} />
 
         {/* Value Props */}
         <ValueProps

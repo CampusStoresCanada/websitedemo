@@ -66,9 +66,11 @@ export type BenefitCadence = (typeof BENEFIT_CADENCES)[number];
 
 /** Canonical registry — used for UI display and provisioning logic */
 export const BENEFIT_REGISTRY: Record<BenefitKey, BenefitDefinition> = {
-  logo_homepage_featured:   { key: "logo_homepage_featured",   label: "Logo — Homepage (Featured)",        category: "website",    provisioning: "automatic" },
-  logo_partners_page:       { key: "logo_partners_page",       label: "Logo — Partners Page",              category: "website",    provisioning: "automatic" },
-  logo_conference_page:     { key: "logo_conference_page",     label: "Logo — Conference Page",            category: "website",    provisioning: "automatic" },
+  // The logo keys never shared a name with their slot, so until 2026-11 an
+  // activation matched none of them and no logo placement was ever created.
+  logo_homepage_featured:   { key: "logo_homepage_featured",   label: "Logo — Homepage (Featured)",        category: "website",    provisioning: "automatic", slotKeys: ["homepage_featured"] },
+  logo_partners_page:       { key: "logo_partners_page",       label: "Logo — Partners Page",              category: "website",    provisioning: "automatic", slotKeys: ["partners_page_featured"] },
+  logo_conference_page:     { key: "logo_conference_page",     label: "Logo — Conference Page",            category: "website",    provisioning: "automatic", slotKeys: ["conference_page"] },
   sponsors_page:            { key: "sponsors_page",            label: "Sponsors Page Listing",             category: "website",    provisioning: "automatic" },
   partner_report_access:    { key: "partner_report_access",    label: "State of the Industry Report",      category: "report",     provisioning: "automatic" },
   cancoll_report_access:    { key: "cancoll_report_access",    label: "Private CANCOLL Data Report",       category: "report",     provisioning: "automatic" },
@@ -304,6 +306,44 @@ export interface ActiveSponsor {
 }
 
 // ── Utility ───────────────────────────────────────────────────────
+
+/** A sponsor as one display shows them: the placement's logo wins over the org's. */
+export interface SponsorInSlot {
+  agreementId: string;
+  organizationName: string;
+  organizationSlug: string;
+  logoUrl: string | null;
+  tier: ActiveSponsor["tier"];
+}
+
+/**
+ * The sponsors a display should show: only those whose agreement has a live
+ * placement in that display's slot, in the placement's order.
+ *
+ * Until 2026-11 the homepage strip and the partners page showed every active
+ * agreement, so what a sponsor bought decided nothing about where they
+ * appeared. A placement is what they bought; this is the one place that
+ * reads it.
+ */
+export function sponsorsInSlot(sponsors: ActiveSponsor[], slotKey: string): SponsorInSlot[] {
+  return sponsors
+    .flatMap((s) =>
+      s.placements
+        .filter((p) => p.slotKey === slotKey)
+        .map((p) => ({
+          order: p.displayOrder,
+          sponsor: {
+            agreementId: s.agreementId,
+            organizationName: s.organizationName,
+            organizationSlug: s.organizationSlug,
+            logoUrl: p.logoUrl ?? s.organizationLogoUrl,
+            tier: s.tier,
+          },
+        }))
+    )
+    .sort((a, b) => a.order - b.order || a.sponsor.organizationName.localeCompare(b.sponsor.organizationName))
+    .map((x) => x.sponsor);
+}
 
 /** Merge tier benefits with per-agreement custom_benefits overrides */
 export function resolveAgreementBenefits(
