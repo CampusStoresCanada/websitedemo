@@ -187,6 +187,31 @@ describe("reviveMembershipToGrace", () => {
     expect(transitionMembershipStateMock).toHaveBeenCalled();
   });
 
+  it("admits a newly approved partner into grace, billing them with the invoice approval already sent", async () => {
+    // Kivuto, 2026-11: approved in November, dues falling due in January.
+    createAdminClientMock.mockReturnValue(
+      dbReturning(
+        { id: ORG, name: "Kivuto", membership_status: "approved", membership_expires_at: null },
+        { existingInvoice: { id: "inv-approval", stripe_invoice_id: "in_approval", status: "invoiced" } }
+      )
+    );
+
+    const result = await reviveMembershipToGrace(ORG, "Signed Nov 12, pays Jan 1 per agreement");
+
+    expect(result.success).toBe(true);
+    expect(transitionMembershipStateMock).toHaveBeenCalledWith(
+      ORG,
+      "grace",
+      "admin",
+      "steve",
+      "Signed Nov 12, pays Jan 1 per agreement",
+      expect.objectContaining({ revived_from: "approved" })
+    );
+    // The approval's invoice is the one they owe; a second would bill them twice.
+    expect(createProgramInvoiceMock).not.toHaveBeenCalled();
+    expect(stripeRetrieveMock).toHaveBeenCalledWith("in_approval");
+  });
+
   it("treats an expiry in the past as lapsed", async () => {
     createAdminClientMock.mockReturnValue(
       dbReturning({
@@ -229,7 +254,7 @@ describe("reviveMembershipToGrace", () => {
     const result = await reviveMembershipToGrace(ORG, "Reason");
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/canceled or lapsed/i);
+    expect(result.error).toMatch(/canceled, lapsed or newly approved/i);
     expect(transitionMembershipStateMock).not.toHaveBeenCalled();
     expect(createProgramInvoiceMock).not.toHaveBeenCalled();
   });

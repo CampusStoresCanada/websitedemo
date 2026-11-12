@@ -933,16 +933,18 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
           }
         }
 
-        // Step 2: Calculate days in grace
+        // Step 2: Calculate days in grace, and the moment it runs out
         const graceStart = new Date(org.grace_period_started_at);
         const daysInGrace =
           (Date.now() - graceStart.getTime()) / (1000 * 60 * 60 * 24);
+        const locksAt = await graceLocksAt(db, org.id, graceStart, graceDays);
+        const daysRemaining = (locksAt.getTime() - Date.now()) / 86_400_000;
 
         const renewalYear = org.membership_expires_at
           ? getRenewalYear(org.membership_expires_at)
           : new Date().getFullYear();
 
-        if (daysInGrace >= graceDays) {
+        if (daysRemaining <= 0) {
           // Grace expired — lock access
           const transResult = await transitionMembershipState(
             org.id,
@@ -1039,18 +1041,11 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
           ) {
             // The date access actually stops, derived from where this org is in
             // its own grace period rather than assumed.
-            const graceLapsesOn = org.grace_period_started_at
-              ? new Date(
-                  new Date(org.grace_period_started_at as string).getTime() +
-                    graceDays * 86_400_000
-                )
-                  .toISOString()
-                  .slice(0, 10)
-              : null;
+            const graceLapsesOn = locksAt.toISOString().slice(0, 10);
 
             await recordRenewalEvent(db, org.id, renewalYear, "grace_reminder", undefined, {
               days_in_grace: Math.floor(daysInGrace),
-              days_remaining: Math.ceil(graceDays - daysInGrace),
+              days_remaining: Math.ceil(daysRemaining),
             });
 
             const graceReminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
@@ -1061,7 +1056,7 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
                 variables: {
                   contact_name: `${org.name} team`,
                   org_name: org.name,
-                  grace_days_remaining: Math.ceil(graceDays - daysInGrace),
+                  grace_days_remaining: Math.ceil(daysRemaining),
                   payment_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
                   membership_value_html: suppressed.has(to.trim().toLowerCase())
                     ? ""
@@ -1124,6 +1119,45 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
       errors: [msg, ...errors],
     };
   }
+}
+
+/**
+ * When an org's grace runs out: grace_days after it started, or the day after
+ * the dues invoice it owes falls due, whichever is later.
+ *
+ * Grace is "in, not yet paid", and the invoice is what they agreed to pay by.
+ * Ordinarily that invoice falls due inside the grace days, so this changes
+ * nothing. It matters when CSC agreed to later terms: Kivuto (2026-11) was
+ * admitted in November with dues falling due January 1, and the bare clock
+ * would have locked them out on December 12 for a bill that was not yet due.
+ *
+ * Only an unpaid invoice that buys a coverage period counts, so a conference
+ * booth invoice on long terms never stretches anyone's dues grace.
+ */
+export async function graceLocksAt(
+  db: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  graceStart: Date,
+  graceDays: number
+): Promise<Date> {
+  const byClock = new Date(graceStart.getTime() + graceDays * 86_400_000);
+
+  const { data: owed } = await db
+    .from("invoices")
+    .select("due_date")
+    .eq("organization_id", orgId)
+    .eq("status", "invoiced")
+    .not("billing_period_end", "is", null)
+    .not("due_date", "is", null)
+    .order("due_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!owed?.due_date) return byClock;
+  // Due on the date means payable all that day: grace ends when it is over.
+  const dayAfterDue = new Date(`${owed.due_date.slice(0, 10)}T00:00:00Z`);
+  dayAfterDue.setUTCDate(dayAfterDue.getUTCDate() + 1);
+  return dayAfterDue > byClock ? dayAfterDue : byClock;
 }
 
 /** How many days ago was the last grace_reminder for this org/year? */

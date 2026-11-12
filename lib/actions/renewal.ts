@@ -309,7 +309,9 @@ export async function reviveMembership(
 
 /**
  * Put a canceled organization back into `grace` — the move for a former
- * member who is rejoining, made before any money has arrived.
+ * member who is rejoining, made before any money has arrived. Also admits a
+ * newly approved partner the same way, when CSC has agreed they pay later
+ * (approved → grace; an exception, not how approval normally works).
  *
  * reviveMembership above is the other half of the pair and deliberately
  * refuses this case: it only un-does a cancellation that should not have
@@ -382,10 +384,19 @@ export async function reviveMembershipToGrace(
   // cycle start, ~11 months out. So reviving hid the only button that could
   // bill them. Orgs stranded that way still need a way out, and re-clicking is
   // it — the billing step below is idempotent.
-  if (org.membership_status !== "canceled" && org.membership_status !== "grace") {
+  // `approved` is a new partner admitted before their first invoice is paid
+  // (Kivuto, 2026-11: signed in November, paying in January). Same move, same
+  // state: in, not yet paid. The invoice the approval already sent is the one
+  // they owe, and issueRenewalInvoice below reuses it rather than raising a
+  // second; the grace job then waits for its due date before locking.
+  if (
+    org.membership_status !== "canceled" &&
+    org.membership_status !== "grace" &&
+    org.membership_status !== "approved"
+  ) {
     return {
       success: false,
-      error: `Only a canceled or lapsed organization can be revived. This one is "${org.membership_status}".`,
+      error: `Only a canceled, lapsed or newly approved organization can be put into grace. This one is "${org.membership_status}".`,
     };
   }
 
@@ -405,14 +416,14 @@ export async function reviveMembershipToGrace(
 
   // Move them first. It is the cheap, reversible half, and an invoice raised
   // against a still-`canceled` org would be the misleading order.
-  if (org.membership_status === "canceled") {
+  if (org.membership_status === "canceled" || org.membership_status === "approved") {
     const transitionResult = await transitionMembershipState(
       orgId,
       "grace",
       "admin",
       ctx.userId,
       trimmedReason,
-      { revived_from: "canceled", had_coverage_through: expiresAt }
+      { revived_from: org.membership_status, had_coverage_through: expiresAt }
     );
 
     if (!transitionResult.success) {

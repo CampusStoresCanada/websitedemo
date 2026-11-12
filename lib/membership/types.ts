@@ -35,7 +35,10 @@ export interface MembershipStateLog {
 /** Allowed transitions map — mirrors the RPC logic for client-side validation. */
 export const ALLOWED_TRANSITIONS: Record<OrgMembershipStatus, OrgMembershipStatus[]> = {
   applied:     ['approved'],
-  approved:    ['active'],
+  // approved → grace admits a new partner before their first invoice is paid
+  // (Revive & bill, reviveMembershipToGrace): an exception staff make with a
+  // reason, never self-serve. Grace then runs to that invoice's due date.
+  approved:    ['active', 'grace'],
   active:      ['grace', 'canceled'],
   grace:       ['active', 'locked', 'canceled'],
   locked:      ['reactivated'],

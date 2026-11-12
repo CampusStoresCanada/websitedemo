@@ -344,7 +344,10 @@ function ReviveToGraceButton({ row }: { row: RenewalDirectoryRow }) {
   // moved them without billing and in doing so hid the Renew Now card that
   // could have. Offering it here is how they get finished.
   const isStrandedInGrace = row.membershipStatus === "grace" && row.invoiceStatus === null;
-  if (row.membershipStatus !== "canceled" && !isStrandedInGrace) return null;
+  // A new partner approved but not yet paid, when CSC has agreed they pay
+  // later: grace lets them in now and holds until their invoice falls due.
+  const isApproved = row.membershipStatus === "approved";
+  if (row.membershipStatus !== "canceled" && !isStrandedInGrace && !isApproved) return null;
 
   return (
     <InlineReasonAction
