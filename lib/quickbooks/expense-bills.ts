@@ -25,7 +25,7 @@ import {
   findQBDocumentByDocNumber,
   findQBVendor,
   fetchQBBookCloseDate,
-  fetchQBPurchaseTaxRate,
+  fetchQBTaxRate,
   qboDocNumber,
   type QBBillLine,
   type QBTxnTaxDetail,
@@ -193,7 +193,7 @@ async function postClaim(db: Db, row: QueueRow): Promise<void> {
 
   let txnTaxDetail: QBTxnTaxDetail | null = null;
   if (program.qboTaxCodeId) {
-    const rate = await fetchQBPurchaseTaxRate(program.qboTaxCodeId);
+    const rate = await fetchQBTaxRate(program.qboTaxCodeId, "Purchase");
     if (!rate) {
       throw new Error(
         `The QuickBooks tax code set for ${program.name} has no single purchase rate to state the tax under. ` +

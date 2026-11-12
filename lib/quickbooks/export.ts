@@ -12,6 +12,8 @@ import {
   findQBDocumentByDocNumber,
   fetchQBBookCloseDate,
   getQBInvoice,
+  fetchQBTaxRate,
+  type QBTxnTaxDetail,
 } from "./client";
 import { openBooksDay, stripeAccountDay } from "./fiscal";
 import { parseSupabaseTimestamp } from "@/lib/time/supabase-timestamp";
@@ -571,34 +573,51 @@ async function processExportRow(
   // dated the day it was paid.
   let qbPaymentId: string | null = row.qbo_payment_id;
   if (needsPayment && paymentDate) {
-    qbPaymentId = await postPayment(db, customer.Id, qbInvoiceId, invoice.total_cents, invoice.currency, paymentDate);
+    qbPaymentId = await postPayment(db, customer.Id, qbInvoiceId, invoice, paymentDate);
   }
 
   await markComplete(db, row, qbInvoiceId, qbPaymentId);
   return null;
 }
 
+/**
+ * The payment, against the invoice it pays. Stripe money lands in the Stripe
+ * account. A cheque or EFT someone marked paid on the Stripe invoice (a
+ * Stripe payment record) never passed through Stripe, so it goes to
+ * Undeposited Funds, where the bookkeeper deposits it with the bank's own
+ * record. Posted to the Stripe account it had to be moved by hand, one at a
+ * time (21 of them, Aug to Oct 2026).
+ */
 async function postPayment(
   db: ReturnType<typeof createAdminClient>,
   customerId: string,
   qbInvoiceId: string,
-  totalCents: number,
-  currency: string | null,
+  invoice: { total_cents: number; currency: string | null; stripe_invoice_id: string | null },
   txnDate: string
 ): Promise<string> {
-  const depositAccountId = await resolveStripeDepositAccountId(db);
+  const outsideStripe = await paidOutsideStripe(invoice.stripe_invoice_id);
+  const depositAccountId = outsideStripe ? null : await resolveStripeDepositAccountId(db);
   const payment = await createQBPayment({
     CustomerRef: { value: customerId },
-    TotalAmt: totalCents / 100,
+    TotalAmt: invoice.total_cents / 100,
     Line: [{
-      Amount: totalCents / 100,
+      Amount: invoice.total_cents / 100,
       LinkedTxn: [{ TxnId: qbInvoiceId, TxnType: "Invoice" }],
     }],
     TxnDate: txnDate,
-    CurrencyRef: { value: currency ?? "CAD" },
-    DepositToAccountRef: { value: depositAccountId },
+    CurrencyRef: { value: invoice.currency ?? "CAD" },
+    ...(depositAccountId ? { DepositToAccountRef: { value: depositAccountId } } : {}),
   });
   return payment.Id;
+}
+
+/** Paid only by Stripe payment records: money that came in by cheque or EFT. */
+async function paidOutsideStripe(stripeInvoiceId: string | null): Promise<boolean> {
+  if (!stripeInvoiceId) return false;
+  const { stripe } = await import("@/lib/stripe/client");
+  const payments = await stripe.invoicePayments.list({ invoice: stripeInvoiceId });
+  const paid = payments.data.filter((p) => p.status === "paid");
+  return paid.length > 0 && paid.every((p) => p.payment?.type === "payment_record");
 }
 
 /**
@@ -615,7 +634,7 @@ async function postPayment(
 async function postTaxCorrection(
   db: ReturnType<typeof createAdminClient>,
   row: QBExportQueueRow,
-  invoice: { id: string; total_cents: number; currency: string | null },
+  invoice: { id: string; total_cents: number; currency: string | null; stripe_invoice_id: string | null },
   correctsInvoiceId: string,
   customerId: string,
   paymentDate: string | null
@@ -640,7 +659,7 @@ async function postTaxCorrection(
       await holdRow(db, row, reason);
       return reason;
     }
-    const paymentId = await postPayment(db, customerId, original.qbo_invoice_id, invoice.total_cents, invoice.currency, paymentDate);
+    const paymentId = await postPayment(db, customerId, original.qbo_invoice_id, invoice, paymentDate);
     await markComplete(db, row, original.qbo_invoice_id, paymentId);
     return null;
   }
@@ -836,6 +855,34 @@ async function resolveStripeDepositAccountId(
 }
 
 /**
+ * A refund is a tax-inclusive amount, the money Stripe sent back, but a line
+ * under a taxable code is before tax: QuickBooks adds the tax on top. Posting
+ * the gross refunded the tax twice (a $559 refund would come out at $586.95),
+ * the same mistake the conference receipts made. The line carries the amount
+ * before tax and the receipt states the tax, so the total is what Stripe
+ * refunded to the cent.
+ */
+export function splitRefundTax(
+  grossCents: number,
+  rate: { id: string; percent: number } | null
+): { netCents: number; taxDetail: QBTxnTaxDetail | null } {
+  if (!rate || rate.percent === 0) return { netCents: grossCents, taxDetail: null };
+  const netCents = Math.round((grossCents * 100) / (100 + rate.percent));
+  const taxCents = grossCents - netCents;
+  return {
+    netCents,
+    taxDetail: {
+      TotalTax: taxCents / 100,
+      TaxLine: [{
+        DetailType: "TaxLineDetail",
+        Amount: taxCents / 100,
+        TaxLineDetail: { TaxRateRef: { value: rate.id }, PercentBased: true, TaxPercent: rate.percent, NetAmountTaxable: netCents / 100 },
+      }],
+    },
+  };
+}
+
+/**
  * Idempotently enqueue an invoice refund for QB export. Called from both
  * processRefund (lib/stripe/billing.ts, admin-triggered) and
  * processRefundUpdate (lib/stripe/webhook-processing.ts, charge.refunded) —
@@ -942,7 +989,7 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       const { data: invoice, error: invErr } = await db
         .from("invoices")
         .select(`
-          id, type, description, amount_cents, currency,
+          id, type, description, amount_cents, currency, metadata,
           organization_id,
           organization:organizations(id, name, email, quickbooks_customer_id, province, country)
         `)
@@ -950,6 +997,22 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
         .single();
 
       if (invErr || !invoice) throw new Error(`Invoice not found: ${row.invoice_id}`);
+
+      // A refund of a tax-only correction is all tax and no sale, and the
+      // correction itself posted no invoice. Hers to record, not ours.
+      const refundMeta = (invoice.metadata as Record<string, unknown> | null) ?? {};
+      if (refundMeta.correction_type === "tax_only") {
+        const reason =
+          `Held for the bookkeeper: a $${(row.refund_amount_cents / 100).toFixed(2)} refund of a tax-only correction ` +
+          `(invoice ${row.invoice_id}). Record it in QuickBooks against the original invoice's tax, then Skip this row.`;
+        await db
+          .from("qbo_membership_refund_queue")
+          .update({ status: "failed", retry_count: row.max_retries, next_retry_at: null, lease_expires_at: null, error_message: reason })
+          .eq("id", row.id);
+        result.failed++;
+        result.errors.push(`invoice ${row.invoice_id}: ${reason}`);
+        continue;
+      }
 
       const org = Array.isArray(invoice.organization) ? invoice.organization[0] : invoice.organization;
       if (!org) throw new Error(`Organization not found for invoice ${row.invoice_id}`);
@@ -970,12 +1033,13 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents, invoice.description);
       const taxCodeRef = await resolveMembershipTaxCode(db, org);
       const depositAccountId = await resolveStripeDepositAccountId(db);
+      const { netCents, taxDetail } = splitRefundTax(row.refund_amount_cents, await fetchQBTaxRate(taxCodeRef, "Sales"));
 
       const refundReceipt = await createQBRefundReceipt({
         CustomerRef: { value: customer.Id },
         Line: [
           {
-            Amount: row.refund_amount_cents / 100,
+            Amount: netCents / 100,
             Description: `Refund — invoice ${row.invoice_id}`,
             DetailType: "SalesItemLineDetail",
             SalesItemLineDetail: {
@@ -985,11 +1049,12 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
             },
           },
         ],
-        TxnDate: new Date().toISOString().slice(0, 10),
+        TxnDate: openBooksDay(stripeAccountDay(new Date()), await fetchQBBookCloseDate()),
         DocNumber: qboDocNumber(row.invoice_id),
         PrivateNote: `CSC Invoice ID: ${row.invoice_id} — refund ${row.stripe_refund_id}`,
         CurrencyRef: { value: invoice.currency ?? "CAD" },
         DepositToAccountRef: { value: depositAccountId },
+        ...(taxDetail ? { TxnTaxDetail: taxDetail } : {}),
       });
 
       await db

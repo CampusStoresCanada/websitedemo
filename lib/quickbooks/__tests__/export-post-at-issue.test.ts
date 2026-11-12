@@ -23,6 +23,7 @@ let invoice: Record<string, unknown>;
 let closeDate: string | null;
 let finalizedAt: number | null;
 let stripeStatus: string;
+let stripePayments: Array<{ status: string; payment: { type: string } }>;
 let updates: Array<{ table: string; values: Record<string, unknown> }>;
 let originalRow: { qbo_invoice_id: string | null } | null;
 let conferenceOrder: { id: string } | null;
@@ -108,7 +109,7 @@ vi.mock("../queue", () => ({
 }));
 
 type PostedInvoice = { TxnDate: string; PrivateNote?: string; Line?: Array<{ Description?: string; SalesItemLineDetail: { TaxCodeRef?: { value: string } } }> };
-type PostedPayment = { TxnDate: string; Line: Array<{ LinkedTxn: Array<{ TxnId: string }> }> };
+type PostedPayment = { TxnDate: string; Line: Array<{ LinkedTxn: Array<{ TxnId: string }> }>; DepositToAccountRef?: { value: string } };
 const createQBInvoice = vi.fn(async (_input: PostedInvoice) => ({ Id: "qb-inv-1" }));
 const createQBPayment = vi.fn(async (_input: PostedPayment) => ({ Id: "qb-pay-1" }));
 vi.mock("../client", () => ({
@@ -126,6 +127,9 @@ vi.mock("@/lib/stripe/client", () => ({
     invoices: {
       retrieve: async () => ({ status: stripeStatus, status_transitions: { finalized_at: finalizedAt } }),
     },
+    invoicePayments: {
+      list: async () => ({ data: stripePayments }),
+    },
   },
 }));
 
@@ -140,7 +144,7 @@ vi.mock("../conference-export", () => ({
   }),
 }));
 
-const { quickbooksExportRun } = await import("../export");
+const { quickbooksExportRun, splitRefundTax } = await import("../export");
 
 const queueUpdate = () => updates.filter((u) => u.table === "qbo_export_queue" && u.values.status !== "processing").at(-1)?.values;
 
@@ -157,6 +161,7 @@ beforeEach(() => {
   openInvoices = [];
   closeDate = "2026-08-31";
   stripeStatus = "open";
+  stripePayments = [{ status: "paid", payment: { type: "payment_intent" } }];
   // 2026-11-21 05:30 UTC is still November 20 in the Stripe account's timezone.
   finalizedAt = Date.UTC(2026, 10, 21, 5, 30) / 1000;
   queueRow = { id: "row-1", invoice_id: "inv-1", qbo_invoice_id: null, qbo_payment_id: null, status: "pending", retry_count: 0, max_retries: 3 };
@@ -291,6 +296,26 @@ describe("quickbooksExportRun, posting at issue", () => {
     expect(queueUpdate()).toMatchObject({ status: "skipped" });
   });
 
+  it("deposits a Stripe payment to the Stripe account", async () => {
+    queueRow.qbo_invoice_id = "qb-inv-1";
+    invoice.status = "paid";
+    invoice.paid_at = "2026-11-25T16:00:00+00:00";
+    await quickbooksExportRun();
+    expect(createQBPayment.mock.calls[0][0].DepositToAccountRef).toEqual({ value: "acct-stripe" });
+  });
+
+  it("leaves a cheque or EFT marked paid in Stripe in Undeposited Funds", async () => {
+    queueRow.qbo_invoice_id = "qb-inv-1";
+    invoice.status = "paid";
+    invoice.paid_at = "2026-11-25T16:00:00+00:00";
+    stripePayments = [
+      { status: "paid", payment: { type: "payment_record" } },
+      { status: "canceled", payment: { type: "payment_intent" } },
+    ];
+    await quickbooksExportRun();
+    expect(createQBPayment.mock.calls[0][0].DepositToAccountRef).toBeUndefined();
+  });
+
   it("falls back to the day we created it when Stripe has no finalize time", async () => {
     finalizedAt = null;
     closeDate = null;
@@ -365,5 +390,19 @@ describe("the December 1 sweep", () => {
     openInvoices = [{ id: "old-1" }];
     await quickbooksExportRun();
     expect(inserts).toEqual([]);
+  });
+});
+
+describe("a refund's tax", () => {
+  it("posts the amount before tax and states the tax, so the total is what Stripe refunded", () => {
+    // Portage's $559 at 5% GST: QuickBooks would have added $27.95 on top.
+    const { netCents, taxDetail } = splitRefundTax(55900, { id: "gst", percent: 5 });
+    expect(netCents).toBe(53238);
+    expect(taxDetail?.TotalTax).toBe(26.62);
+    expect(netCents + Math.round((taxDetail?.TotalTax ?? 0) * 100)).toBe(55900);
+  });
+
+  it("leaves an exempt refund as it is", () => {
+    expect(splitRefundTax(42000, null)).toEqual({ netCents: 42000, taxDetail: null });
   });
 });

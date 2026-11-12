@@ -1140,6 +1140,27 @@ async function handleChargeRefunded(
         await processRefundUpdate(invoiceByPi, charge, db);
         return { conferenceOrderId: null };
       }
+
+      // An invoice paid on Stripe's hosted page stores neither the charge nor
+      // the payment intent on our row (107 of 116 since July 2026), so a
+      // refund issued from the Stripe dashboard found nothing and never
+      // reached QuickBooks. Ask Stripe which invoice the payment paid.
+      const { data: payments } = await stripe.invoicePayments.list({
+        payment: { type: "payment_intent", payment_intent: piId },
+      });
+      const stripeInvoiceId = payments.find((p) => p.status === "paid")?.invoice;
+      const stripeInvoiceKey = typeof stripeInvoiceId === "string" ? stripeInvoiceId : stripeInvoiceId?.id;
+      if (stripeInvoiceKey) {
+        const { data: invoiceByStripeInvoice } = await db
+          .from("invoices")
+          .select("id, total_cents, status")
+          .eq("stripe_invoice_id", stripeInvoiceKey)
+          .maybeSingle();
+        if (invoiceByStripeInvoice) {
+          await processRefundUpdate(invoiceByStripeInvoice, charge, db);
+          return { conferenceOrderId: null };
+        }
+      }
     }
 
     console.warn(`charge.refunded: no local invoice found for charge ${charge.id}`);

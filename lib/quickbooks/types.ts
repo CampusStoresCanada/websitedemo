@@ -59,7 +59,8 @@ export interface QBPaymentInput {
   }>;
   TxnDate?: string;
   CurrencyRef?: { value: string };
-  DepositToAccountRef: { value: string }; // without this QB defaults to Undeposited Funds — see qbo_stripe_deposit_account_id
+  /** Omitted, QuickBooks files it in Undeposited Funds: a cheque or EFT, not Stripe money. */
+  DepositToAccountRef?: { value: string }; // the Stripe account for Stripe payments — see qbo_stripe_deposit_account_id
 }
 
 export interface QBPayment {
@@ -99,6 +100,8 @@ export interface QBRefundReceiptInput {
   PrivateNote?: string;
   CurrencyRef?: { value: string };
   DepositToAccountRef: { value: string }; // same account the original sale used — see qbo_refund_deposit_account_id
+  /** The tax as Stripe refunded it, overriding what QuickBooks would work out. */
+  TxnTaxDetail?: import("./client").QBTxnTaxDetail;
 }
 
 export interface QBRefundReceipt extends QBRefundReceiptInput {

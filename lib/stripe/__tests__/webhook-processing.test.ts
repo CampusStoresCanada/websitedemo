@@ -20,6 +20,8 @@ const {
   stripeInvoicesVoidInvoiceMock,
   stripeInvoicesDelMock,
   stripeRefundsListMock,
+  stripeInvoicePaymentsListMock,
+  enqueueQBExportRefundMock,
   resolveAssigneeForEmailMock,
   findExistingUserByEmailMock,
 } = vi.hoisted(() => ({
@@ -32,6 +34,8 @@ const {
   stripeInvoicesVoidInvoiceMock: vi.fn(),
   stripeInvoicesDelMock: vi.fn(),
   stripeRefundsListMock: vi.fn(),
+  stripeInvoicePaymentsListMock: vi.fn(),
+  enqueueQBExportRefundMock: vi.fn(),
   resolveAssigneeForEmailMock: vi.fn(),
   findExistingUserByEmailMock: vi.fn(),
 }));
@@ -44,6 +48,7 @@ vi.mock("@/lib/membership/state-machine", () => ({
 }));
 vi.mock("@/lib/quickbooks/export", () => ({
   enqueueQBExport: enqueueQBExportMock,
+  enqueueQBExportRefund: enqueueQBExportRefundMock,
 }));
 // lib/quickbooks/conference-export.ts (pulled in unmocked by
 // handleCheckoutSessionCompleted/handleChargeRefunded) calls createAdminClient()
@@ -72,6 +77,9 @@ vi.mock("@/lib/stripe/client", () => ({
     },
     refunds: {
       list: stripeRefundsListMock,
+    },
+    invoicePayments: {
+      list: stripeInvoicePaymentsListMock,
     },
   },
 }));
@@ -388,6 +396,28 @@ describe("processStripeWebhookEvent — charge.refunded (conference)", () => {
     expect(rpc).not.toHaveBeenCalled();
     expect(context).toEqual({ conferenceOrderId: null });
     consoleWarn.mockRestore();
+  });
+
+  it("finds a dashboard refund's invoice through Stripe when our row stores no charge", async () => {
+    // Paid on Stripe's hosted page: our row has the Stripe invoice id but
+    // neither the charge nor the payment intent, so only Stripe can say which
+    // invoice the refunded payment paid.
+    stripeInvoicePaymentsListMock.mockResolvedValueOnce({ data: [{ status: "paid", invoice: "in_portage" }] });
+    const { db } = makeFakeDb({
+      invoices: [
+        { data: null },
+        { data: null },
+        { data: { id: "inv-portage", total_cents: 100000, status: "paid" } },
+      ],
+    });
+    const event = chargeRefundedEvent({ metadata: {}, amountRefunded: 55900, paymentIntent: "pi_portage" });
+
+    await processStripeWebhookEvent(event, db as never);
+
+    expect(stripeInvoicePaymentsListMock).toHaveBeenCalledWith({
+      payment: { type: "payment_intent", payment_intent: "pi_portage" },
+    });
+    expect(enqueueQBExportRefundMock).toHaveBeenCalledExactlyOnceWith("inv-portage", "ch_test_1_55900", 55900);
   });
 });
 

@@ -626,15 +626,21 @@ export interface QBTaxCode {
 }
 
 /**
- * The one purchase tax rate a tax code applies, for stating a bill's tax
- * outright. Null when the code has no purchase rate or more than one (a
- * combined code), where one amount cannot say how it splits.
+ * The one sales or purchase tax rate a tax code applies, for stating a
+ * document's tax outright. Null when the code has no rate on that side (an
+ * exempt code) or more than one (a combined code), where one amount cannot
+ * say how it splits.
  */
-export async function fetchQBPurchaseTaxRate(taxCodeId: string): Promise<{ id: string; percent: number } | null> {
-  const code = await qbRequest<{
-    TaxCode: { PurchaseTaxRateList?: { TaxRateDetail?: Array<{ TaxRateRef: { value: string } }> } };
-  }>("GET", `/taxcode/${taxCodeId}`);
-  const rates = code.TaxCode.PurchaseTaxRateList?.TaxRateDetail ?? [];
+export async function fetchQBTaxRate(
+  taxCodeId: string,
+  side: "Sales" | "Purchase"
+): Promise<{ id: string; percent: number } | null> {
+  type RateList = { TaxRateDetail?: Array<{ TaxRateRef: { value: string } }> };
+  const code = await qbRequest<{ TaxCode: { SalesTaxRateList?: RateList; PurchaseTaxRateList?: RateList } }>(
+    "GET",
+    `/taxcode/${taxCodeId}`
+  );
+  const rates = (side === "Sales" ? code.TaxCode.SalesTaxRateList : code.TaxCode.PurchaseTaxRateList)?.TaxRateDetail ?? [];
   if (rates.length !== 1) return null;
   const id = rates[0].TaxRateRef.value;
   const rate = await qbRequest<{ TaxRate: { RateValue?: number } }>("GET", `/taxrate/${id}`);
