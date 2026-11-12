@@ -33,9 +33,19 @@ interface BenefitBuilderProps {
   benefits: BenefitConfig[];
   onChange: (benefits: BenefitConfig[]) => void;
   referenceOptions: BenefitReferenceOptions;
+  /** Limit the groups offered. A catalog item shows only the year-round ones. */
+  categories?: ReadonlyArray<keyof typeof CATEGORY_LABELS>;
 }
 
-export default function BenefitBuilder({ benefits, onChange, referenceOptions }: BenefitBuilderProps) {
+/**
+ * The year-round groups: what a sponsor gets from the Sponsors tab, for the
+ * agreement's term. Conference perks (booth, speaking, naming on an event,
+ * Conference in a Box) are granted by the item's own connections in the Build
+ * editor instead, so a catalog item never offers them here twice.
+ */
+export const YEAR_ROUND_CATEGORIES = ["website", "report", "circle", "email"] as const;
+
+export default function BenefitBuilder({ benefits, onChange, referenceOptions, categories }: BenefitBuilderProps) {
   const enabledKeys = new Set(benefits.map((b) => b.key));
 
   function toggle(key: BenefitKey, enabled: boolean) {
@@ -64,7 +74,7 @@ export default function BenefitBuilder({ benefits, onChange, referenceOptions }:
     );
   }
 
-  const grouped = CATEGORY_ORDER.map((cat) => ({
+  const grouped = CATEGORY_ORDER.filter((cat) => !categories || categories.includes(cat)).map((cat) => ({
     category: cat,
     label: CATEGORY_LABELS[cat],
     keys: BENEFIT_KEYS.filter((k) => BENEFIT_REGISTRY[k].category === cat),

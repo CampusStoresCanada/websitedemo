@@ -30,7 +30,7 @@ import {
   openQuestions,
   structuredAttributes,
 } from "@/lib/conference/entity-graph";
-import BenefitBuilder from "@/components/admin/sponsorships/BenefitBuilder";
+import BenefitBuilder, { YEAR_ROUND_CATEGORIES } from "@/components/admin/sponsorships/BenefitBuilder";
 import { listBenefitReferenceOptions, type BenefitReferenceOptions } from "@/lib/actions/sponsorship";
 import type { BenefitConfig } from "@/lib/sponsorship/types";
 import { accessibleThings, offerGrants } from "@/lib/conference/entity-commerce";
@@ -721,15 +721,19 @@ function ThingForm({
     }
     return [];
   });
-  // A sponsorship carries its own benefit list, picked from the registry with
-  // the same builder tiers use. Copied onto the agreement when it is paid for.
+  // Year-round benefits (logos, emails, Circle posts, reports): the Sponsors-tab
+  // half of what an item sells, copied onto the buyer's agreement when it is
+  // paid for. The conference half is the item's connections below. Offered on
+  // sponsorships and booths, and on anything that already carries some.
   const [benefits, setBenefits] = useState<BenefitConfig[]>(() =>
     Array.isArray(editing?.attributes.benefits) ? (editing!.attributes.benefits as unknown as BenefitConfig[]) : []
   );
   const [benefitRefs, setBenefitRefs] = useState<BenefitReferenceOptions | null>(null);
-  const isSponsorship = kind.trim().toLowerCase() === "sponsorship";
+  const showsBenefits =
+    ["sponsorship", "booth"].includes(kind.trim().toLowerCase()) ||
+    Array.isArray(editing?.attributes.benefits);
   useEffect(() => {
-    if (!isSponsorship || benefitRefs) return;
+    if (!showsBenefits || benefitRefs) return;
     let stopped = false;
     void listBenefitReferenceOptions().then((res) => {
       if (!stopped && res.success) setBenefitRefs(res.data);
@@ -737,7 +741,7 @@ function ThingForm({
     return () => {
       stopped = true;
     };
-  }, [isSponsorship, benefitRefs]);
+  }, [showsBenefits, benefitRefs]);
   const [isForSale, setIsForSale] = useState(editing?.isForSale ?? false);
   const [salesWindow, setSalesWindow] = useState<"member" | "vendor" | null>(editing?.salesWindow ?? null);
   const [qboItemId, setQboItemId] = useState<string | null>(editing?.qboItemId ?? null);
@@ -856,7 +860,7 @@ function ThingForm({
       if (!p.key.trim() || p.value === "") continue;
       attributes[p.key.trim()] = p.type === "number" ? Number(p.value) : p.value;
     }
-    if (isSponsorship) {
+    if (showsBenefits) {
       if (benefits.length > 0) attributes.benefits = benefits as unknown as EntityAttributes[string];
       else delete attributes.benefits;
     }
@@ -1001,15 +1005,22 @@ function ThingForm({
         </div>
       )}
 
-      {isSponsorship && (
+      {showsBenefits && (
         <div className="mt-3">
           <div className="flex items-baseline gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Benefits</span>
-            <span className="text-[10px] text-gray-400">copied onto the sponsor&apos;s agreement when it is paid for</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Year-round benefits</span>
+            <span className="text-[10px] text-gray-400">
+              go on the buyer&apos;s agreement in the Sponsors tab when paid for; conference perks are connections below
+            </span>
           </div>
           <div className="mt-1.5">
             {benefitRefs ? (
-              <BenefitBuilder benefits={benefits} onChange={setBenefits} referenceOptions={benefitRefs} />
+              <BenefitBuilder
+                benefits={benefits}
+                onChange={setBenefits}
+                referenceOptions={benefitRefs}
+                categories={YEAR_ROUND_CATEGORIES}
+              />
             ) : (
               <p className="text-xs text-gray-400">Loading benefits…</p>
             )}

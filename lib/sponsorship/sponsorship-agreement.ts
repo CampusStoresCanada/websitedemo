@@ -49,30 +49,46 @@ export function sponsorshipTermEnd(
   return nextStart.toISOString().slice(0, 10);
 }
 
+/** The year-round benefits a catalog item carries, if any (attributes.benefits). */
+export function itemYearRoundBenefits(attributes: Record<string, unknown> | null | undefined): BenefitConfig[] {
+  const raw = (attributes ?? {}).benefits;
+  return Array.isArray(raw) ? (raw as BenefitConfig[]) : [];
+}
+
 /**
- * A paid sponsorship line becomes the sponsor's agreement, live at once.
+ * A paid catalog item that carries year-round benefits becomes the buyer's
+ * agreement, live at once.
  *
- * The review happened when the item was published (Steve, 2026-11-12), so,
- * unlike a tier-priced booth (createSponsorAgreementFromBoothPurchase, which
- * leaves a draft), this creates the agreement active and puts up its
- * placements straight away. The item's benefits are COPIED: editing the item
- * later must not change a deal already sold.
+ * Any kind of item: a sponsorship (Kivuto, 2026-11) or a booth that includes
+ * logos. Its conference perks are granted by its own connections, as for any
+ * purchase; this is only the Sponsors-tab half (Steve, 2026-11-12: year-round
+ * benefits head to the Sponsors tab, conference ones are built into the
+ * conference, and an item selling both wires them together). An item with no
+ * year-round benefits makes no agreement.
+ *
+ * The review happened when the item was published, so, unlike a tier-priced
+ * booth (createSponsorAgreementFromBoothPurchase, which leaves a draft), this
+ * creates the agreement active and puts up its placements straight away. The
+ * benefits are COPIED: editing the item later must not change a deal sold.
  *
  * Idempotent per order and item: webhooks retry, and a re-run must not create
  * a second agreement or a second set of placements.
  */
-export async function createSponsorAgreementFromSponsorshipPurchase(params: {
+export async function createSponsorAgreementFromItemPurchase(params: {
   organizationId: string;
   orderId: string;
-  sponsorshipEntityId: string;
-  sponsorshipName: string;
+  itemEntityId: string;
+  itemName: string;
   attributes: Record<string, unknown> | null;
   /** YYYY-MM-DD; defaults to today. */
   startDate?: string;
 }): Promise<void> {
+  const benefits = itemYearRoundBenefits(params.attributes);
+  if (benefits.length === 0) return;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = createAdminClient() as any;
-  const marker = `sponsorship ${params.sponsorshipEntityId} / order ${params.orderId}`;
+  const marker = `item ${params.itemEntityId} / order ${params.orderId}`;
 
   const { data: existing } = await db
     .from("sponsor_agreements")
@@ -97,7 +113,7 @@ export async function createSponsorAgreementFromSponsorshipPurchase(params: {
       ruleKey: `sponsorship_agreement_missing_tier:${params.orderId}`,
       severity: "critical",
       message:
-        `${params.sponsorshipName} was paid for (order ${params.orderId}) but no agreement was created: ` +
+        `${params.itemName} was paid for (order ${params.orderId}) but no agreement was created: ` +
         `the "${SPONSORSHIP_ITEM_TIER_SLUG}" sponsor tier is missing.`,
       details: { organization_id: params.organizationId, order_id: params.orderId },
     });
@@ -105,7 +121,6 @@ export async function createSponsorAgreementFromSponsorshipPurchase(params: {
   }
 
   const attrs = params.attributes ?? {};
-  const benefits = Array.isArray(attrs.benefits) ? (attrs.benefits as BenefitConfig[]) : [];
   const termMonths = typeof attrs.term_months === "number" ? attrs.term_months : null;
   const startDate = params.startDate ?? new Date().toISOString().slice(0, 10);
   const { cycle_start_month_day, pre_renewal_skip_stub_days } = await getRenewalConfig();
@@ -120,12 +135,12 @@ export async function createSponsorAgreementFromSponsorshipPurchase(params: {
       start_date: startDate,
       end_date: endDate,
       custom_benefits: benefits,
-      notes: `Created live from a paid ${params.sponsorshipName} (${marker}).`,
+      notes: `Created live from a paid ${params.itemName} (${marker}).`,
     })
     .select("id")
     .single();
   if (error || !agreement) {
-    throw new Error(`Could not create the agreement for ${params.sponsorshipName}: ${error?.message ?? "no row"}`);
+    throw new Error(`Could not create the agreement for ${params.itemName}: ${error?.message ?? "no row"}`);
   }
 
   await provisionAgreementPlacements(db, agreement.id);

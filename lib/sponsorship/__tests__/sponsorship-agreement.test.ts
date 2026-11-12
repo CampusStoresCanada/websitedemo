@@ -29,7 +29,7 @@ vi.mock("../../membership/renewal-activation", async () => {
   };
 });
 
-import { createSponsorAgreementFromSponsorshipPurchase, sponsorshipTermEnd } from "../sponsorship-agreement";
+import { createSponsorAgreementFromItemPurchase, sponsorshipTermEnd } from "../sponsorship-agreement";
 import { provisionAgreementPlacements } from "../provision";
 import { sponsorsInSlot, type ActiveSponsor } from "../types";
 
@@ -89,11 +89,14 @@ const SLOTS = [
   { id: "slot-email-f", key: "email_footer", is_active: true },
 ];
 const ORG = { id: "kivuto", logo_url: "https://logo", website: "https://kivuto.com" };
+// Year-round only: the Meet & Greet naming, booth and Conference in a Box are
+// the item's conference connections, not benefits.
 const KIVUTO_BENEFITS = [
-  { key: "conference_offsite_host", label: "Meet & Greet", config: { reference_id: "meet-greet" } },
   { key: "sponsors_page", label: "Sponsors page", config: {} },
+  { key: "logo_partners_page", label: "Partners page", config: {} },
   { key: "email_brand_presence", label: "Email", config: {} },
   { key: "circle_sponsored_post", label: "Circle post", config: { count: 4, cadence: "quarter" } },
+  { key: "post_show_report", label: "Post-show report", config: { reference_id: "csc-2027" } },
   { key: "member_market_report", label: "Market report", config: {} },
 ];
 
@@ -118,14 +121,14 @@ describe("sponsorshipTermEnd", () => {
   });
 });
 
-describe("createSponsorAgreementFromSponsorshipPurchase", () => {
-  const call = () =>
-    createSponsorAgreementFromSponsorshipPurchase({
+describe("createSponsorAgreementFromItemPurchase", () => {
+  const call = (attributes: Record<string, unknown> = { benefits: KIVUTO_BENEFITS }, itemEntityId = "item-kivuto") =>
+    createSponsorAgreementFromItemPurchase({
       organizationId: "kivuto",
       orderId: "order-1",
-      sponsorshipEntityId: "item-kivuto",
-      sponsorshipName: "2027 Sponsorship — Kivuto",
-      attributes: { benefits: KIVUTO_BENEFITS },
+      itemEntityId,
+      itemName: "2027 Sponsorship — Kivuto",
+      attributes,
       startDate: "2026-11-12",
     });
 
@@ -153,11 +156,10 @@ describe("createSponsorAgreementFromSponsorshipPurchase", () => {
     await call();
 
     const slots = tables.sponsor_placements.map((p) => p.slot_id).sort();
-    // Sponsors page, the Meet & Greet, and both email slots. The Circle post
-    // and the report are deliverables, not placements.
-    expect(slots).toEqual(["slot-email-f", "slot-email-h", "slot-offsite", "slot-sponsors"]);
-    const offsite = tables.sponsor_placements.find((p) => p.slot_id === "slot-offsite");
-    expect(offsite).toMatchObject({ config_json: { reference_id: "meet-greet" }, logo_url: "https://logo" });
+    // Sponsors page, partners page and both email slots. The Circle post and
+    // the reports are deliverables, not placements.
+    expect(slots).toEqual(["slot-email-f", "slot-email-h", "slot-partners", "slot-sponsors"]);
+    expect(tables.sponsor_placements[0]).toMatchObject({ logo_url: "https://logo", link_url: "https://kivuto.com" });
   });
 
   it("does nothing new on a webhook retry", async () => {
@@ -169,6 +171,26 @@ describe("createSponsorAgreementFromSponsorshipPurchase", () => {
 
     expect(tables.sponsor_agreements).toHaveLength(1);
     expect(tables.sponsor_placements).toHaveLength(4);
+  });
+
+  it("makes no agreement for an item with no year-round benefits (Ambassador's sponsorship today)", async () => {
+    const { db, tables } = fakeDb({ tiers: [{ id: "tier-custom", slug: "custom", benefits: [] }], slots: SLOTS, orgs: [ORG] });
+    createAdminClientMock.mockReturnValue(db);
+
+    await call({});
+
+    expect(tables.sponsor_agreements).toHaveLength(0);
+    expect(raiseAlertMock).not.toHaveBeenCalled();
+  });
+
+  it("makes a live agreement for a booth that carries logos, like any item", async () => {
+    const { db, tables } = fakeDb({ tiers: [{ id: "tier-custom", slug: "custom", benefits: [] }], slots: SLOTS, orgs: [ORG] });
+    createAdminClientMock.mockReturnValue(db);
+
+    await call({ benefits: [{ key: "logo_partners_page", label: "Partners", config: {} }] }, "booth-104");
+
+    expect(tables.sponsor_agreements).toMatchObject([{ status: "active", tier_id: "tier-custom" }]);
+    expect(tables.sponsor_placements.map((p) => p.slot_id)).toEqual(["slot-partners"]);
   });
 
   it("raises it for a person, never silently, when the tier is missing", async () => {

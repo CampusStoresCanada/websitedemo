@@ -10,7 +10,10 @@ import {
   settlePaidInvoiceMembership,
 } from "../membership/renewal-activation";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
-import { createSponsorAgreementFromSponsorshipPurchase } from "../sponsorship/sponsorship-agreement";
+import {
+  createSponsorAgreementFromItemPurchase,
+  itemYearRoundBenefits,
+} from "../sponsorship/sponsorship-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import {
   triggerConferenceRegistrationConfirmation,
@@ -671,9 +674,12 @@ export async function fulfilConferenceOrder(
     // the admin sponsorship queue instead of relying on someone noticing
     // the sale. An order can contain more than one booth (an org can hold
     // multiple), so every booth line needs its own call, not just the first.
+    // A booth that carries its own year-round benefits gets its agreement
+    // below, live, like any item; the tier draft is only for booths without.
     const boothItems = (orderItems ?? [])
       .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
-      .filter((offer) => offer?.kind === "booth");
+      .filter((offer) => offer?.kind === "booth")
+      .filter((offer) => itemYearRoundBenefits(offer?.attributes as Record<string, unknown> | null).length === 0);
     for (const boothItem of boothItems) {
       if (boothItem?.id && boothItem.price_cents != null) {
         await createSponsorAgreementFromBoothPurchase({
@@ -685,30 +691,31 @@ export async function fulfilConferenceOrder(
       }
     }
 
-    // A paid sponsorship line is the sponsor's agreement, live at once: the
-    // review happened when the item was published. Its own failure must not
-    // undo a payment already recorded, so it is raised for a person instead.
-    const sponsorshipItems = (orderItems ?? [])
+    // Any paid line whose item carries year-round benefits (a sponsorship, a
+    // booth with logos) is the buyer's agreement, live at once: the review
+    // happened when the item was published. Its own failure must not undo a
+    // payment already recorded, so it is raised for a person instead.
+    const yearRoundItems = (orderItems ?? [])
       .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
-      .filter((offer) => offer?.kind === "sponsorship");
-    for (const sponsorship of sponsorshipItems) {
-      if (!sponsorship?.id) continue;
+      .filter((offer) => itemYearRoundBenefits(offer?.attributes as Record<string, unknown> | null).length > 0);
+    for (const item of yearRoundItems) {
+      if (!item?.id) continue;
       try {
-        await createSponsorAgreementFromSponsorshipPurchase({
+        await createSponsorAgreementFromItemPurchase({
           organizationId: orgId,
           orderId,
-          sponsorshipEntityId: sponsorship.id,
-          sponsorshipName: sponsorship.name,
-          attributes: (sponsorship.attributes as Record<string, unknown> | null) ?? null,
+          itemEntityId: item.id,
+          itemName: item.name,
+          attributes: (item.attributes as Record<string, unknown> | null) ?? null,
         });
       } catch (err) {
         await raiseAlertIfNotOpen({
-          ruleKey: `sponsorship_agreement_failed:${orderId}:${sponsorship.id}`,
+          ruleKey: `sponsorship_agreement_failed:${orderId}:${item.id}`,
           severity: "critical",
-          message: `${sponsorship.name} was paid for (order ${orderId}) but its agreement could not be switched on: ${
+          message: `${item.name} was paid for (order ${orderId}) but its year-round benefits could not be switched on: ${
             err instanceof Error ? err.message : String(err)
           }`,
-          details: { organization_id: orgId, order_id: orderId, sponsorship_entity_id: sponsorship.id },
+          details: { organization_id: orgId, order_id: orderId, item_entity_id: item.id },
         });
       }
     }
