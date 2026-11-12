@@ -58,7 +58,7 @@ export function effectiveIncludes(entity: BuildEntity, byId: Map<string, BuildEn
 export function effectiveAttributes(
   entity: BuildEntity,
   byId: Map<string, BuildEntity>
-): Record<string, string | number | null> {
+): BuildEntity["attributes"] {
   const typeId = instanceTypeId(entity);
   const type = typeId ? byId.get(typeId) : undefined;
   if (!type) return entity.attributes;
@@ -161,4 +161,27 @@ export function wouldCycleIncludes(
     for (const next of adj.get(node) ?? []) stack.push(next);
   }
   return false;
+}
+
+/**
+ * Is this attribute a plain value the Build editor can show as a text field?
+ * Flags, lists and objects are not: the editor used to `String()` them, which
+ * stored `true` as "true" (Big Ideas Presentations, 2026-10) and a list as
+ * "[object Object]".
+ */
+export function isScalarAttribute(v: unknown): v is string | number {
+  return typeof v === "string" || typeof v === "number";
+}
+
+/**
+ * The attributes the editor does not show as fields and must carry through a
+ * save untouched: anything structured (direct_purchase_only, direct_purchase_org_ids,
+ * a sponsorship's benefits). Nulls are dropped, as the editor drops empty fields.
+ */
+export function structuredAttributes(attrs: BuildEntity["attributes"] | undefined): BuildEntity["attributes"] {
+  const out: BuildEntity["attributes"] = {};
+  for (const [k, v] of Object.entries(attrs ?? {})) {
+    if (v != null && !isScalarAttribute(v)) out[k] = v;
+  }
+  return out;
 }

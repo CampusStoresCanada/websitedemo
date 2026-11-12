@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   createEntity,
   deleteEntity,
@@ -22,7 +22,17 @@ import {
   kindLabel,
   type SuggestedField,
 } from "@/lib/conference/entity-kinds";
-import { effectiveAttributes, effectiveRefs, instanceTypeId, openQuestions } from "@/lib/conference/entity-graph";
+import {
+  effectiveAttributes,
+  effectiveRefs,
+  instanceTypeId,
+  isScalarAttribute,
+  openQuestions,
+  structuredAttributes,
+} from "@/lib/conference/entity-graph";
+import BenefitBuilder from "@/components/admin/sponsorships/BenefitBuilder";
+import { listBenefitReferenceOptions, type BenefitReferenceOptions } from "@/lib/actions/sponsorship";
+import type { BenefitConfig } from "@/lib/sponsorship/types";
 import { accessibleThings, offerGrants } from "@/lib/conference/entity-commerce";
 import { availability, priceTable } from "@/lib/conference/entity-pricing";
 import { colorForKind } from "@/lib/conference/schedule-colors";
@@ -688,8 +698,10 @@ function ThingForm({
       const fields = SUGGESTION_BY_KIND[editing.kind]?.fields ?? [];
       // Use effective attributes so instances show inherited values from their type.
       const attrs = effectiveAttributes(editing, byId);
+      // Structured values (flags, lists, a sponsorship's benefits) are not text
+      // fields: they ride through the save untouched (structuredAttributes).
       return Object.entries(attrs)
-        .filter(([k]) => !SYSTEM_ATTRS.includes(k))
+        .filter(([k, v]) => !SYSTEM_ATTRS.includes(k) && (v == null || isScalarAttribute(v)))
         .map(([k, v]) => {
           const f = fields.find((x) => x.key === k);
           return {
@@ -709,6 +721,23 @@ function ThingForm({
     }
     return [];
   });
+  // A sponsorship carries its own benefit list, picked from the registry with
+  // the same builder tiers use. Copied onto the agreement when it is paid for.
+  const [benefits, setBenefits] = useState<BenefitConfig[]>(() =>
+    Array.isArray(editing?.attributes.benefits) ? (editing!.attributes.benefits as unknown as BenefitConfig[]) : []
+  );
+  const [benefitRefs, setBenefitRefs] = useState<BenefitReferenceOptions | null>(null);
+  const isSponsorship = kind.trim().toLowerCase() === "sponsorship";
+  useEffect(() => {
+    if (!isSponsorship || benefitRefs) return;
+    let stopped = false;
+    void listBenefitReferenceOptions().then((res) => {
+      if (!stopped && res.success) setBenefitRefs(res.data);
+    });
+    return () => {
+      stopped = true;
+    };
+  }, [isSponsorship, benefitRefs]);
   const [isForSale, setIsForSale] = useState(editing?.isForSale ?? false);
   const [salesWindow, setSalesWindow] = useState<"member" | "vendor" | null>(editing?.salesWindow ?? null);
   const [qboItemId, setQboItemId] = useState<string | null>(editing?.qboItemId ?? null);
@@ -754,7 +783,7 @@ function ThingForm({
     // Apply-to-all: write properties + new connections to the TYPE so every
     // instance inherits them, leaving each instance's own customizations intact.
     if (editing && isInstance && applyToAll && proliferateTypeId && proliferateType) {
-      const typeAttributes: EntityAttributes = {};
+      const typeAttributes: EntityAttributes = structuredAttributes(proliferateType.attributes);
       for (const k of SYSTEM_ATTRS) {
         const v = proliferateType.attributes[k];
         if (v != null) typeAttributes[k] = v;
@@ -821,11 +850,15 @@ function ThingForm({
       return;
     }
 
-    const attributes: EntityAttributes = {};
+    const attributes: EntityAttributes = structuredAttributes(editing?.attributes);
     if (editing) for (const k of SYSTEM_ATTRS) if (editing.attributes[k] != null) attributes[k] = editing.attributes[k];
     for (const p of props) {
       if (!p.key.trim() || p.value === "") continue;
       attributes[p.key.trim()] = p.type === "number" ? Number(p.value) : p.value;
+    }
+    if (isSponsorship) {
+      if (benefits.length > 0) attributes.benefits = benefits as unknown as EntityAttributes[string];
+      else delete attributes.benefits;
     }
 
     const finalKind = kind.trim().toLowerCase();
@@ -965,6 +998,22 @@ function ThingForm({
             </label>
           )}
           {rsvpError && <p className="mt-1 text-[11px] text-red-600">{rsvpError}</p>}
+        </div>
+      )}
+
+      {isSponsorship && (
+        <div className="mt-3">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Benefits</span>
+            <span className="text-[10px] text-gray-400">copied onto the sponsor&apos;s agreement when it is paid for</span>
+          </div>
+          <div className="mt-1.5">
+            {benefitRefs ? (
+              <BenefitBuilder benefits={benefits} onChange={setBenefits} referenceOptions={benefitRefs} />
+            ) : (
+              <p className="text-xs text-gray-400">Loading benefits…</p>
+            )}
+          </div>
         </div>
       )}
 

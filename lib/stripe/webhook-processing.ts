@@ -10,6 +10,7 @@ import {
   settlePaidInvoiceMembership,
 } from "../membership/renewal-activation";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
+import { createSponsorAgreementFromSponsorshipPurchase } from "../sponsorship/sponsorship-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import {
   triggerConferenceRegistrationConfirmation,
@@ -622,7 +623,7 @@ export async function fulfilConferenceOrder(
   if (orgId) {
     const { data: orderItems } = await db
       .from("conference_order_items")
-      .select("unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
+      .select("unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents, attributes)")
       .eq("order_id", orderId)
       .not("offer_entity_id", "is", null);
     // unit_price_cents (not the catalog price_cents) is what was actually
@@ -680,6 +681,34 @@ export async function fulfilConferenceOrder(
           boothEntityId: boothItem.id,
           boothEntityName: boothItem.name,
           boothPriceCents: boothItem.price_cents,
+        });
+      }
+    }
+
+    // A paid sponsorship line is the sponsor's agreement, live at once: the
+    // review happened when the item was published. Its own failure must not
+    // undo a payment already recorded, so it is raised for a person instead.
+    const sponsorshipItems = (orderItems ?? [])
+      .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
+      .filter((offer) => offer?.kind === "sponsorship");
+    for (const sponsorship of sponsorshipItems) {
+      if (!sponsorship?.id) continue;
+      try {
+        await createSponsorAgreementFromSponsorshipPurchase({
+          organizationId: orgId,
+          orderId,
+          sponsorshipEntityId: sponsorship.id,
+          sponsorshipName: sponsorship.name,
+          attributes: (sponsorship.attributes as Record<string, unknown> | null) ?? null,
+        });
+      } catch (err) {
+        await raiseAlertIfNotOpen({
+          ruleKey: `sponsorship_agreement_failed:${orderId}:${sponsorship.id}`,
+          severity: "critical",
+          message: `${sponsorship.name} was paid for (order ${orderId}) but its agreement could not be switched on: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          details: { organization_id: orgId, order_id: orderId, sponsorship_entity_id: sponsorship.id },
         });
       }
     }

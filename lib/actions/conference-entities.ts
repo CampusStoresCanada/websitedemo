@@ -30,7 +30,20 @@ import {
  */
 
 export type EntityKind = string;
-export type EntityAttributes = Record<string, string | number | null>;
+/**
+ * Scalar detail is what the Build editor shows as editable properties. Some
+ * attributes are structured and are never typed in as text: flags such as
+ * direct_purchase_only, lists such as direct_purchase_org_ids, and a
+ * sponsorship's benefits. The type says so, because the stored rows do.
+ */
+export type EntityAttributeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | EntityAttributeValue[]
+  | { [key: string]: EntityAttributeValue };
+export type EntityAttributes = Record<string, EntityAttributeValue>;
 
 export type EntityRefView = {
   toEntityId: string;

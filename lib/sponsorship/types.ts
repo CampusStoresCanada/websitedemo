@@ -15,10 +15,13 @@ export const BENEFIT_KEYS = [
   // Reports
   "partner_report_access",
   "cancoll_report_access",
+  "post_show_report",
+  "member_market_report",
   // Circle
   "circle_partner_space",
   "circle_community_tag",
   "circle_ama_slots",
+  "circle_sponsored_post",
   // Conference
   "conference_exhibitor",
   "conference_offsite_host",
@@ -26,8 +29,10 @@ export const BENEFIT_KEYS = [
   "conference_speaking_slot",
   "conference_hot_products_care_package",
   "conference_hot_products_showcase",
+  "conference_lead_capture",
   // Email
   "email_broadcast_slots",
+  "email_brand_presence",
 ] as const;
 
 export type BenefitKey = (typeof BENEFIT_KEYS)[number];
@@ -43,7 +48,21 @@ export interface BenefitDefinition {
   hasReferenceId?: boolean;
   /** Whether this benefit has a quota count (e.g. ama_slots: 2) */
   hasCount?: boolean;
+  /**
+   * Whether the count is spread over the term ("up to 1 per quarter, at most
+   * 4"), not delivered whenever. The period lives in config.cadence.
+   */
+  hasCadence?: boolean;
+  /**
+   * The placement slot(s) an automatic benefit puts up, when they are not the
+   * slot with the benefit's own key (the convention that covers the logos).
+   */
+  slotKeys?: readonly string[];
 }
+
+/** How often a cadenced benefit falls due within its term. */
+export const BENEFIT_CADENCES = ["month", "quarter", "year"] as const;
+export type BenefitCadence = (typeof BENEFIT_CADENCES)[number];
 
 /** Canonical registry — used for UI display and provisioning logic */
 export const BENEFIT_REGISTRY: Record<BenefitKey, BenefitDefinition> = {
@@ -57,7 +76,9 @@ export const BENEFIT_REGISTRY: Record<BenefitKey, BenefitDefinition> = {
   circle_community_tag:     { key: "circle_community_tag",     label: "Circle — Community Partner Tag",    category: "circle",     provisioning: "triggered" },
   circle_ama_slots:         { key: "circle_ama_slots",         label: "Circle — AMA / Sponsored Events",   category: "circle",     provisioning: "manual",    hasCount: true },
   conference_exhibitor:     { key: "conference_exhibitor",     label: "Conference — Exhibitor Booth",      category: "conference", provisioning: "manual",    hasReferenceId: true },
-  conference_offsite_host:  { key: "conference_offsite_host",  label: "Conference — Offsite Event Host",   category: "conference", provisioning: "manual",    hasReferenceId: true },
+  // A placement: the sponsor named on the offsite event it references. Was
+  // "manual" until 2026-11, when nothing provisioned it; no tier used it.
+  conference_offsite_host:  { key: "conference_offsite_host",  label: "Conference — Offsite Event Host",   category: "conference", provisioning: "automatic", hasReferenceId: true, slotKeys: ["conference_offsite"] },
   conference_travel_host:   { key: "conference_travel_host",   label: "Conference — Member Travel Host",   category: "conference", provisioning: "manual",    hasReferenceId: true },
   conference_speaking_slot: { key: "conference_speaking_slot", label: "Conference — Speaking Slot",        category: "conference", provisioning: "manual",    hasReferenceId: true },
   // Both keys below keep their stored spelling ("hot_products") after the 2026-10-05
@@ -67,7 +88,24 @@ export const BENEFIT_REGISTRY: Record<BenefitKey, BenefitDefinition> = {
   conference_hot_products_care_package: { key: "conference_hot_products_care_package", label: "Conference — Conference in a Box", category: "conference", provisioning: "manual" },
   conference_hot_products_showcase:      { key: "conference_hot_products_showcase",      label: "Conference — Pre-Conference Online Showcase", category: "conference", provisioning: "manual" },
   email_broadcast_slots:    { key: "email_broadcast_slots",    label: "Email — Broadcast Slots",           category: "email",      provisioning: "manual",    hasCount: true },
+  // Added for sponsorships sold as their own item (Kivuto, 2026-11).
+  // Automatic = a placement put up for the term; triggered = a grant;
+  // manual = a deliverable somebody owes by a date.
+  email_brand_presence:     { key: "email_brand_presence",     label: "Email — Brand in CSC Communications", category: "email",    provisioning: "automatic", slotKeys: ["email_header", "email_footer"] },
+  circle_sponsored_post:    { key: "circle_sponsored_post",    label: "Circle — Sponsored Post from CSC",  category: "circle",     provisioning: "manual",    hasCount: true, hasCadence: true },
+  conference_lead_capture:  { key: "conference_lead_capture",  label: "Conference — Badge-Scan Leads",     category: "conference", provisioning: "triggered", hasReferenceId: true },
+  post_show_report:         { key: "post_show_report",         label: "Post-Show Report",                  category: "report",     provisioning: "manual",    hasReferenceId: true },
+  member_market_report:     { key: "member_market_report",     label: "Member Market Report",              category: "report",     provisioning: "manual" },
 };
+
+/**
+ * The slots an automatic benefit fills: its own declared slotKeys, else the
+ * slot that shares its key.
+ */
+export function benefitSlotKeys(key: string): readonly string[] {
+  const def = (BENEFIT_REGISTRY as Record<string, BenefitDefinition | undefined>)[key];
+  return def?.slotKeys ?? [key];
+}
 
 // ── Benefit config (stored in jsonb) ─────────────────────────────
 
@@ -76,6 +114,7 @@ export interface BenefitConfig {
   label: string;
   config: {
     count?: number;            // for slot-based benefits (ama_slots, broadcast_slots)
+    cadence?: BenefitCadence;  // for hasCadence benefits: count is "at most", spread one per period
     reference_id?: string;     // for conference-linked benefits
     [key: string]: unknown;
   };

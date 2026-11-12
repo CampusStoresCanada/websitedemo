@@ -55,6 +55,7 @@ import { getRenewalConfig, getProgramsConfig, resolveConferenceTier } from "../p
 // STRIPE_SECRET_KEY in test environments.
 import { getPartnershipRateCents, applyProration } from "@/lib/stripe/billing";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
+import { createSponsorAgreementFromSponsorshipPurchase } from "../sponsorship/sponsorship-agreement";
 import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
@@ -2560,6 +2561,18 @@ export async function devCompleteConferenceCheckout(params: {
           boothPriceCents: boothOffer.priceCents,
         });
       }
+    }
+
+    // Mirrors the webhook's sponsorship step: a paid sponsorship line is the
+    // sponsor's agreement, live at once.
+    for (const sponsorshipOffer of offerCart.rows.map((r) => r.offer).filter((o) => o.kind === "sponsorship")) {
+      await createSponsorAgreementFromSponsorshipPurchase({
+        organizationId: params.organizationId,
+        orderId: order.id,
+        sponsorshipEntityId: sponsorshipOffer.id,
+        sponsorshipName: sponsorshipOffer.name,
+        attributes: (sponsorshipOffer.attributes as Record<string, unknown> | null) ?? null,
+      });
     }
 
     // Cart consumed by the completed order.

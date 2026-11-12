@@ -1,6 +1,6 @@
 "use client";
 
-import { BENEFIT_REGISTRY, BENEFIT_KEYS } from "@/lib/sponsorship/types";
+import { BENEFIT_REGISTRY, BENEFIT_KEYS, BENEFIT_CADENCES } from "@/lib/sponsorship/types";
 import type { BenefitConfig, BenefitKey } from "@/lib/sponsorship/types";
 import type { BenefitReferenceOptions } from "@/lib/actions/sponsorship";
 
@@ -25,6 +25,8 @@ const REFERENCE_SOURCE: Partial<Record<BenefitKey, keyof BenefitReferenceOptions
   // table — that table is for site-wide events unrelated to a specific conference.
   conference_offsite_host:  "programItems",
   conference_speaking_slot: "programItems",
+  conference_lead_capture:  "conferenceInstances",
+  post_show_report:         "conferenceInstances",
 };
 
 interface BenefitBuilderProps {
@@ -44,6 +46,7 @@ export default function BenefitBuilder({ benefits, onChange, referenceOptions }:
         label: def.label,
         config: {
           ...(def.hasCount ? { count: 1 } : {}),
+          ...(def.hasCadence ? { cadence: "quarter" as const } : {}),
           ...(def.hasReferenceId ? { reference_id: "" } : {}),
         },
       };
@@ -102,7 +105,7 @@ export default function BenefitBuilder({ benefits, onChange, referenceOptions }:
                     <span className="ml-auto font-mono text-[10px] text-gray-400">{key}</span>
                   </label>
 
-                  {enabled && (def.hasCount || def.hasReferenceId) && (
+                  {enabled && (def.hasCount || def.hasCadence || def.hasReferenceId) && (
                     <div className="mt-2 ml-6 flex flex-wrap gap-3">
 
                       {def.hasCount && (
@@ -118,6 +121,21 @@ export default function BenefitBuilder({ benefits, onChange, referenceOptions }:
                             }
                             className="w-16 rounded border border-gray-300 px-2 py-0.5 text-xs"
                           />
+                        </label>
+                      )}
+
+                      {def.hasCadence && (
+                        <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                          <span>At most one per:</span>
+                          <select
+                            value={(benefit?.config?.cadence as string) ?? "quarter"}
+                            onChange={(e) => updateConfig(key, { cadence: e.target.value })}
+                            className="rounded border border-gray-300 px-2 py-0.5 text-xs bg-white"
+                          >
+                            {BENEFIT_CADENCES.map((c) => (
+                              <option key={c} value={c}>{c}</option>
+                            ))}
+                          </select>
                         </label>
                       )}
 

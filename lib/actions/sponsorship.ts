@@ -36,6 +36,7 @@ import {
   AGREEMENT_STATUS_TRANSITIONS,
   resolveAgreementBenefits,
 } from "@/lib/sponsorship/types";
+import { provisionAgreementPlacements } from "@/lib/sponsorship/provision";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -253,9 +254,14 @@ export async function transitionAgreementStatus(
     updated_at: new Date().toISOString(),
   };
 
-  // On activation: auto-provision placements from tier benefits, seeded with org data
+  // On activation: put up placements for the tier's benefits plus the
+  // agreement's own, seeded with org data.
   if (toStatus === "active") {
-    await _provisionTierPlacements(id, current.tier_id, current.organization_id, db);
+    try {
+      await provisionAgreementPlacements(db, id);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : "Could not put up placements." };
+    }
   }
 
   // On expiry/cancellation: deactivate all placements
@@ -279,49 +285,6 @@ export async function transitionAgreementStatus(
   revalidatePath("/partners");
   revalidatePath("/");
   return { success: true, data: data as SponsorAgreement };
-}
-
-/** Auto-create placements for all website/automatic benefit keys when an agreement activates.
- *  Seeds logo_url and link_url from the org's existing profile data so the admin
- *  doesn't have to re-enter information we already have. */
-async function _provisionTierPlacements(
-  agreementId: string,
-  tierId: string,
-  organizationId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any
-): Promise<void> {
-  const [tierRes, slotsRes, orgRes] = await Promise.all([
-    db.from("sponsor_tiers").select("benefits").eq("id", tierId).single(),
-    db.from("sponsor_placement_slots").select("id, key").eq("is_active", true),
-    db.from("organizations").select("logo_url, website").eq("id", organizationId).single(),
-  ]);
-
-  if (!tierRes.data) return;
-  const tier = tierRes.data;
-  const slots = slotsRes.data ?? [];
-  const org = orgRes.data ?? {};
-
-  const slotByKey = Object.fromEntries(slots.map((s: { id: string; key: string }) => [s.key, s.id]));
-
-  // Map benefit keys → slot keys (1:1 by convention where they share a key)
-  const benefitsToProvision = (tier.benefits as Array<{ key: string }>) ?? [];
-  const placements = benefitsToProvision
-    .filter((b) => slotByKey[b.key])
-    .map((b, i) => ({
-      agreement_id: agreementId,
-      slot_id: slotByKey[b.key],
-      display_order: i,
-      is_active: true,
-      // Pre-seed from org profile — admin can override per placement
-      logo_url: org.logo_url ?? null,
-      link_url: org.website ?? null,
-      config_json: {},
-    }));
-
-  if (placements.length > 0) {
-    await db.from("sponsor_placements").insert(placements);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────

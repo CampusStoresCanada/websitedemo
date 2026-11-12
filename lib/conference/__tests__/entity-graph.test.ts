@@ -118,3 +118,22 @@ describe("wouldCycleIncludes — graph safety", () => {
     expect(wouldCycleIncludes([{ from: "a", to: "b" }], "a", "c")).toBe(false);
   });
 });
+
+describe("structuredAttributes", () => {
+  it("carries flags, lists and objects through an editor save, and nothing scalar", async () => {
+    const { structuredAttributes } = await import("../entity-graph");
+    const attrs = {
+      capacity: 40,
+      room: "Vista Salon",
+      direct_purchase_only: true,
+      direct_purchase_org_ids: ["kivuto"],
+      benefits: [{ key: "sponsors_page", label: "S", config: {} }],
+      empty: null,
+    };
+    expect(structuredAttributes(attrs)).toEqual({
+      direct_purchase_only: true,
+      direct_purchase_org_ids: ["kivuto"],
+      benefits: [{ key: "sponsors_page", label: "S", config: {} }],
+    });
+  });
+});
