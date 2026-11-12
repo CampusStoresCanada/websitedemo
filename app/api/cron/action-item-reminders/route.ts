@@ -11,11 +11,26 @@
  *
  * Each reminder is only sent once (tracked by reminder_sent_at /
  * pre_meeting_reminder_sent_at). Items that are complete or deferred are skipped.
+ *
+ * First, it puts this quarter's sponsored Circle post on the checklist for
+ * each sponsor owed one (lib/sponsorship/post-reminders.ts). A sponsorship
+ * item's due-date reminder also emails the sponsor, so both sides hear.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { notifyActionItemAssignees } from "@/lib/board/action-notify";
+import { sendEmail } from "@/lib/email/send";
+import { resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import { getRenewalConfig } from "@/lib/policy/engine";
+import { getPlatformIdentity } from "@/lib/data";
+import {
+  membershipQuarterFor,
+  parseSponsorPostMarker,
+  sponsorPostReminderEmail,
+  syncSponsorPostActionItems,
+} from "@/lib/sponsorship/post-reminders";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +42,22 @@ export async function GET(req: NextRequest) {
 
   const db  = createAdminClient();
   const now = new Date();
+
+  // ── 0. This quarter's sponsored Circle posts ─────────────────────────────
+  // Its own failure must not stop every other reminder going out.
+  let sponsorPosts: { created: number; skipped: number } | { error: string };
+  try {
+    sponsorPosts = await syncSponsorPostActionItems(now.toISOString().slice(0, 10));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    sponsorPosts = { error: message };
+    await raiseAlertIfNotOpen({
+      ruleKey: "sponsor_post_sync_failed",
+      severity: "warning",
+      message: `Sponsored Circle posts could not be put on the checklist: ${message}`,
+      details: {},
+    });
+  }
 
   // ── 1. Read reminder-days setting ────────────────────────────────────────
   const { data: setting } = await db
@@ -45,7 +76,7 @@ export async function GET(req: NextRequest) {
   // ── 2. Find open items due in exactly N days (no reminder sent yet) ───────
   const { data: dueItems } = await db
     .from("board_action_items")
-    .select("id, title, description, due_date, complete_token, assignees, meeting_id")
+    .select("id, title, description, due_date, complete_token, assignees, meeting_id, source, source_excerpt")
     .in("status", ["open", "in_progress"])
     .eq("due_date", targetDateStr)
     .is("reminder_sent_at", null);
@@ -75,7 +106,7 @@ export async function GET(req: NextRequest) {
     if (isPreMeetingMonday) {
       const { data: openItems } = await db
         .from("board_action_items")
-        .select("id, title, description, due_date, complete_token, assignees, meeting_id")
+        .select("id, title, description, due_date, complete_token, assignees, meeting_id, source, source_excerpt")
         .in("status", ["open", "in_progress"])
         .is("pre_meeting_reminder_sent_at", null);
 
@@ -121,6 +152,10 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    if (item.source === "sponsorship") {
+      await remindSponsorOfPost(db, item.source_excerpt);
+    }
+
     await db
       .from("board_action_items")
       .update({ reminder_sent_at: now.toISOString() })
@@ -163,5 +198,45 @@ export async function GET(req: NextRequest) {
     targetDate:          targetDateStr,
     dueReminders:        dueResults.length,
     preMeetingReminders: preMeetingResults.length,
+    sponsorPosts,
   });
+}
+
+/**
+ * The sponsor's half of a sponsored-post reminder: their primary contact
+ * hears that this quarter's post hasn't gone up yet, and can reply with it.
+ * Never throws; a sponsor nobody can reach is raised for staff instead.
+ */
+async function remindSponsorOfPost(db: ReturnType<typeof createAdminClient>, marker: string | null) {
+  const parsed = parseSponsorPostMarker(marker);
+  if (!parsed) return;
+  try {
+    const { data: agreement } = await db
+      .from("sponsor_agreements")
+      .select("organization_id, status, organization:organizations(name)")
+      .eq("id", parsed.agreementId)
+      .maybeSingle();
+    if (!agreement || agreement.status !== "active") return;
+    const orgName = (agreement.organization as { name?: string } | null)?.name ?? "Sponsor";
+    const to = await resolveOrgPrimaryContactEmail(db, agreement.organization_id);
+    if (!to) {
+      await raiseAlertIfNotOpen({
+        ruleKey: `sponsor_post_no_contact:${parsed.agreementId}`,
+        severity: "warning",
+        message: `${orgName}'s sponsored Circle post reminder could not be emailed: no contact on file.`,
+        details: { agreement_id: parsed.agreementId, organization_id: agreement.organization_id },
+      });
+      return;
+    }
+    const { cycle_start_month_day } = await getRenewalConfig();
+    const email = sponsorPostReminderEmail({
+      orgName,
+      quarter: membershipQuarterFor(parsed.quarterStart, cycle_start_month_day),
+    });
+    // They are asked to reply with the post, so the reply must reach a person.
+    const { supportEmail } = await getPlatformIdentity();
+    await sendEmail({ to, subject: email.subject, html: email.html, replyTo: supportEmail || undefined });
+  } catch (err) {
+    console.error("[action-item-reminders] sponsor post email failed:", err);
+  }
 }
