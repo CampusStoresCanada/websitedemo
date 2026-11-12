@@ -25,6 +25,7 @@ let finalizedAt: number | null;
 let stripeStatus: string;
 let updates: Array<{ table: string; values: Record<string, unknown> }>;
 let originalRow: { qbo_invoice_id: string | null } | null;
+let conferenceOrder: { id: string } | null;
 let originalBalance: number;
 let sweepDone: string | null;
 let openInvoices: Array<{ id: string }>;
@@ -49,6 +50,7 @@ function builder(table: string) {
       if (table === "qbo_export_queue" && values.status === "processing") return { data: [queueRow], error: null };
       return { data: null, error: null };
     }
+    if (table === "conference_orders") return { data: conferenceOrder, error: null };
     if (table === "qbo_export_queue" && filters.invoice_id) return { data: originalRow, error: null };
     if (table === "qbo_export_queue") return { data: [{ id: queueRow.id }], error: null };
     if (table === "invoices" && filters.status) return { data: openInvoices, error: null };
@@ -138,6 +140,7 @@ beforeEach(() => {
   inserts = [];
   upserts = [];
   originalRow = null;
+  conferenceOrder = null;
   originalBalance = 0;
   sweepDone = "done";
   openInvoices = [];
@@ -230,6 +233,15 @@ describe("quickbooksExportRun, posting at issue", () => {
     invoice.status = "voided";
     await quickbooksExportRun();
     expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(queueUpdate()).toMatchObject({ status: "skipped" });
+  });
+
+  it("posts nothing at issue for a conference order invoiced at the desk; its receipt posts when paid", async () => {
+    invoice.type = "conference";
+    conferenceOrder = { id: "order-1" };
+    await quickbooksExportRun();
+    expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(createQBPayment).not.toHaveBeenCalled();
     expect(queueUpdate()).toMatchObject({ status: "skipped" });
   });
 

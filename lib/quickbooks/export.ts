@@ -461,6 +461,23 @@ async function processExportRow(
     return null;
   }
 
+  // A conference order invoiced at the desk posts once, when paid, as the
+  // per-line Sales Receipt fulfilConferenceOrder queues (conference tax per
+  // line). The paid event never reopens this row for it, so posting a
+  // one-line Invoice here at issue would book the sale twice and leave that
+  // Invoice open forever.
+  if (!row.qbo_invoice_id) {
+    const { data: order } = await db
+      .from("conference_orders")
+      .select("id")
+      .eq("invoice_id", invoice.id)
+      .maybeSingle();
+    if (order) {
+      await markSkipped(db, row, "Not posted: a conference order, recorded as a Sales Receipt when paid.");
+      return null;
+    }
+  }
+
   // The day each document is recorded on. An invoice carries the day Stripe
   // issued it; one issued before the rule, the day it posts. Anything on or
   // before the bookkeeper's closing date moves to the first day after it.
