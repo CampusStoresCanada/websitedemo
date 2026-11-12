@@ -72,6 +72,9 @@ export default function CartClient({
   const [warning, setWarning] = useState<string | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState<string | null>(null);
   const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
+  // Staff only, with the invoice: blank means the usual 30 days. Set when CSC
+  // agreed later terms (Kivuto, 2026-11: due January 1).
+  const [invoiceDueDate, setInvoiceDueDate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [assigningSlot, setAssigningSlot] = useState<{ cartItemId: string; index: number } | null>(null);
 
@@ -191,7 +194,9 @@ export default function CartClient({
         organizationId,
         successUrl,
         cancelUrl,
-        ...(paymentMethod === "invoice" ? { paymentMethod: "invoice" as const } : {}),
+        ...(paymentMethod === "invoice"
+          ? { paymentMethod: "invoice" as const, ...(invoiceDueDate ? { dueDate: invoiceDueDate } : {}) }
+          : {}),
       });
 
       if (!result.success) {
@@ -214,7 +219,9 @@ export default function CartClient({
         await refreshCart();
         dispatchConferenceCartUpdated(organizationId);
         setInvoiceUrl(result.data.checkoutUrl || null);
-        setStatus(`Invoice sent to ${organizationName}. Due in 30 days.`);
+        setStatus(
+          `Invoice sent to ${organizationName}. Due ${invoiceDueDate ? `on ${invoiceDueDate}` : "in 30 days"}.`
+        );
         return;
       }
 
@@ -427,6 +434,20 @@ export default function CartClient({
             >
               {isPending ? "Processing..." : `Invoice ${organizationName}`}
             </button>
+          ) : null}
+          {canInvoice ? (
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              Invoice due
+              <input
+                type="date"
+                value={invoiceDueDate}
+                onChange={(e) => setInvoiceDueDate(e.target.value)}
+                disabled={isPending}
+                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-800"
+                aria-label="Invoice due date, blank for 30 days"
+              />
+              {!invoiceDueDate && <span className="text-gray-400">30 days</span>}
+            </label>
           ) : null}
           <button
             onClick={handleClear}
