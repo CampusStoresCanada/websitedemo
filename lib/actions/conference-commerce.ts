@@ -58,6 +58,7 @@ import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-ag
 import {
   createSponsorAgreementFromItemPurchase,
   itemYearRoundBenefits,
+  settleSponsorAgreementsForRefund,
 } from "../sponsorship/sponsorship-agreement";
 import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
@@ -2363,6 +2364,12 @@ export async function requestConferenceRefund(
     // webhook will also fire and try to enqueue, but the unique constraint on
     // qbo_conference_refund_queue.stripe_refund_id makes the second insert a no-op.
     await enqueueQBConferenceRefund(orderId, stripeRefund.id, requestedRefundAmount);
+
+    // Same step the charge.refunded webhook runs; whichever lands first does it.
+    await settleSponsorAgreementsForRefund({
+      orderId,
+      fullRefund: alreadyRefunded + requestedRefundAmount >= order.total_cents,
+    });
 
     await logAuditEventSafe({
       action: "conference_refund_request",

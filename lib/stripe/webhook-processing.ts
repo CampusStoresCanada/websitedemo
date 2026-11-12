@@ -13,6 +13,7 @@ import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-ag
 import {
   createSponsorAgreementFromItemPurchase,
   itemYearRoundBenefits,
+  settleSponsorAgreementsForRefund,
 } from "../sponsorship/sponsorship-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import {
@@ -1122,6 +1123,19 @@ async function handleChargeRefunded(
       );
     }
 
+    // A fully refunded order takes down the sponsorship it bought.
+    const { data: refundedOrder } = await db
+      .from("conference_orders")
+      .select("status")
+      .eq("id", chargeMetadataOrderId)
+      .maybeSingle();
+    if (refundedOrder && ["refunded", "partially_refunded"].includes(refundedOrder.status)) {
+      await settleSponsorAgreementsForRefund({
+        orderId: chargeMetadataOrderId,
+        fullRefund: refundedOrder.status === "refunded",
+      });
+    }
+
     // Each Stripe Refund object carries its own incremental amount (unlike
     // charge.amount_refunded, which is the running cumulative total) — take
     // the most recent one as the refund this event is about. stripe_refund_id
@@ -1224,6 +1238,14 @@ async function processRefundUpdate(
       updated_at: new Date().toISOString(),
     })
     .eq("id", localInvoice.id);
+
+  // An invoiced conference order (a sponsorship billed with terms) carries its
+  // order on the invoice. A full refund takes down what the order bought.
+  const { data: invoiceMeta } = await db.from("invoices").select("metadata").eq("id", localInvoice.id).maybeSingle();
+  const invoicedOrderId = (invoiceMeta?.metadata as Record<string, unknown> | null)?.conference_order_id;
+  if (typeof invoicedOrderId === "string") {
+    await settleSponsorAgreementsForRefund({ orderId: invoicedOrderId, fullRefund: isFullRefund });
+  }
 
   // Same "latest refund object, fall back to a synthesized id" pattern as
   // handleChargeRefunded's conference path above — stripe_refund_id is the

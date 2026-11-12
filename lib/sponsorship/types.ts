@@ -313,6 +313,8 @@ export interface SponsorInSlot {
   organizationName: string;
   organizationSlug: string;
   logoUrl: string | null;
+  /** Where the logo links: the placement's link, if one was set. */
+  linkUrl: string | null;
   tier: ActiveSponsor["tier"];
 }
 
@@ -337,6 +339,7 @@ export function sponsorsInSlot(sponsors: ActiveSponsor[], slotKey: string): Spon
             organizationName: s.organizationName,
             organizationSlug: s.organizationSlug,
             logoUrl: p.logoUrl ?? s.organizationLogoUrl,
+            linkUrl: p.linkUrl ?? null,
             tier: s.tier,
           },
         }))

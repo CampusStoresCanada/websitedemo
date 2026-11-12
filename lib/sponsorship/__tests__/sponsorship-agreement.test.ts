@@ -29,7 +29,7 @@ vi.mock("../../membership/renewal-activation", async () => {
   };
 });
 
-import { createSponsorAgreementFromItemPurchase, sponsorshipTermEnd } from "../sponsorship-agreement";
+import { createSponsorAgreementFromItemPurchase, settleSponsorAgreementsForRefund, sponsorshipTermEnd } from "../sponsorship-agreement";
 import { provisionAgreementPlacements } from "../provision";
 import { sponsorsInSlot, type ActiveSponsor } from "../types";
 
@@ -53,10 +53,13 @@ function fakeDb(seed: { tiers?: Row[]; agreements?: Row[]; slots?: Row[]; orgs?:
   const from = (table: string) => {
     let rows = tables[table];
     let inserted: Row[] | null = null;
+    let patch: Row | null = null;
     const q: Record<string, unknown> = {};
     Object.assign(q, {
       select: () => q,
       eq: (c: string, v: unknown) => ((rows = rows.filter((r) => r[c] === v)), q),
+      in: (c: string, vals: unknown[]) => ((rows = rows.filter((r) => vals.includes(r[c]))), q),
+      update: (p: Row) => ((patch = p), q),
       like: (c: string, pat: string) => {
         const needle = pat.replaceAll("%", "");
         rows = rows.filter((r) => String(r[c] ?? "").includes(needle));
@@ -70,7 +73,10 @@ function fakeDb(seed: { tiers?: Row[]; agreements?: Row[]; slots?: Row[]; orgs?:
       },
       maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       single: async () => ({ data: (inserted ?? rows)[0] ?? null, error: null }),
-      then: (resolve: (v: unknown) => void) => resolve({ data: inserted ?? rows, error: null }),
+      then: (resolve: (v: unknown) => void) => {
+        if (patch) for (const r of rows) Object.assign(r, patch);
+        return resolve({ data: inserted ?? rows, error: null });
+      },
     });
     return q;
   };
@@ -294,5 +300,48 @@ describe("sponsorsInSlot", () => {
     expect(shown.map((s) => s.organizationName)).toEqual(["First", "Second"]);
     expect(shown[0].logoUrl).toBe("https://placement/logo");
     expect(shown[1].logoUrl).toBe("https://a/logo");
+  });
+});
+
+describe("a refund on an order that bought a sponsorship", () => {
+  const order = "order-9";
+  function seeded() {
+    return fakeDb({
+      agreements: [
+        { id: "ag-1", organization_id: "org-k", status: "active", notes: `Created live from a paid X (item i-1 / order ${order}).` },
+        { id: "ag-other", organization_id: "org-z", status: "active", notes: "Created live from a paid X (item i-1 / order order-99)." },
+      ],
+      placements: [
+        { id: "p1", agreement_id: "ag-1", is_active: true },
+        { id: "p2", agreement_id: "ag-other", is_active: true },
+      ],
+    });
+  }
+  beforeEach(() => raiseAlertMock.mockReset());
+
+  it("a full refund cancels that order's agreement and takes its logos down", async () => {
+    const { tables, db } = seeded();
+    createAdminClientMock.mockReturnValue(db);
+    await settleSponsorAgreementsForRefund({ orderId: order, fullRefund: true });
+    expect(tables.sponsor_agreements.find((a) => a.id === "ag-1")?.status).toBe("cancelled");
+    expect(tables.sponsor_placements.find((p) => p.id === "p1")?.is_active).toBe(false);
+    // order-99 is a different order: untouched (order-9 must not match order-99).
+    expect(tables.sponsor_agreements.find((a) => a.id === "ag-other")?.status).toBe("active");
+    expect(tables.sponsor_placements.find((p) => p.id === "p2")?.is_active).toBe(true);
+    expect(raiseAlertMock).not.toHaveBeenCalled();
+  });
+
+  it("a partial refund leaves it live and asks staff", async () => {
+    const { tables, db } = seeded();
+    createAdminClientMock.mockReturnValue(db);
+    await settleSponsorAgreementsForRefund({ orderId: order, fullRefund: false });
+    expect(tables.sponsor_agreements.find((a) => a.id === "ag-1")?.status).toBe("active");
+    expect(raiseAlertMock).toHaveBeenCalledWith(expect.objectContaining({ ruleKey: "sponsorship_partial_refund:ag-1" }));
+  });
+
+  it("never throws: a failure becomes an alert", async () => {
+    createAdminClientMock.mockReturnValue({ from: () => { throw new Error("db down"); } });
+    await expect(settleSponsorAgreementsForRefund({ orderId: order, fullRefund: true })).resolves.toBeUndefined();
+    expect(raiseAlertMock).toHaveBeenCalledWith(expect.objectContaining({ ruleKey: `sponsorship_refund_failed:${order}` }));
   });
 });

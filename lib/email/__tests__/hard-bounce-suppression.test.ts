@@ -33,6 +33,7 @@ vi.mock("resend", () => ({
   },
 }));
 vi.mock("../layout", () => ({ wrapEmailBody: async (html: string) => html }));
+vi.mock("@/lib/sponsorship/email-sponsors", () => ({ loadEmailSponsors: async () => [] }));
 vi.mock("@/lib/data", () => ({
   getPlatformIdentity: async () => ({ clientName: "CSC", clientDomain: "campusstores.ca" }),
 }));

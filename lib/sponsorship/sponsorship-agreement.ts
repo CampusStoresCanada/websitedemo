@@ -145,3 +145,74 @@ export async function createSponsorAgreementFromItemPurchase(params: {
 
   await provisionAgreementPlacements(db, agreement.id);
 }
+
+/**
+ * A refund on an order that bought year-round benefits.
+ *
+ * Fully refunded: the agreements that order created are cancelled and their
+ * placements come down, so the logos leave the site and the emails.
+ * Partly refunded: nothing changes, and staff get an alert to decide. A
+ * partially refunded order keeps every line item, so there is no telling from
+ * the order whether the refunded part was the sponsorship or the booth.
+ *
+ * Called from both refund paths (a card order's charge.refunded, a Stripe
+ * invoice's refund) and from the admin refund action. Re-runnable: an
+ * agreement already cancelled is left alone, and the alert is raised once.
+ *
+ * Never throws: the refund itself has already happened and its QuickBooks
+ * entry must still be queued, so a failure here is raised as an alert instead.
+ */
+export async function settleSponsorAgreementsForRefund(params: {
+  orderId: string;
+  fullRefund: boolean;
+}): Promise<void> {
+  try {
+    await settleAgreements(params);
+  } catch (err) {
+    await raiseAlertIfNotOpen({
+      ruleKey: `sponsorship_refund_failed:${params.orderId}`,
+      severity: "critical",
+      message:
+        `Order ${params.orderId} was refunded but its sponsorship could not be ended: ` +
+        `${err instanceof Error ? err.message : String(err)}. Cancel the agreement in Sponsorships.`,
+      details: { order_id: params.orderId, full_refund: params.fullRefund },
+    });
+  }
+}
+
+async function settleAgreements(params: { orderId: string; fullRefund: boolean }): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+  const { data: agreements, error } = await db
+    .from("sponsor_agreements")
+    .select("id, organization_id, status, organization:organizations(name)")
+    .like("notes", `%/ order ${params.orderId})%`)
+    .in("status", ["active", "draft"]);
+  if (error) throw new Error(`Could not look up agreements for refunded order ${params.orderId}: ${error.message}`);
+  if (!agreements?.length) return;
+
+  for (const agreement of agreements as Array<{ id: string; organization_id: string; organization?: { name?: string } }>) {
+    const orgName = agreement.organization?.name ?? "A sponsor";
+    if (!params.fullRefund) {
+      await raiseAlertIfNotOpen({
+        ruleKey: `sponsorship_partial_refund:${agreement.id}`,
+        severity: "warning",
+        message:
+          `${orgName}'s order ${params.orderId} was partly refunded. Its sponsorship is still live: ` +
+          `cancel the agreement in Sponsorships if the refund was for the sponsorship.`,
+        details: { organization_id: agreement.organization_id, order_id: params.orderId, agreement_id: agreement.id },
+      });
+      continue;
+    }
+    const { error: cancelError } = await db
+      .from("sponsor_agreements")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", agreement.id);
+    if (cancelError) throw new Error(`Could not cancel agreement ${agreement.id}: ${cancelError.message}`);
+    const { error: placementError } = await db
+      .from("sponsor_placements")
+      .update({ is_active: false })
+      .eq("agreement_id", agreement.id);
+    if (placementError) throw new Error(`Could not take down placements for ${agreement.id}: ${placementError.message}`);
+  }
+}

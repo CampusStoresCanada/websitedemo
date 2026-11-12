@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { wrapEmailBody } from "./layout";
 import { getPlatformIdentity } from "@/lib/data";
+import { loadEmailSponsors } from "@/lib/sponsorship/email-sponsors";
 import { loadHardBouncedEmails, normalizeEmail } from "@/lib/comms/suppressions";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -128,6 +129,8 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
   const intercept = process.env.DEV_EMAIL_INTERCEPT;
   const fromAddress = await resolveFromAddress();
   const identity = await getPlatformIdentity();
+  // One sponsor lookup for the whole batch; only commercial mail shows them.
+  const sponsors = items.some((i) => i.manageUrl) ? await loadEmailSponsors() : [];
   const results: BatchSendResult[] = new Array(items.length);
 
   // One lookup for the whole batch, not one per chunk.
@@ -156,7 +159,7 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
         from: fromAddress,
         to: intercept ?? item.to,
         subject: intercept ? `[DEV → ${item.to}] ${item.subject}` : item.subject,
-        html: await wrapEmailBody(item.html, undefined, item.manageUrl, identity),
+        html: await wrapEmailBody(item.html, undefined, item.manageUrl, identity, sponsors),
         replyTo: item.replyTo,
       }))
     );

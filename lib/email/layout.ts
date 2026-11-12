@@ -14,6 +14,8 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { getPlatformIdentity } from "@/lib/data";
+import { loadEmailSponsors } from "@/lib/sponsorship/email-sponsors";
+import type { SponsorInSlot } from "@/lib/sponsorship/types";
 
 export const BRAND_NAVY = "#163D6D";
 export const BRAND_RED  = "#EE2A2E";
@@ -61,14 +63,20 @@ const ASSET_VERSION = "20260808";
  *                  emails in one loop (e.g. sendEmailBatch) so it's only
  *                  fetched once rather than per item. Self-fetches when
  *                  omitted.
+ * @param sponsors  Pre-fetched sponsors to thank, for the same reason.
+ *                  Only commercial mail (the ones with a manageUrl) carries
+ *                  the sponsor block: a receipt, a password reset or election
+ *                  mail never does. Self-fetches when omitted.
  */
 export async function wrapEmailBody(
   contentHtml: string,
   baseUrl?: string,
   manageUrl?: string,
-  identity?: Awaited<ReturnType<typeof getPlatformIdentity>>
+  identity?: Awaited<ReturnType<typeof getPlatformIdentity>>,
+  sponsors?: SponsorInSlot[]
 ): Promise<string> {
   const resolvedIdentity = identity ?? (await getPlatformIdentity());
+  const sponsorBlock = manageUrl ? renderSponsorBlock(sponsors ?? (await loadEmailSponsors())) : "";
   const base        = baseUrl ?? APP_URL;
   const bgUrl       = base ? `${base}/email/background.png?v=${ASSET_VERSION}` : "";
   // Wordmark/mark images are CSC's specific assets — a fresh deployment
@@ -154,6 +162,7 @@ export async function wrapEmailBody(
           <!-- ════ Footer ════ -->
           <tr>
             <td align="center" style="background-color:${FOOTER_BG};border:1px solid #E0DDD8;border-top:none;border-radius:0 0 8px 8px;padding:18px 32px 22px;text-align:center;">
+              ${sponsorBlock}
               ${markUrl
                 ? `<img src="${markUrl}" alt="" width="52" height="32"
                        style="display:block;margin:0 auto 8px;border:0;outline:none;text-decoration:none;width:52px;height:32px;" />`
@@ -182,4 +191,39 @@ export async function wrapEmailBody(
 
 </body>
 </html>`;
+}
+
+const SPONSOR_LOGO_HEIGHT = 32;
+const SPONSOR_LOGO_MAX_WIDTH = 120;
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * "And thanks to our sponsors", then their logos in one row, above the
+ * mailing address and unsubscribe link. Empty when there is nobody to thank,
+ * so a send with no active sponsors shows no heading over nothing.
+ *
+ * Who appears is decided by the sponsor's email_footer placement
+ * (lib/sponsorship/email-sponsors.ts), not here.
+ */
+export function renderSponsorBlock(sponsors: SponsorInSlot[]): string {
+  const withLogos = sponsors.filter((s) => !!s.logoUrl);
+  if (withLogos.length === 0) return "";
+  const logos = withLogos
+    .map((s) => {
+      const img = `<img src="${escapeAttr(s.logoUrl!)}" alt="${escapeAttr(s.organizationName)}" height="${SPONSOR_LOGO_HEIGHT}"
+                   style="display:inline-block;border:0;outline:none;text-decoration:none;height:${SPONSOR_LOGO_HEIGHT}px;width:auto;max-width:${SPONSOR_LOGO_MAX_WIDTH}px;vertical-align:middle;" />`;
+      const inner = s.linkUrl
+        ? `<a href="${escapeAttr(s.linkUrl)}" style="text-decoration:none;">${img}</a>`
+        : img;
+      return `<span style="display:inline-block;margin:6px 10px;">${inner}</span>`;
+    })
+    .join("");
+  return `<p style="margin:0 0 6px;font-family:${FONT};font-size:11px;font-weight:700;color:${TEXT_MUTED};letter-spacing:0.4px;text-transform:uppercase;">
+                And thanks to our sponsors
+              </p>
+              <div style="margin:0 0 14px;padding:0 0 14px;border-bottom:1px solid #E0DDD8;text-align:center;line-height:0;">${logos}</div>
+              `;
 }
