@@ -8,7 +8,6 @@ import {
   requireAuthenticated,
   requireSuperAdmin,
 } from "@/lib/auth/guards";
-import { findUserByEmail } from "@/lib/supabase/user-lookup";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 import {
@@ -35,12 +34,8 @@ import {
   accountInviteEmail,
   paidBoothWelcomeEmail,
 } from "@/lib/email/send";
-import {
-  ensureKnownPerson,
-  ensurePersonForUser,
-  linkUserToPerson,
-  upsertPersonContact,
-} from "@/lib/identity/lifecycle";
+import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle";
+import { attachLoginToContact } from "@/lib/identity/org-login";
 import { enqueueCircleSync } from "@/lib/circle/sync";
 import { getAccessGroupIds } from "@/lib/circle/config";
 import { markVoteExecuted, withdrawVoteForApplication } from "@/lib/board/vote-service";
@@ -954,40 +949,27 @@ export async function approveApplication(
     stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id, app.applicant_email, options?.invoiceDueDate);
   }
 
-  // 6. Create user account and send invite
+  // 6. Give the applicant their admin login, linked to the contact from step
+  // 2, and send the set-up code. An email that already has a login (from
+  // another org, say) is reused: it gets admin here and no surprise reset
+  // code, the same as a merge. This used to fail outright on an existing
+  // account and leave the applicant with no access at all.
   try {
-    const { data: authData, error: authError } = await db.auth.admin.createUser({
-      email: app.applicant_email!,
-      email_confirm: true,
-      user_metadata: {
-        display_name: app.applicant_name,
-        organization_id: org.id,
-      },
-    });
+    const attached = app.applicant_email
+      ? await attachLoginToContact({
+          orgId: org.id,
+          email: app.applicant_email,
+          role: "org_admin",
+          contactId: knownPerson.personId,
+          displayName: app.applicant_name,
+          newAccount: "silent",
+          ifAlreadyActive: "keep",
+        })
+      : null;
 
-    if (authError) {
-      console.error("User creation failed:", authError);
-    } else if (authData.user) {
-      // Link user to org as org_admin
-      await db.from("user_organizations").insert({
-        user_id: authData.user.id,
-        organization_id: org.id,
-        role: "org_admin",
-        status: "active",
-      });
-
-      const ensuredPerson = await ensurePersonForUser({
-        userId: authData.user.id,
-        organizationId: org.id,
-        fallbackEmail: app.applicant_email ?? null,
-      });
-      if (!ensuredPerson.personId && knownPerson.personId) {
-        await linkUserToPerson({
-          userId: authData.user.id,
-          personId: knownPerson.personId,
-        });
-      }
-
+    if (attached && !attached.success) {
+      console.error("Granting the applicant a login failed:", attached.error);
+    } else if (attached?.isNewAccount) {
       // Generate password reset link as invite
       const { data: resetData } = await db.auth.admin.generateLink({
         type: "recovery",
@@ -1374,54 +1356,24 @@ export async function mergeApplicationIntoOrganization(
   // if one already exists (common — the merged org's real admin likely
   // already has a login); otherwise create one, same as a normal approval.
   try {
-    const existingUser = app.applicant_email ? await findUserByEmail(db, app.applicant_email) : null;
-    let grantedUserId: string | null = existingUser?.id ?? null;
-
-    if (!grantedUserId && app.applicant_email) {
-      const { data: authData, error: authError } = await db.auth.admin.createUser({
-        email: app.applicant_email,
-        email_confirm: true,
-        user_metadata: {
-          display_name: app.applicant_name,
-          organization_id: targetOrgId,
-        },
-      });
-      if (authError) {
-        console.error("User creation failed during merge:", authError);
-      } else {
-        grantedUserId = authData.user?.id ?? null;
-      }
-    }
-
-    if (grantedUserId) {
-      const { data: existingLink } = await db
-        .from("user_organizations")
-        .select("user_id")
-        .eq("user_id", grantedUserId)
-        .eq("organization_id", targetOrgId)
-        .maybeSingle();
-
-      if (!existingLink) {
-        await db.from("user_organizations").insert({
-          user_id: grantedUserId,
-          organization_id: targetOrgId,
+    const attached = app.applicant_email
+      ? await attachLoginToContact({
+          orgId: targetOrgId,
+          email: app.applicant_email,
           role: "org_admin",
-          status: "active",
-        });
-      }
+          contactId: knownPerson.personId,
+          displayName: app.applicant_name,
+          newAccount: "silent",
+          ifAlreadyActive: "keep",
+        })
+      : null;
 
-      const ensuredPerson = await ensurePersonForUser({
-        userId: grantedUserId,
-        organizationId: targetOrgId,
-        fallbackEmail: app.applicant_email ?? null,
-      });
-      if (!ensuredPerson.personId && knownPerson.personId) {
-        await linkUserToPerson({ userId: grantedUserId, personId: knownPerson.personId });
-      }
-
+    if (attached && !attached.success) {
+      console.error("Granting access failed during merge:", attached.error);
+    } else if (attached) {
       // Only send an invite (set-password) link for a brand-new account —
       // an email that already had a login shouldn't get a surprise reset link.
-      if (!existingUser) {
+      if (attached.isNewAccount) {
         const { data: resetData } = await db.auth.admin.generateLink({
           type: "recovery",
           email: app.applicant_email!,

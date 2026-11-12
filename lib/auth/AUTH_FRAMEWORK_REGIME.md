@@ -29,7 +29,6 @@ All server-side auth decisions must go through `lib/auth/guards.ts`.
 - `app/benchmarking/admin/layout.tsx`
 - `app/benchmarking/page.tsx`
 - `app/benchmarking/survey/page.tsx`
-- `app/api/applications/route.ts`
 
 ### Server Actions
 - `lib/actions/policy.ts`

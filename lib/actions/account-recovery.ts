@@ -1,7 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ensurePersonForUser, ensureKnownPerson, linkUserToPerson } from "@/lib/identity/lifecycle";
+import { attachLoginToContact } from "@/lib/identity/org-login";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findUserByEmail } from "@/lib/supabase/user-lookup";
 import { hasNonMemberTag } from "@/lib/contacts/tags";
@@ -63,47 +63,27 @@ export async function initiateAccountRecovery(rawEmail: string): Promise<Recover
       return { outcome: "not_recognized" };
     }
 
-    const { data: created, error: createErr } = await adminClient.auth.admin.createUser({
+    // The login is for the contact we just recognised them as. Nothing is
+    // sent here; the code goes out through the normal reset below.
+    const attached = await attachLoginToContact({
+      orgId: contact.organization_id,
       email,
-      email_confirm: true,
-      user_metadata: { display_name: contact.name },
-    });
-    if (createErr || !created.user) {
-      console.error("[initiateAccountRecovery] createUser failed", createErr);
-      return { outcome: "error", error: "Could not set up your account. Please try again." };
-    }
-    const userId = created.user.id;
-
-    await adminClient
-      .from("profiles")
-      .upsert({ id: userId, global_role: "user" }, { onConflict: "id" });
-
-    const ensuredPerson = await ensurePersonForUser({
-      userId,
-      organizationId: contact.organization_id,
-      fallbackEmail: email,
-    });
-    if (!ensuredPerson.personId) {
-      const known = await ensureKnownPerson({
-        organizationId: contact.organization_id,
-        name: contact.name,
-        email,
-      });
-      if (known.personId) {
-        await linkUserToPerson({ userId, personId: known.personId });
-      }
-    }
-
-    const { error: orgErr } = await adminClient.from("user_organizations").insert({
-      user_id: userId,
-      organization_id: contact.organization_id,
       role: "member",
-      status: "active",
+      contactId: contact.id,
+      displayName: contact.name,
+      newAccount: "silent",
+      ifAlreadyActive: "keep",
     });
-    if (orgErr) {
-      console.error("[initiateAccountRecovery] user_organizations insert failed", orgErr);
-      return { outcome: "error", error: "Could not link your account to your organization." };
+    if (!attached.success || !attached.userId) {
+      console.error("[initiateAccountRecovery] could not set up the login", attached.error);
+      return {
+        outcome: "error",
+        error: attached.userId
+          ? "Could not link your account to your organization."
+          : "Could not set up your account. Please try again.",
+      };
     }
+    const userId = attached.userId;
 
     await logAuditEventSafe({
       action: "self_service_account_provisioned",

@@ -104,132 +104,43 @@ export async function provisionOrgLogin(params: {
       }
     }
 
-    // Check if a user with this email already exists in auth
-    const existingUser = await findUserByEmail(adminClient, normalizedEmail);
+    const attached = await attachLoginToContact({
+      orgId,
+      email: normalizedEmail,
+      role,
+      contactId: knownPersonId,
+      newAccount: "magic_link",
+      ifAlreadyActive: "refuse",
+    });
 
-    let userId: string;
+    if (!attached.success || !attached.userId) {
+      if (attached.membership === "already_active") {
+        return {
+          success: false,
+          outcome: "already_member",
+          error: "User is already an active member of this organization",
+        };
+      }
+      return { success: false, error: attached.error ?? "Failed to add user to organization" };
+    }
+
+    const userId = attached.userId;
+    const isNewAccount = attached.isNewAccount === true;
+
+    if (attached.membership === "reactivated") {
+      sendTransactional({
+        templateKey: "org_user_added_to_org",
+        to: normalizedEmail,
+        variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
+      }).catch(() => {});
+      return { success: true, outcome: "reactivated" };
+    }
+
     // The contact this login belongs to. Circle queue rows are keyed by
     // contact — entity_id used to be handed the auth user id instead, which
     // points at no contacts row at all, so every tool that joins on it (the
     // ops panel, the access-group reconcile) saw an orphan.
-    let circleContactId: string | null = null;
-
-    if (existingUser) {
-      userId = existingUser.id;
-      const ensuredPerson = await ensurePersonForUser({
-        userId,
-        organizationId: orgId,
-        fallbackEmail: normalizedEmail,
-      });
-      // Link whichever contact we resolved — the freshly-matched one (most
-      // trustworthy: it's this exact user's email in this exact org) if we
-      // found one, otherwise the one syncIdentity resolved/created above.
-      // Now that this is a real write (not the old no-op), it should run
-      // whenever we have a contact in hand, not just as an email-lookup fallback.
-      const linkPersonId = ensuredPerson.personId ?? knownPersonId;
-      circleContactId = linkPersonId ?? null;
-      if (linkPersonId) {
-        await linkUserToPerson({ userId, personId: linkPersonId });
-      }
-
-      // Check if they're already a member of this org
-      const { data: existingMembership } = await adminClient
-        .from("user_organizations")
-        .select("id, status")
-        .eq("user_id", userId)
-        .eq("organization_id", orgId)
-        .maybeSingle();
-
-      if (existingMembership) {
-        if (existingMembership.status === "active") {
-          return {
-            success: false,
-            outcome: "already_member",
-            error: "User is already an active member of this organization",
-          };
-        }
-        // Reactivate if inactive. ⛔ Clears any old end date too: a temp whose
-        // link expired and is invited back would otherwise be reactivated
-        // straight into a date already past, and still locked out.
-        const { error: updateErr } = await adminClient
-          .from("user_organizations")
-          .update({ status: "active", role, expires_at: null, updated_at: new Date().toISOString() })
-          .eq("id", existingMembership.id);
-
-        if (updateErr) {
-          console.error("[provisionOrgLogin] Reactivation failed:", updateErr);
-          return { success: false, error: "Failed to reactivate user membership" };
-        }
-
-        sendTransactional({
-          templateKey: "org_user_added_to_org",
-          to: normalizedEmail,
-          variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
-        }).catch(() => {});
-        return { success: true, outcome: "reactivated" };
-      }
-    } else {
-      // Create a new auth user via invite (sends magic-link email)
-      const { data: inviteData, error: inviteErr } =
-        await adminClient.auth.admin.inviteUserByEmail(normalizedEmail);
-
-      if (inviteErr || !inviteData.user) {
-        console.error("[provisionOrgLogin] Invite failed:", inviteErr);
-        return {
-          success: false,
-          error: inviteErr?.message ?? "Failed to send invite",
-        };
-      }
-
-      userId = inviteData.user.id;
-
-      // Create profile row if it doesn't exist
-      const { error: profileErr } = await adminClient
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-            global_role: "user",
-          },
-          { onConflict: "id" }
-        );
-
-      if (profileErr) {
-        console.error("[provisionOrgLogin] Profile creation failed:", profileErr);
-        // Non-fatal: the profile trigger may handle this
-      }
-
-      const ensuredPerson = await ensurePersonForUser({
-        userId,
-        organizationId: orgId,
-        fallbackEmail: normalizedEmail,
-      });
-      const linkPersonId = ensuredPerson.personId ?? knownPersonId;
-      circleContactId = linkPersonId ?? null;
-      if (linkPersonId) {
-        await linkUserToPerson({ userId, personId: linkPersonId });
-      }
-    }
-
-    // Create user_organizations row
-    const { error: orgErr } = await adminClient
-      .from("user_organizations")
-      .insert({
-        user_id: userId,
-        organization_id: orgId,
-        role,
-        status: "active",
-      });
-
-    if (orgErr) {
-      console.error("[provisionOrgLogin] user_organizations insert failed:", orgErr);
-      return {
-        success: false,
-        error: orgErr.message.includes("duplicate")
-          ? "User is already a member of this organization"
-          : "Failed to add user to organization",
-      };
-    }
+    const circleContactId = attached.linkedContactId ?? null;
 
     // ── Circle: link, then group, then tag ───────────────────────────────────
     // This used to queue the tag alone. add_tag and add_to_access_group both
@@ -284,7 +195,7 @@ export async function provisionOrgLogin(params: {
 
     return {
       success: true,
-      outcome: existingUser ? "added_existing_account" : "invited",
+      outcome: isNewAccount ? "invited" : "added_existing_account",
     };
   } catch (err) {
     console.error("[provisionOrgLogin] Unexpected error:", err);
@@ -293,4 +204,158 @@ export async function provisionOrgLogin(params: {
       error: err instanceof Error ? err.message : "Unknown error",
     };
   }
+}
+
+export interface AttachLoginResult {
+  success: boolean;
+  error?: string;
+  userId?: string;
+  /** True when this call created the auth account. */
+  isNewAccount?: boolean;
+  /** What happened to the membership. "already_active" with success false
+   *  means the caller asked to refuse an existing active member. */
+  membership?: "created" | "reactivated" | "already_active";
+  /** The contact now linked to this login (contacts.profile_id), if any. */
+  linkedContactId?: string | null;
+}
+
+/**
+ * Give a person a login at an organisation. THE one place this happens.
+ *
+ * Finds or creates the auth account for the email, links it to the contact
+ * the caller names (contacts.profile_id), and makes sure the membership
+ * exists with the role asked for. It sends nothing of its own except
+ * Supabase's invite when `newAccount` is "magic_link"; which email a person
+ * gets is the caller's business.
+ *
+ * ⛔ Why this exists: application approval, merge and account recovery each
+ * used to do these steps by hand, and each linked the contact only when the
+ * email lookup found nothing. That lookup always finds the contact the flow
+ * had just written, so the link was never made: 24 of 230 org admins had no
+ * linked contact on 2026-11-12. Commit 11c69c9b had fixed the same thing in
+ * provisionOrgLogin alone. Every path that gives someone a login goes through
+ * here so the link cannot be forgotten by a new one.
+ *
+ * The contact the caller names wins. The email lookup is only a fallback for
+ * a caller that has none, never a reason to link a different row: with two
+ * contacts on one address it would pick whichever came back first.
+ *
+ * Unguarded — every caller must authorize first.
+ */
+export async function attachLoginToContact(params: {
+  orgId: string;
+  email: string;
+  role: "member" | "org_admin";
+  /** The contact this login IS. */
+  contactId: string | null;
+  /** Display name for a brand-new account. */
+  displayName?: string | null;
+  /**
+   * How a brand-new account is created:
+   *  - "magic_link": Supabase emails its own invite (staff invites).
+   *  - "silent": nothing is sent; the caller delivers its own 6-digit code
+   *    (approval, recovery), because magic links break in Outlook Safe Links.
+   */
+  newAccount: "magic_link" | "silent";
+  /** An active membership already at this org: leave it as it is ("keep"),
+   *  or stop and report it ("refuse"). */
+  ifAlreadyActive: "keep" | "refuse";
+}): Promise<AttachLoginResult> {
+  const adminClient = createAdminClient();
+  const email = params.email.trim().toLowerCase();
+  if (!email) return { success: false, error: "An email address is required" };
+
+  // 1. The account.
+  let userId: string;
+  let isNewAccount = false;
+  const existingUser = await findUserByEmail(adminClient, email);
+  if (existingUser) {
+    userId = existingUser.id;
+  } else if (params.newAccount === "magic_link") {
+    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email);
+    if (error || !data.user) {
+      console.error("[attachLoginToContact] Invite failed:", error);
+      return { success: false, error: error?.message ?? "Failed to send invite" };
+    }
+    userId = data.user.id;
+    isNewAccount = true;
+  } else {
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email,
+      email_confirm: true,
+      user_metadata: params.displayName ? { display_name: params.displayName } : undefined,
+    });
+    if (error || !data.user) {
+      console.error("[attachLoginToContact] createUser failed:", error);
+      return { success: false, error: error?.message ?? "Could not create the account" };
+    }
+    userId = data.user.id;
+    isNewAccount = true;
+  }
+
+  if (isNewAccount) {
+    const { error: profileErr } = await adminClient
+      .from("profiles")
+      .upsert({ id: userId, global_role: "user" }, { onConflict: "id" });
+    // Non-fatal: the profile trigger may handle this.
+    if (profileErr) console.error("[attachLoginToContact] Profile creation failed:", profileErr);
+  }
+
+  // 2. The link: this login IS this contact.
+  const linkedContactId =
+    params.contactId ??
+    (await ensurePersonForUser({ userId, organizationId: params.orgId, fallbackEmail: email })).personId;
+  if (linkedContactId) {
+    await linkUserToPerson({ userId, personId: linkedContactId });
+  }
+
+  // 3. The membership.
+  const { data: membership } = await adminClient
+    .from("user_organizations")
+    .select("id, status")
+    .eq("user_id", userId)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (membership?.status === "active") {
+    return params.ifAlreadyActive === "refuse"
+      ? {
+          success: false,
+          error: "User is already an active member of this organization",
+          userId,
+          isNewAccount,
+          membership: "already_active",
+          linkedContactId,
+        }
+      : { success: true, userId, isNewAccount, membership: "already_active", linkedContactId };
+  }
+
+  if (membership) {
+    // ⛔ Clears any old end date too: a temp whose link expired and is invited
+    // back would otherwise be reactivated straight into a date already past,
+    // and still locked out.
+    const { error } = await adminClient
+      .from("user_organizations")
+      .update({ status: "active", role: params.role, expires_at: null, updated_at: new Date().toISOString() })
+      .eq("id", membership.id);
+    if (error) {
+      console.error("[attachLoginToContact] Reactivation failed:", error);
+      return { success: false, error: "Failed to reactivate user membership" };
+    }
+    return { success: true, userId, isNewAccount, membership: "reactivated", linkedContactId };
+  }
+
+  const { error: insertErr } = await adminClient
+    .from("user_organizations")
+    .insert({ user_id: userId, organization_id: params.orgId, role: params.role, status: "active" });
+  if (insertErr) {
+    console.error("[attachLoginToContact] user_organizations insert failed:", insertErr);
+    return {
+      success: false,
+      error: insertErr.message.includes("duplicate")
+        ? "User is already a member of this organization"
+        : "Failed to add user to organization",
+    };
+  }
+  return { success: true, userId, isNewAccount, membership: "created", linkedContactId };
 }

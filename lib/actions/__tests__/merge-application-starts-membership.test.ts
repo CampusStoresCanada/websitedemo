@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
   applicationApprovedEmail: vi.fn(),
   mirrorFieldsToMembership: vi.fn(),
+  attachLoginToContact: vi.fn(),
   orgUpdates: [] as Record<string, unknown>[],
 }));
 
@@ -78,6 +79,7 @@ vi.mock("@/lib/identity/lifecycle", () => ({
   ensurePersonForUser: vi.fn(async () => ({ personId: "person-ken" })),
   linkUserToPerson: vi.fn(),
 }));
+vi.mock("@/lib/identity/org-login", () => ({ attachLoginToContact: mocks.attachLoginToContact }));
 vi.mock("@/lib/circle/sync", () => ({ enqueueCircleSync: vi.fn() }));
 vi.mock("@/lib/circle/config", () => ({ getAccessGroupIds: vi.fn() }));
 vi.mock("@/lib/board/vote-service", () => ({
@@ -94,7 +96,8 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 // time without a key.
 vi.mock("@/lib/stripe/client", () => ({ stripe: {}, isTestMode: true }));
 
-import { mergeApplicationIntoOrganization } from "../applications";
+import { approveApplication, mergeApplicationIntoOrganization } from "../applications";
+import { requireAdmin } from "@/lib/auth/guards";
 
 const APP = {
   id: "app-1",
@@ -164,6 +167,14 @@ beforeEach(() => {
     hostedInvoiceUrl: "https://invoice.stripe.com/i/acct_1/live_abc?s=ap",
   });
   mocks.applicationApprovedEmail.mockResolvedValue({ subject: "Approved", html: "<p/>" });
+  // Ken already has a login: the merge reuses it and sends no set-up code.
+  mocks.attachLoginToContact.mockResolvedValue({
+    success: true,
+    userId: "user-ken",
+    isNewAccount: false,
+    membership: "created",
+    linkedContactId: "person-ken",
+  });
 });
 
 describe("mergeApplicationIntoOrganization", () => {
@@ -218,6 +229,22 @@ describe("mergeApplicationIntoOrganization", () => {
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
+  it("gives the applicant their login through the shared step, linked to their contact", async () => {
+    mocks.createAdminClient.mockReturnValue(mockDb({ membership_status: "active", type: "Member" }));
+
+    await mergeApplicationIntoOrganization("app-1", "org-rrc");
+
+    expect(mocks.attachLoginToContact).toHaveBeenCalledWith({
+      orgId: "org-rrc",
+      email: "khansen2@rrc.ca",
+      role: "org_admin",
+      contactId: "person-ken",
+      displayName: "Ken Hansen",
+      newAccount: "silent",
+      ifAlreadyActive: "keep",
+    });
+  });
+
   it("stops before invoicing if the membership cannot be started", async () => {
     mocks.createAdminClient.mockReturnValue(mockDb({ membership_status: null, type: "Non-Member" }));
     mocks.transitionMembershipState.mockResolvedValueOnce({ success: false, error: "boom" });
@@ -227,5 +254,53 @@ describe("mergeApplicationIntoOrganization", () => {
     expect(result.success).toBe(false);
     expect(mocks.createProgramInvoice).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("approveApplication", () => {
+  function approvalDb() {
+    vi.mocked(requireAdmin).mockResolvedValue({ ok: true, ctx: { userId: "admin-1" } } as never);
+    const db = mockDb({ membership_status: null, type: "Member" });
+    db.auth.admin.generateLink = vi.fn(async () => ({
+      data: { properties: { email_otp: "123456" } },
+      error: null,
+    }));
+    mocks.createAdminClient.mockReturnValue(db);
+    return db;
+  }
+
+  it("gives the new admin a login linked to the contact the approval wrote, and sends the code", async () => {
+    // Sock Rocket, RAINS, Kroeger and every approval since 2026-08-18 were
+    // left with no link: the old hand-rolled step skipped it whenever the
+    // email lookup found the contact, which it always did.
+    const db = approvalDb();
+    mocks.attachLoginToContact.mockResolvedValue({
+      success: true,
+      userId: "user-new",
+      isNewAccount: true,
+      membership: "created",
+      linkedContactId: "person-ken",
+    });
+
+    await approveApplication("app-1", { confirmDuplicates: true });
+
+    expect(mocks.attachLoginToContact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "khansen2@rrc.ca",
+        role: "org_admin",
+        contactId: "person-ken",
+        newAccount: "silent",
+      })
+    );
+    expect(db.auth.admin.generateLink).toHaveBeenCalledWith({ type: "recovery", email: "khansen2@rrc.ca" });
+  });
+
+  it("reuses an existing login without sending a surprise reset code", async () => {
+    const db = approvalDb();
+
+    await approveApplication("app-1", { confirmDuplicates: true });
+
+    expect(mocks.attachLoginToContact).toHaveBeenCalled();
+    expect(db.auth.admin.generateLink).not.toHaveBeenCalled();
   });
 });
