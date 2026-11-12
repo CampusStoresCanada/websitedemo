@@ -10,7 +10,7 @@ import {
 import { stripe } from "@/lib/stripe/client";
 import { resolveConferenceOrderTaxRates } from "@/lib/stripe/tax";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ensureStripeCustomer, finalizeAndSendInvoice } from "@/lib/stripe/billing";
+import { ensureStripeCustomer, finalizeAndSendInvoice, stripeDueTerms } from "@/lib/stripe/billing";
 import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 // Relative imports: these pure modules are pulled in unmocked by vitest, where
@@ -102,6 +102,11 @@ interface CheckoutInput {
    * Stripe object differs.
    */
   paymentMethod?: "card" | "invoice";
+  /**
+   * With "invoice" only: a due date agreed with the company (YYYY-MM-DD), in
+   * place of the usual 30 days. Desk staff only, like the invoice itself.
+   */
+  dueDate?: string;
 }
 
 /**
@@ -1826,7 +1831,8 @@ export async function createConferenceCheckout(
       const stripeInvoice = await stripe.invoices.create({
         customer: stripeCustomerId,
         collection_method: "send_invoice",
-        days_until_due: 30,
+        // 30 days, or the date CSC agreed with this company (Kivuto, 2026-11).
+        ...stripeDueTerms(input.dueDate),
         currency: order.currency.toLowerCase(),
         // ⛔ conference_order_id is what invoice.paid routes on. Without it the
         // money lands and nobody gets a seat.

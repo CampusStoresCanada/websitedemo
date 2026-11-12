@@ -95,6 +95,7 @@ vi.mock("@/lib/stripe/billing", () => ({
   applyProration: applyProrationMock,
   ensureStripeCustomer: ensureStripeCustomerMock,
   finalizeAndSendInvoice: finalizeAndSendInvoiceMock,
+  stripeDueTerms: (dueDate?: string) => (dueDate ? { due_date: 1798830000 } : { days_until_due: 30 }),
 }));
 vi.mock("../../conference/entity-pricing", () => ({
   canBuy: canBuyMock,
@@ -230,6 +231,22 @@ describe("invoicing at the desk — who may, and what it grants", () => {
 
   // ⛔ An unnamed seat has no badge. The walk-up the desk just invoiced is named
   // now, while they are standing there — not when their company pays.
+  it("sends the invoice on the terms agreed at the desk, or 30 days", async () => {
+    // Kivuto, 2026-11: invoiced in November, due January 1. Stripe takes the
+    // date only at creation, so it has to reach invoices.create.
+    createAdminClientMock.mockReturnValue(makeFakeDb(invoiceQueues(), ORDER_RPC).db);
+    await createConferenceCheckout({ ...INVOICE_INPUT, dueDate: "2027-01-01" });
+    expect(stripeInvoiceCreateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ due_date: 1798830000 })
+    );
+
+    createAdminClientMock.mockReturnValue(makeFakeDb(invoiceQueues(), ORDER_RPC).db);
+    await createConferenceCheckout(INVOICE_INPUT);
+    expect(stripeInvoiceCreateMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ days_until_due: 30 })
+    );
+  });
+
   it("names the attendees when the invoice is sent", async () => {
     const { db } = makeFakeDb(invoiceQueues(), ORDER_RPC);
     createAdminClientMock.mockReturnValue(db);

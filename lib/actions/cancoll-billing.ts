@@ -23,7 +23,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
-import { ensureStripeCustomer, finalizeAndSendInvoice } from "@/lib/stripe/billing";
+import { ensureStripeCustomer, finalizeAndSendInvoice, stripeDueTerms } from "@/lib/stripe/billing";
 import { sendTransactional } from "@/lib/comms/send";
 import { formatMemberFacingDate } from "@/lib/comms/format";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -147,7 +147,7 @@ export async function issueCancollInvoice(params: {
     const created = await stripe.invoices.create({
       customer: stripeCustomerId,
       collection_method: "send_invoice",
-      days_until_due: 30,
+      ...stripeDueTerms(),
       currency: "cad",
       metadata: { org_id: cancoll.id, cancoll_conference_id: params.conferenceId },
     });

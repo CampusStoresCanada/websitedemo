@@ -11,6 +11,7 @@ import { sendTransactional } from "@/lib/comms/send";
 import { formatMemberFacingDate } from "@/lib/comms/format";
 import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
 import { formatCents } from "@/lib/utils";
+import { stripeAccountDay } from "@/lib/quickbooks/fiscal";
 import type {
   Invoice,
   PaymentMethod,
@@ -152,6 +153,30 @@ export async function getPartnershipRateCents(): Promise<number> {
 }
 
 /**
+ * When a sent invoice falls due: 30 days from when it goes out, or a date CSC
+ * agreed to instead (Kivuto, 2026-11: invoiced in November, due January 1,
+ * when their fiscal year opens).
+ *
+ * The one place an invoice's terms are set, for every invoice the site sends.
+ * Stripe takes the date only while the invoice is a draft, so it has to be
+ * chosen here, at creation. A date is due all that day, so it is pinned to
+ * the middle of that day in the Stripe account's timezone, which keeps the
+ * same calendar date wherever it is shown.
+ */
+export function stripeDueTerms(
+  dueDate?: string | null
+): { days_until_due: number } | { due_date: number } {
+  if (!dueDate) return { days_until_due: 30 };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    throw new Error(`Due date must be YYYY-MM-DD, got "${dueDate}".`);
+  }
+  if (dueDate <= stripeAccountDay(new Date())) {
+    throw new Error(`Due date ${dueDate} has to be after today.`);
+  }
+  return { due_date: Math.floor(Date.parse(`${dueDate}T19:00:00Z`) / 1000) };
+}
+
+/**
  * Create an invoice for an org, priced according to its membership
  * program (lib/policy/types.ts — MembershipProgramDef). Replaces what
  * used to be two separately-implemented functions
@@ -169,6 +194,8 @@ export async function createProgramInvoice(
     billingPeriodStart?: string;
     billingPeriodEnd?: string;
     policySetId?: string;
+    /** A due date CSC agreed to (YYYY-MM-DD); otherwise 30 days. See stripeDueTerms. */
+    dueDate?: string;
   }
 ): Promise<Invoice> {
   const db = createAdminClient();
@@ -260,7 +287,7 @@ export async function createProgramInvoice(
   const stripeInvoice = await stripe.invoices.create({
     customer: stripeCustomerId,
     collection_method: "send_invoice",
-    days_until_due: 30,
+    ...stripeDueTerms(options?.dueDate),
     currency: billing.currency.toLowerCase(),
     metadata: { org_id: orgId, invoice_type: program.invoiceType },
   });
@@ -369,6 +396,10 @@ export async function finalizeAndSendInvoice(
       status: "invoiced",
       invoice_pdf_url: finalized.invoice_pdf ?? null,
       hosted_invoice_url: finalized.hosted_invoice_url ?? null,
+      // The date Stripe fixed at finalization, from stripeDueTerms. Until
+      // 2026-11-12 nothing wrote it, so every invoice row had none: the issued
+      // email's "Due:" line was blank and QuickBooks got no due date.
+      due_date: finalized.due_date ? stripeAccountDay(new Date(finalized.due_date * 1000)) : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", invoiceId);

@@ -79,6 +79,9 @@ export default function DeskSellPanel({
   // ⛔ An invoice bills a company without anyone paying: staff approve it with
   // their PIN, so a customer holding the iPad cannot.
   const [approvingInvoice, setApprovingInvoice] = useState(false);
+  // Blank means the usual 30 days. Set only when CSC has agreed later terms
+  // with the company (Kivuto, 2026-11: due January 1).
+  const [invoiceDueDate, setInvoiceDueDate] = useState("");
 
   // Who a registration is for. Known when the desk sent a person; otherwise the
   // walk-up form below fills it — never by guessing from an email.
@@ -245,6 +248,7 @@ export default function DeskSellPanel({
       conferenceId,
       organizationId: orgId,
       paymentMethod: "invoice",
+      ...(invoiceDueDate ? { dueDate: invoiceDueDate } : {}),
       ...returnUrls(),
     });
     setBusy(false);
@@ -350,6 +354,17 @@ export default function DeskSellPanel({
                 >
                   {busy ? "…" : "Invoice the company instead"}
                 </button>
+                <label className="flex min-h-12 items-center gap-2 text-sm text-gray-600">
+                  Invoice due
+                  <input
+                    type="date"
+                    value={invoiceDueDate}
+                    onChange={(e) => setInvoiceDueDate(e.target.value)}
+                    className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                    aria-label="Invoice due date, blank for 30 days"
+                  />
+                  {!invoiceDueDate && <span className="text-gray-400">30 days</span>}
+                </label>
                 <button
                   type="button"
                   onClick={() => {

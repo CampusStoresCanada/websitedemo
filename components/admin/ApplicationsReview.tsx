@@ -91,6 +91,9 @@ export function ApplicationsReview({
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Per application: blank means the usual 30 days. Set only when CSC agreed
+  // later terms (Kivuto, 2026-11: dues due January 1).
+  const [invoiceDueDates, setInvoiceDueDates] = useState<Record<string, string>>({});
   const [duplicateWarning, setDuplicateWarning] = useState<{
     id: string;
     matches: DuplicateOrgMatch[];
@@ -134,7 +137,8 @@ export function ApplicationsReview({
     setError(null);
     setActionLoading(id);
 
-    const result = await approveApplication(id, { confirmDuplicates });
+    const invoiceDueDate = invoiceDueDates[id] || undefined;
+    const result = await approveApplication(id, { confirmDuplicates, invoiceDueDate });
 
     setActionLoading(null);
 
@@ -332,6 +336,10 @@ export function ApplicationsReview({
                           isFastTrackConfirming={fastTrackConfirmId === app.id}
                           isSuperAdmin={isSuperAdmin}
                           boardVote={voteSummaries[app.id] ?? null}
+                          invoiceDueDate={invoiceDueDates[app.id] ?? ""}
+                          onInvoiceDueDateChange={(v) =>
+                            setInvoiceDueDates((prev) => ({ ...prev, [app.id]: v }))
+                          }
                           onApprove={() => handleApprove(app.id)}
                           onConfirmApproveAnyway={() => handleApprove(app.id, true)}
                           onCancelDuplicateWarning={() => setDuplicateWarning(null)}
@@ -439,6 +447,8 @@ function ExpandedView({
   isFastTrackConfirming,
   isSuperAdmin,
   boardVote,
+  invoiceDueDate,
+  onInvoiceDueDateChange,
   onApprove,
   onConfirmApproveAnyway,
   onCancelDuplicateWarning,
@@ -465,6 +475,8 @@ function ExpandedView({
   isFastTrackConfirming: boolean;
   isSuperAdmin: boolean;
   boardVote: BoardVoteSummary | null;
+  invoiceDueDate: string;
+  onInvoiceDueDateChange: (v: string) => void;
   onApprove: () => void;
   onConfirmApproveAnyway: () => void;
   onCancelDuplicateWarning: () => void;
@@ -778,6 +790,18 @@ function ExpandedView({
               >
                 {isLoading ? "Approving\u2026" : "Approve"}
               </button>
+              <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                Invoice due
+                <input
+                  type="date"
+                  value={invoiceDueDate}
+                  onChange={(e) => onInvoiceDueDateChange(e.target.value)}
+                  disabled={isLoading}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                  aria-label="First invoice due date, blank for 30 days"
+                />
+                {!invoiceDueDate && <span className="text-gray-400">30 days</span>}
+              </label>
               <button
                 onClick={onStartReject}
                 disabled={isLoading}

@@ -23,6 +23,7 @@ import {
   createProgramInvoice,
   finalizeAndSendInvoice,
   setInvoicePayer,
+  stripeDueTerms,
 } from "@/lib/stripe/billing";
 import {
   sendEmail,
@@ -716,7 +717,11 @@ function revalidateApplicationSurfaces() {
 
 export async function approveApplication(
   applicationId: string,
-  options?: { confirmDuplicates?: boolean }
+  options?: {
+    confirmDuplicates?: boolean;
+    /** When the first invoice falls due, if CSC agreed later terms (YYYY-MM-DD). */
+    invoiceDueDate?: string;
+  }
 ): Promise<{ success: boolean; error?: string; duplicates?: DuplicateOrgMatch[] }> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -734,6 +739,16 @@ export async function approveApplication(
   if (!app) return { success: false, error: "Application not found" };
   if (app.status !== "pending_review") {
     return { success: false, error: `Cannot approve application in ${app.status} status` };
+  }
+
+  // A bad due date must stop the approval here. Later, the invoice step treats
+  // any failure as non-fatal and the org would be approved with no invoice.
+  if (options?.invoiceDueDate) {
+    try {
+      stripeDueTerms(options.invoiceDueDate);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : "Invalid due date" };
+    }
   }
 
   const appData = app.application_data as Record<string, unknown>;
@@ -936,7 +951,7 @@ export async function approveApplication(
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
   } else {
-    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id, app.applicant_email);
+    stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id, app.applicant_email, options?.invoiceDueDate);
   }
 
   // 6. Create user account and send invite
@@ -1038,7 +1053,11 @@ export async function approveApplication(
  * one. Returns the Stripe hosted URL, or "" if invoicing failed (non-fatal:
  * the approval email then points at /org/billing instead).
  */
-async function invoiceFirstMembershipPeriod(orgId: string, applicantEmail: string | null): Promise<string> {
+async function invoiceFirstMembershipPeriod(
+  orgId: string,
+  applicantEmail: string | null,
+  dueDate?: string
+): Promise<string> {
   try {
     // A brand-new org joining within the pre-renewal skip-stub window
     // isn't worth billing a small prorated stub for the dying cycle's
@@ -1055,8 +1074,8 @@ async function invoiceFirstMembershipPeriod(orgId: string, applicantEmail: strin
       : await computeNewExpiresAt(null);
 
     const invoiceOptions = withinSkipWindow
-      ? { billingPeriodStart, billingPeriodEnd }
-      : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now };
+      ? { billingPeriodStart, billingPeriodEnd, dueDate }
+      : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now, dueDate };
 
     const invoice = await createProgramInvoice(orgId, invoiceOptions);
 
