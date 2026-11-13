@@ -9,15 +9,11 @@ import { createProspectOrganization } from "@/lib/actions/prospect-organizations
 type Duplicate = { id: string; name: string; type: string | null; slug: string | null };
 
 /**
- * "Add a company" on Admin › Membership: a store or vendor we would like to
+ * "Add a company" on Admin › Prospects: a store or vendor we would like to
  * have. Creates the company and opens its page, where its people are added
  * with the toolkit's "Add a new contact" (tag them "Prospect (never joined)").
  */
-export default function AddProspectCompany({
-  prospects,
-}: {
-  prospects: Array<{ name: string; slug: string; type: string }>;
-}) {
+export default function AddProspectCompany() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -148,21 +144,6 @@ export default function AddProspectCompany({
             </div>
           )}
 
-          {prospects.length > 0 && (
-            <div className="border-t border-gray-100 pt-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Prospects so far</p>
-              <ul className="mt-1.5 space-y-1 text-sm">
-                {prospects.map((p) => (
-                  <li key={p.slug}>
-                    <Link href={`/org/${p.slug}`} className="text-[#163D6D] hover:underline">
-                      {p.name}
-                    </Link>
-                    <span className="text-gray-500"> · {p.type}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </Modal>
     </>

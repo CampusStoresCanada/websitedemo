@@ -15,6 +15,8 @@ export interface CallListContact {
 export interface CallListEntry {
   organizationId: string;
   organizationName: string;
+  /** For a link to the org's page; null if it has none. */
+  slug: string | null;
   orgType: string;
   province: string | null;
   amountCents: number;
@@ -72,13 +74,53 @@ export async function getRenewalCallList(
     .eq("assigned_to", profileId);
 
   const orgIds = (assignments ?? []).map((a) => a.organization_id);
+  return callListForOrgs(db, orgIds, renewalYear, { anyYear: false });
+}
+
+/**
+ * Every prospect (a store or vendor that has never joined) as one shared call
+ * list. The same rows and the same contact log as renewal calls; what differs
+ * is who is on it (all prospects, not one person's assignments) and that the
+ * history is every year's, because recruiting someone spans cycles.
+ */
+export async function getProspectCallList(
+  renewalYear: number
+): Promise<{ partners: RenewalCallList; members: RenewalCallList }> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("organizations")
+    .select("id, type")
+    .in("type", [ORG_TYPE.prospectivePartner, ORG_TYPE.prospectiveMember])
+    .is("archived_at", null);
+  const rows = (data ?? []) as Array<{ id: string; type: string }>;
+  const ids = (type: string) => rows.filter((r) => r.type === type).map((r) => r.id);
+  const [partners, members] = await Promise.all([
+    callListForOrgs(db, ids(ORG_TYPE.prospectivePartner), renewalYear, { anyYear: true }),
+    callListForOrgs(db, ids(ORG_TYPE.prospectiveMember), renewalYear, { anyYear: true }),
+  ]);
+  return { partners, members };
+}
+
+async function callListForOrgs(
+  db: ReturnType<typeof createAdminClient>,
+  orgIds: string[],
+  renewalYear: number,
+  opts: { anyYear: boolean }
+): Promise<RenewalCallList> {
   const empty: RenewalCallList = { renewalYear, entries: [], outstandingCount: 0, contactedCount: 0 };
   if (orgIds.length === 0) return empty;
+
+  let logQuery = db
+    .from("renewal_contact_log")
+    .select("id, organization_id, contacted_at, contacted_by, channel, outcome, note")
+    .in("organization_id", orgIds)
+    .order("contacted_at", { ascending: false });
+  if (!opts.anyYear) logQuery = logQuery.eq("renewal_year", renewalYear);
 
   const [orgsRes, contactsRes, logRes, chargesRes, expectedByOrg, boothHolders] = await Promise.all([
     db
       .from("organizations")
-      .select("id, name, type, province, renewal_notifications_paused_until, renewal_pause_reason")
+      .select("id, name, slug, type, province, renewal_notifications_paused_until, renewal_pause_reason")
       .in("id", orgIds),
     // Contact details are working details for the call. Ordering mirrors the
     // board report: the flagged primary first, then whoever has an email.
@@ -89,12 +131,7 @@ export async function getRenewalCallList(
       .is("archived_at", null)
       .order("is_primary", { ascending: false, nullsFirst: false })
       .order("created_at"),
-    db
-      .from("renewal_contact_log")
-      .select("id, organization_id, contacted_at, contacted_by, channel, outcome, note")
-      .eq("renewal_year", renewalYear)
-      .in("organization_id", orgIds)
-      .order("contacted_at", { ascending: false }),
+    logQuery,
     db
       .from("renewal_events")
       .select("organization_id")
@@ -145,6 +182,7 @@ export async function getRenewalCallList(
   const entries: CallListEntry[] = (orgsRes.data ?? []).map((o) => ({
     organizationId: o.id,
     organizationName: o.name,
+    slug: o.slug ?? null,
     orgType: o.type ?? "",
     province: o.province,
     amountCents: expectedByOrg.get(o.id) ?? 0,

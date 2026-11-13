@@ -8,6 +8,8 @@ export const CONTACT_OUTCOMES = [
   "no_response",
   "booking_booth",
   "not_exhibiting",
+  "joining",
+  "not_interested",
   "other",
 ] as const;
 
@@ -29,6 +31,8 @@ export const OUTCOME_LABEL: Record<ContactOutcome, string> = {
   no_response: "No response",
   booking_booth: "Says they'll book a booth",
   not_exhibiting: "Not exhibiting this year",
+  joining: "Interested in joining",
+  not_interested: "Not interested",
   other: "Other",
 };
 
@@ -53,6 +57,15 @@ export const BOOTH_OUTCOMES: ContactOutcome[] = [
   "booking_booth",
   "undecided",
   "not_exhibiting",
+  "no_response",
+  "other",
+];
+
+/** A prospect: a store or vendor that has never joined (app/admin/prospects). */
+export const PROSPECT_OUTCOMES: ContactOutcome[] = [
+  "joining",
+  "undecided",
+  "not_interested",
   "no_response",
   "other",
 ];
