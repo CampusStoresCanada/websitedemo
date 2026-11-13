@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { isProspectOrgType } from "@/lib/constants/org-types";
 import {
   getOrganizationProfile,
   type BenchmarkingWithOrg,
@@ -91,6 +92,25 @@ export async function getOrganizationForViewer(
   const raw = await getCachedOrgProfile(slug);
 
   if (!raw.organization) {
+    return {
+      organization: null,
+      contacts: [],
+      brandColors: [],
+      benchmarking: null,
+      allBenchmarking: [],
+      benchmarkingWithheldReason: null,
+    };
+  }
+
+  // ⛔ A prospect is for CSC staff only: its people were added by us and never
+  // agreed to be listed, and the field mask has no rule for a prospect type.
+  // Withheld here, not on the page, so every reader of this (the org page and
+  // the toolkit Export) gets the same answer.
+  if (
+    isProspectOrgType(raw.organization.type) &&
+    viewer.viewerLevel !== "admin" &&
+    viewer.viewerLevel !== "super_admin"
+  ) {
     return {
       organization: null,
       contacts: [],
