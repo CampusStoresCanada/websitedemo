@@ -1132,7 +1132,10 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
  * would have locked them out on December 12 for a bill that was not yet due.
  *
  * Only an unpaid invoice that buys a coverage period counts, so a conference
- * booth invoice on long terms never stretches anyone's dues grace.
+ * booth invoice on long terms never stretches anyone's dues grace. A
+ * conference invoice that carries the dues as its own line counts: that is
+ * how the dues are billed when they ride with a booth (Steve, 2026-11-13:
+ * one invoice for Kivuto, the standalone dues invoice voided).
  */
 export async function graceLocksAt(
   db: ReturnType<typeof createAdminClient>,
@@ -1141,23 +1144,49 @@ export async function graceLocksAt(
   graceDays: number
 ): Promise<Date> {
   const byClock = new Date(graceStart.getTime() + graceDays * 86_400_000);
-
-  const { data: owed } = await db
-    .from("invoices")
-    .select("due_date")
-    .eq("organization_id", orgId)
-    .eq("status", "invoiced")
-    .not("billing_period_end", "is", null)
-    .not("due_date", "is", null)
-    .order("due_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!owed?.due_date) return byClock;
+  const due = await owedDuesDueDate(db, orgId);
+  if (!due) return byClock;
   // Due on the date means payable all that day: grace ends when it is over.
-  const dayAfterDue = new Date(`${owed.due_date.slice(0, 10)}T00:00:00Z`);
+  const dayAfterDue = new Date(`${due.slice(0, 10)}T00:00:00Z`);
   dayAfterDue.setUTCDate(dayAfterDue.getUTCDate() + 1);
   return dayAfterDue > byClock ? dayAfterDue : byClock;
+}
+
+/**
+ * The latest due date among the org's unpaid invoices that bill its dues:
+ * a dues invoice (it buys a coverage period), or a conference invoice whose
+ * order includes the membership renewal line. Null when none is owed.
+ */
+export async function owedDuesDueDate(
+  db: ReturnType<typeof createAdminClient>,
+  orgId: string
+): Promise<string | null> {
+  const [{ data: dues }, { data: conference }] = await Promise.all([
+    db
+      .from("invoices")
+      .select("due_date")
+      .eq("organization_id", orgId)
+      .eq("status", "invoiced")
+      .not("billing_period_end", "is", null)
+      .not("due_date", "is", null)
+      .order("due_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db
+      .from("conference_orders")
+      .select("invoice:invoices!inner(due_date, status), items:conference_order_items!inner(offer:conference_entities!inner(kind))")
+      .eq("organization_id", orgId)
+      .eq("invoice.status", "invoiced")
+      .not("invoice.due_date", "is", null)
+      .eq("items.offer.kind", "membership_renewal"),
+  ]);
+
+  const dates = [
+    dues?.due_date ?? null,
+    ...((conference ?? []) as Array<{ invoice: { due_date: string | null } | null }>).map((o) => o.invoice?.due_date ?? null),
+  ].filter((d): d is string => Boolean(d));
+  if (dates.length === 0) return null;
+  return dates.sort().at(-1)!;
 }
 
 /** How many days ago was the last grace_reminder for this org/year? */

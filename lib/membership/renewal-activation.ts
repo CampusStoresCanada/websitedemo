@@ -7,6 +7,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { stripe } from "@/lib/stripe/client";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 // renewal/events and policy/engine have no existing mock anywhere, so they
 // must resolve for real (getRenewalConfig's own createAdminClient call uses
 // the "@/" alias internally, which the existing mocks in this suite already
@@ -179,6 +180,80 @@ export async function cyclesNeededFrom(
   return bridgeFrom(anchor, mustCoverThrough, cycleStartMonthDay).cycles;
 }
 
+/** Invoice types that bill dues: the ones a newer dues bill makes redundant. */
+export const DUES_INVOICE_TYPES = ["membership", "partnership"] as const;
+
+/**
+ * Void an org's open dues invoices (except `exceptInvoiceId`) in Stripe and
+ * here, because something else now bills or has paid those dues.
+ *
+ * Two callers: dues being paid (activateMembershipRenewal), and dues moved
+ * onto a combined conference invoice when a booth and the partnership are
+ * billed together (Steve, 2026-11-13: one invoice, the standalone voided).
+ *
+ * Dues invoices only. Until 2026-11-13 the payment path voided EVERY open
+ * invoice the org had, so paying dues would have voided an unrelated
+ * conference invoice still awaiting payment.
+ *
+ * QuickBooks: an invoice voided before it posts is skipped by the export
+ * worker. One that already posted stays open there, and nothing here can void
+ * it, so the bookkeeper gets an alert naming it.
+ */
+export async function voidOpenDuesInvoices(
+  db: ReturnType<typeof createAdminClient>,
+  organizationId: string,
+  opts: { exceptInvoiceId?: string | null; reason: string }
+): Promise<string[]> {
+  const { data: open } = await db
+    .from("invoices")
+    .select("id, status, stripe_invoice_id, total_cents")
+    .eq("organization_id", organizationId)
+    .in("type", [...DUES_INVOICE_TYPES])
+    .in("status", ["invoiced", "pending_settlement", "draft"])
+    .neq("id", opts.exceptInvoiceId ?? "00000000-0000-0000-0000-000000000000");
+
+  const voided: string[] = [];
+  for (const inv of open ?? []) {
+    await db
+      .from("invoices")
+      .update({ status: "voided", reminder_suppressed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", inv.id);
+    voided.push(inv.id);
+
+    if (inv.stripe_invoice_id) {
+      try {
+        const stripeInvoice = await stripe.invoices.retrieve(inv.stripe_invoice_id);
+        if (stripeInvoice.status === "open") {
+          await stripe.invoices.voidInvoice(inv.stripe_invoice_id);
+        } else if (stripeInvoice.status === "draft") {
+          await stripe.invoices.del(inv.stripe_invoice_id);
+        }
+      } catch (err) {
+        console.error(`[membership] failed to void Stripe invoice ${inv.stripe_invoice_id}:`, err);
+        // Non-fatal — local state is already voided.
+      }
+    }
+
+    const { data: posted } = await db
+      .from("qbo_export_queue")
+      .select("qbo_invoice_id")
+      .eq("invoice_id", inv.id)
+      .not("qbo_invoice_id", "is", null)
+      .maybeSingle();
+    if (posted?.qbo_invoice_id) {
+      await raiseAlertIfNotOpen({
+        ruleKey: `qbo_void_needed:${inv.id}`,
+        severity: "warning",
+        message:
+          `Invoice ${inv.id} ($${((inv.total_cents ?? 0) / 100).toFixed(2)}) was voided (${opts.reason}) ` +
+          `but is already in QuickBooks as invoice ${posted.qbo_invoice_id}. Void it in QuickBooks.`,
+        details: { invoice_id: inv.id, organization_id: organizationId, qbo_invoice_id: posted.qbo_invoice_id },
+      });
+    }
+  }
+  return voided;
+}
+
 export interface ActivateMembershipRenewalParams {
   organizationId: string;
   /** ISO date (YYYY-MM-DD) the new membership period ends. */
@@ -315,35 +390,12 @@ export async function activateMembershipRenewal(
     }
   }
 
-  // Void any other pending renewal invoice for this org so the cron doesn't
+  // Void any other pending dues invoice for this org so the cron doesn't
   // double-bill. Mirrors optOutOfRenewal() in lib/actions/renewal.ts.
-  const { data: pendingInvoices } = await db
-    .from("invoices")
-    .select("id, status, stripe_invoice_id")
-    .eq("organization_id", params.organizationId)
-    .in("status", ["invoiced", "pending_settlement", "draft"])
-    .neq("id", params.invoiceId ?? "00000000-0000-0000-0000-000000000000");
-
-  for (const inv of pendingInvoices ?? []) {
-    await db
-      .from("invoices")
-      .update({ status: "voided", updated_at: new Date().toISOString() })
-      .eq("id", inv.id);
-
-    if (inv.stripe_invoice_id) {
-      try {
-        const stripeInvoice = await stripe.invoices.retrieve(inv.stripe_invoice_id);
-        if (stripeInvoice.status === "open") {
-          await stripe.invoices.voidInvoice(inv.stripe_invoice_id);
-        } else if (stripeInvoice.status === "draft") {
-          await stripe.invoices.del(inv.stripe_invoice_id);
-        }
-      } catch (err) {
-        console.error(`[membership] failed to void Stripe invoice ${inv.stripe_invoice_id}:`, err);
-        // Non-fatal — local state is already voided.
-      }
-    }
-  }
+  await voidOpenDuesInvoices(db, params.organizationId, {
+    exceptInvoiceId: params.invoiceId ?? null,
+    reason: "dues paid",
+  });
 
   await recordRenewalEvent(
     db,

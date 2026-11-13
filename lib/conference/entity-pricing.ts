@@ -145,6 +145,22 @@ export function directPurchaseAllowed(
 }
 
 /**
+ * Does this offer name `organizationId` as a buyer outright?
+ *
+ * Narrower than directPurchaseAllowed, which also lets every partner through
+ * when no list is set. Only a name on the list means the offer was held for
+ * this org in particular (a booth kept for a sponsor), which is what earns it a
+ * place on that org's own page.
+ */
+export function namesBuyer(
+  attributes: Record<string, unknown> | null | undefined,
+  organizationId: string
+): boolean {
+  const ids = (attributes ?? {}).direct_purchase_org_ids;
+  return Array.isArray(ids) && ids.includes(organizationId);
+}
+
+/**
  * Is this offer sold only to named buyers rather than from the storefront?
  *
  * ⚠️ Reads a boolean, and the stored value has been the STRING "true" at least

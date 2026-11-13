@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { directPurchaseAllowed, isDirectPurchaseOnly } from "../entity-pricing";
+import { directPurchaseAllowed, isDirectPurchaseOnly, namesBuyer } from "../entity-pricing";
 
 /**
  * Who is allowed to buy an offer that never appears on the storefront.
@@ -80,5 +80,23 @@ describe("the for-sale flag is a boolean", () => {
   it("is false when absent", () => {
     expect(isDirectPurchaseOnly({})).toBe(false);
     expect(isDirectPurchaseOnly(null)).toBe(false);
+  });
+});
+
+/**
+ * A booth or sponsorship held for one sponsor shows on that sponsor's own
+ * page (Kivuto, 2026-11). Only an explicit name earns that: an offer open to
+ * every partner is not "held for" any of them.
+ */
+describe("namesBuyer", () => {
+  it("is true only for an org named on the list", () => {
+    const held = { direct_purchase_only: true, direct_purchase_org_ids: ["kivuto"] };
+    expect(namesBuyer(held, "kivuto")).toBe(true);
+    expect(namesBuyer(held, "someone-else")).toBe(false);
+  });
+
+  it("is false when no list names anyone, even though every partner may buy", () => {
+    expect(namesBuyer({ direct_purchase_only: true }, "kivuto")).toBe(false);
+    expect(namesBuyer(null, "kivuto")).toBe(false);
   });
 });

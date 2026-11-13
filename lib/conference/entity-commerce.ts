@@ -410,6 +410,8 @@ export function nonMemberDayPassToOffer(pass: NonMemberDayPass): ConferenceOffer
      * holds nothing else at the conference, which is the whole point of it.
      */
     standalone: true,
+    // A public day pass is never held for a named buyer.
+    heldForBuyer: false,
     accessSummary: pass.accessSummary,
     // Only the desk orders by dates, and the desk never sells a non-member day
     // pass (that is the public online purchase), so none are worked out here.

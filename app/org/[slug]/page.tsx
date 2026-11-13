@@ -5,6 +5,7 @@ import { recordAct } from "@/lib/signals/inbox";
 import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { graceLocksAt } from "@/lib/renewal/jobs";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import { loadSupportedSeats } from "@/lib/conference/bursary-access";
@@ -496,8 +497,11 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       // owns one. Once a registration gated by requires_ownership_of
       // becomes visible (the org now owns the prerequisite, per
       // listConferenceOffers), it belongs here regardless.
+      // Booths are bought on the floor plan, except one held for this org by
+      // name: the plan draws a held booth as unavailable, so this page is the
+      // only place its buyer (or staff shopping as them) can reach it.
       buyableExtras = (offersResult.success ? offersResult.data : []).filter(
-        (o) => o.eligible && !["booth", "membership_renewal"].includes(o.kind)
+        (o) => o.eligible && o.kind !== "membership_renewal" && (o.kind !== "booth" || o.heldForBuyer)
       );
 
       /**
@@ -510,8 +514,10 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
        * when somebody marks the next offer for sale without thinking about a
        * profile page they have never seen.
        */
+      // An offer held for this org by name passes too: naming the buyer is
+      // the deliberate act this guard is waiting for.
       if (!participatesInCurrent) {
-        buyableExtras = buyableExtras.filter((o) => o.standalone);
+        buyableExtras = buyableExtras.filter((o) => o.standalone || o.heldForBuyer);
       }
     }
   }
@@ -615,6 +621,15 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
   if (isCscAdminViewer || isOwnOrgAdmin) {
     const renewalConfig = await getRenewalConfig();
     graceDays = renewalConfig.grace_days;
+    // The banner counts grace_days from the start, but grace holds until the
+    // dues they owe fall due when CSC agreed later terms (Kivuto: Jan 1), so
+    // it would have warned "30 days" for a lockout two months away. Hand it
+    // the length the lockout job itself uses (graceLocksAt).
+    if (organization.membership_status === "grace" && organization.grace_period_started_at) {
+      const started = new Date(organization.grace_period_started_at);
+      const locks = await graceLocksAt(createAdminClient(), organization.id, started, graceDays);
+      graceDays = Math.round((locks.getTime() - started.getTime()) / 86_400_000);
+    }
     const maxReminderDay = Math.max(...renewalConfig.reminder_days);
     // No per-org expiry yet (never completed a renewal cycle) — count down to
     // the same shared cycle-start date the reminder cron falls back to

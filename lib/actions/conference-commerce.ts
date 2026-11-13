@@ -44,6 +44,7 @@ import {
   nextCycleStartOnOrAfter,
   cyclesNeededFrom,
   isWithinPreRenewalSkipWindow,
+  voidOpenDuesInvoices,
 } from "../membership/renewal-activation";
 // getRenewalConfig has no import-time side effects (createAdminClient is only
 // a function reference), so a relative import is safe here.
@@ -1988,6 +1989,29 @@ export async function createConferenceCheckout(
         .eq("id", order.id);
       if (holdError) {
         return { success: false, error: `Could not clear the reservation hold: ${holdError.message}` };
+      }
+
+      /**
+       * ⛔ ONE BILL FOR THE DUES. A booth needs paid coverage, so an org that
+       * has not paid its dues gets the membership-renewal line in this cart,
+       * and this invoice now bills those dues. The standalone dues invoice it
+       * was already sent (an approval with later terms, Revive & bill) would
+       * bill them a second time, so it is voided here, when the new bill goes
+       * out, not left for the payment to sort out (Steve, 2026-11-13: one
+       * invoice for Kivuto). Grace follows this invoice's due date instead
+       * (owedDuesDueDate in lib/renewal/jobs.ts).
+       */
+      const { data: duesLine } = await adminClient
+        .from("conference_order_items")
+        .select("id, offer:conference_entities!inner(kind)")
+        .eq("order_id", order.id)
+        .eq("offer.kind", MEMBERSHIP_RENEWAL_KIND)
+        .limit(1)
+        .maybeSingle();
+      if (duesLine) {
+        await voidOpenDuesInvoices(adminClient, input.organizationId, {
+          reason: `billed on conference invoice ${invoiceRow.id}`,
+        });
       }
       // ⚠️ finalizeAndSendInvoice writes the hosted URL onto the row rather than
       // returning it — read it back so the desk can show a QR to pay from.

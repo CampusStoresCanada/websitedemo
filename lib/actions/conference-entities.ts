@@ -6,7 +6,7 @@ import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements,
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
-import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, priceForTier } from "@/lib/conference/entity-pricing";
+import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, namesBuyer, priceForTier } from "@/lib/conference/entity-pricing";
 import { accessibleThings, admittedDates, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
@@ -424,6 +424,14 @@ export type ConferenceOffer = {
    */
   standalone: boolean;
   /**
+   * Held off the storefront and sold to this org by name
+   * (direct_purchase_only with this org in direct_purchase_org_ids): a booth
+   * kept for a sponsor, a sponsorship written for them. Naming the buyer is
+   * the deliberate act `standalone` asks for, so the org's own page shows it,
+   * booth or not (Kivuto, 2026-11: booth 2 and its sponsorship had no screen).
+   */
+  heldForBuyer: boolean;
+  /**
    * The dates this offer gets someone in — the check-in rule (admittedDates):
    * days it grants plus the day of every session and event it grants. The
    * desk orders what it offers by these: what adds a day this person lacks,
@@ -446,7 +454,7 @@ export async function listConferenceOffers(
   if (!auth.ok) return { success: false, error: "Not authorized for this organization." };
 
   const db = createAdminClient();
-  const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([
+  const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs, cartRes] = await Promise.all([
     db.from("organizations").select("id, type").eq("id", organizationId).maybeSingle(),
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
     db
@@ -460,6 +468,14 @@ export async function listConferenceOffers(
       .eq("conference_id", conferenceId)
       .eq("organization_id", organizationId),
     getProgramsConfig(),
+    // A prerequisite already in this org's cart counts as held, the same rule
+    // addOfferToCart applies, so what is shown and what can be bought agree.
+    db
+      .from("cart_items")
+      .select("offer_entity_id")
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId)
+      .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`),
   ]);
   if (entitiesRes.error) return { success: false, error: entitiesRes.error.message };
   if (refsRes.error) return { success: false, error: refsRes.error.message };
@@ -486,7 +502,10 @@ export async function listConferenceOffers(
     (refsRes.data ?? []).filter((r) => r.role === "instance_of").map((r) => [r.from_entity_id, r.to_entity_id])
   );
   const heldIdentityIds = expandWithInstanceOfParents(
-    (balancesRes.data ?? []).map((b) => b.entity_id).filter((id): id is string => Boolean(id)),
+    [
+      ...(balancesRes.data ?? []).map((b) => b.entity_id),
+      ...(cartRes.data ?? []).map((c) => c.offer_entity_id),
+    ].filter((id): id is string => Boolean(id)),
     instanceOfParentByChild
   );
 
@@ -556,6 +575,7 @@ export async function listConferenceOffers(
         standalone:
           offerRequiresOwnershipOfEntityIds(refs).length === 0 &&
           eligibleTiers(offer, byId).length > 0,
+        heldForBuyer: soldDirectly && namesBuyer(offer.attributes, organizationId),
       };
     })
     .sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.name.localeCompare(b.name));
