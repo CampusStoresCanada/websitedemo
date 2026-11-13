@@ -16,12 +16,15 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * ~15 call sites did not have to change. A "person id" is now a contact id.
  */
 
-function splitDisplayName(name: string | null | undefined): { firstName: string; lastName: string } {
-  const cleaned = (name ?? "").trim();
-  if (!cleaned) return { firstName: "Unknown", lastName: "User" };
-  const parts = cleaned.split(/\s+/);
-  if (parts.length === 1) return { firstName: parts[0], lastName: "User" };
-  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+/**
+ * "Mary Ann Smith" → Mary / Ann Smith; one word is a first name alone, the
+ * same rule updateField uses. This used to invent a last name of "User" (and
+ * "Unknown User" for no name), which badges and call lists then printed as
+ * if it were the person's surname.
+ */
+function splitDisplayName(name: string | null | undefined): { firstName: string | null; lastName: string | null } {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  return { firstName: parts[0] ?? null, lastName: parts.slice(1).join(" ") || null };
 }
 
 /** Only overwrite a stored value when the caller actually supplied one.
