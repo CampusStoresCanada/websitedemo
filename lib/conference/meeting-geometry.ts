@@ -70,6 +70,19 @@ function deriveMeetingCountFromWindow(
   return Math.max(0, Math.floor((totalWindowMinutes + bufferMinutes) / slotSpanMinutes));
 }
 
+/**
+ * How many meetings fit in one scheduled block on a meeting day, at that day's
+ * cadence. Same arithmetic the scheduler uses to cut slots, so the schedule's
+ * "5 × 15-min meetings" can't disagree with the slots that get generated.
+ */
+export function meetingsInBlock(
+  day: Pick<MeetingDayGeometry, "slotDurationMinutes" | "bufferMinutes">,
+  startTime: string,
+  endTime: string
+): number {
+  return deriveMeetingCountFromWindow(startTime, endTime, day.slotDurationMinutes, day.bufferMinutes);
+}
+
 export function resolveMeetingGeometryFromModulesConfig(
   config: Record<string, unknown>
 ): MeetingGeometryResolution {

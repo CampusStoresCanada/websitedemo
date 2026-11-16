@@ -6,6 +6,7 @@ import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { deriveAgenda } from "@/lib/conference/agenda";
 import { effectiveAttributes } from "@/lib/conference/entity-graph";
 import { isNotPublic } from "@/lib/conference/entity-kinds";
+import { meetingsInBlock, resolveMeetingGeometryFromEntities } from "@/lib/conference/meeting-geometry";
 import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 
 export type ConferenceScheduleViewerRole =
@@ -66,6 +67,12 @@ export interface ConferenceScheduleItem {
   depth: number;
   /** `who` audience names carried for admin lenses (not a visibility gate). */
   audienceNames: string[];
+  /**
+   * For a meeting block on a meeting day: how many back-to-back meetings it
+   * holds and the spacing between them (meeting + buffer), so a 75-minute block reads as 5 short
+   * meetings rather than one long one. Null for everything else.
+   */
+  meetingSlots?: { count: number; minutes: number } | null;
 }
 
 export interface ConferenceScheduleTimeline {
@@ -193,8 +200,19 @@ export async function getConferenceScheduleTimeline(
     if (notPublic) hidden.add(a.id);
     return !notPublic;
   });
+  const meetingCadenceByDate = new Map(
+    resolveMeetingGeometryFromEntities(
+      entities
+        .filter((e) => e.kind === "day" && typeof e.attributes.date === "string")
+        .map((e) => ({ date: e.attributes.date as string, attributes: e.attributes })),
+      []
+    ).dayConfigs.map((d) => [d.date, d])
+  );
   const programItems: ConferenceScheduleItem[] = agenda.map((a, idx) => {
     const timed = a.startTime != null;
+    const cadence = a.kind === "meeting" ? meetingCadenceByDate.get(a.dayKey) : undefined;
+    const slotCount =
+      cadence && a.startTime && a.endTime ? meetingsInBlock(cadence, a.startTime, a.endTime) : 0;
     return {
       id: a.id,
       conferenceId,
@@ -222,6 +240,12 @@ export async function getConferenceScheduleTimeline(
       parentId: a.parentId,
       depth: a.depth,
       audienceNames: a.audienceNames,
+      meetingSlots:
+        // Minutes = meeting + buffer, i.e. how often a new meeting starts
+        // (12 + 3 reads as "15-min meetings"), per Steve 2026-11-16.
+        cadence && slotCount > 0
+          ? { count: slotCount, minutes: cadence.slotDurationMinutes + cadence.bufferMinutes }
+          : null,
     };
   });
 

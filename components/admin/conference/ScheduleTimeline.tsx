@@ -108,7 +108,8 @@ export default function ScheduleTimeline({ conferenceId, items, entities, timeZo
         return {
           dayKey,
           count: dayItems.length,
-          nodes: roots.map((item) => ({ item, children: childrenByParent.get(item.id) ?? [] })),
+          roots,
+          childrenByParent,
         };
       });
   }, [items]);
@@ -149,6 +150,27 @@ export default function ScheduleTimeline({ conferenceId, items, entities, timeZo
         onDelete={() => handleDelete(item.id)}
       />
     );
+
+  // Recursive so every level of the agenda's nesting renders (deriveAgenda
+  // caps depth and breaks cycles). One level used to drop grandchildren, e.g.
+  // Thursday's breaks inside Trade Show Thursday inside Big Ideas Day.
+  const renderNode = (
+    item: ConferenceScheduleItem,
+    childrenByParent: Map<string, ConferenceScheduleItem[]>,
+    parentTitle?: string
+  ): React.ReactNode => {
+    const children = childrenByParent.get(item.id) ?? [];
+    return (
+      <li key={item.id}>
+        {renderRowOrForm(item, !!parentTitle, parentTitle)}
+        {children.length > 0 && (
+          <ol className="ml-6 border-l border-dashed border-gray-200 pl-3">
+            {children.map((child) => renderNode(child, childrenByParent, item.title))}
+          </ol>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
@@ -231,18 +253,7 @@ export default function ScheduleTimeline({ conferenceId, items, entities, timeZo
 
                 {!isCollapsed && (
                   <ol className="px-3 py-2">
-                    {day.nodes.map((node) => (
-                      <li key={node.item.id}>
-                        {renderRowOrForm(node.item, false)}
-                        {node.children.length > 0 && (
-                          <ol className="ml-6 border-l border-dashed border-gray-200 pl-3">
-                            {node.children.map((child) => (
-                              <li key={child.id}>{renderRowOrForm(child, true, node.item.title)}</li>
-                            ))}
-                          </ol>
-                        )}
-                      </li>
-                    ))}
+                    {day.roots.map((item) => renderNode(item, day.childrenByParent))}
                   </ol>
                 )}
               </section>
@@ -290,6 +301,11 @@ function ScheduleRow({
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-600">
+          {item.meetingSlots && (
+            <span className="font-medium text-gray-800">
+              {item.meetingSlots.count} × {item.meetingSlots.minutes}-min meetings
+            </span>
+          )}
           {item.locationLabel && <span>📍 {item.locationLabel}</span>}
           {item.audienceNames.length > 0 && <span>👥 {item.audienceNames.join(", ")}</span>}
           {item.description && <span className="text-gray-500">{item.description}</span>}

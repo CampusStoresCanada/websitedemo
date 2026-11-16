@@ -15,7 +15,44 @@ export type ScheduleBlockItem = {
   endsAtLocal: string;
   locationLabel: string | null;
   dayKeyLocal: string;
+  /** The agenda's computed parent (agenda.ts `pickParent`). */
+  parentId?: string | null;
+  /** A meeting block's back-to-back meetings (schedule-service `meetingSlots`). */
+  meetingSlots?: { count: number; minutes: number } | null;
 };
+
+/**
+ * Split a day into top-level rows and the rows shown inside them. Only things
+ * that happen during an *event* nest (a dinner inside the reception it is part
+ * of). The agenda also nests by plain time-containment, e.g. the Tuesday
+ * meeting blocks fall inside "Move-in - Tuesday", which is right for the admin
+ * view but would bury them here. A child whose parent was filtered out of this
+ * view stays top-level rather than vanishing.
+ */
+function nestByEvent(items: ScheduleBlockItem[]): {
+  roots: ScheduleBlockItem[];
+  childrenOf: Map<string, ScheduleBlockItem[]>;
+} {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const eventParentOf = (item: ScheduleBlockItem) => {
+    const parent = item.parentId ? byId.get(item.parentId) : undefined;
+    return parent?.kind === "event" ? parent : undefined;
+  };
+  const roots: ScheduleBlockItem[] = [];
+  const childrenOf = new Map<string, ScheduleBlockItem[]>();
+  for (const item of items) {
+    const parent = eventParentOf(item);
+    // One level only: if the event is itself nested, keep this row top-level.
+    if (parent && !eventParentOf(parent)) {
+      const list = childrenOf.get(parent.id) ?? [];
+      list.push(item);
+      childrenOf.set(parent.id, list);
+    } else {
+      roots.push(item);
+    }
+  }
+  return { roots, childrenOf };
+}
 
 // Tuesday's five pre-arranged meeting blocks are the curated-meetings day,
 // not open floor time like Wed/Thu — give them their own label rather than
@@ -97,6 +134,71 @@ export default function ScheduleDayCards({
 }) {
   if (dayKeys.length === 0) return null;
 
+  const renderItem = (
+    item: ScheduleBlockItem,
+    childrenOf: Map<string, ScheduleBlockItem[]>,
+  ) => {
+    const tags = tierTagFor?.(item.id) ?? [];
+    const rsvpSlug = rsvpSlugByEntityId?.get(item.id);
+    const children = childrenOf.get(item.id) ?? [];
+    return (
+      <li key={item.id} className={tags.length > 0 ? "flex gap-2" : ""}>
+        {tags.length > 0 && (
+          <span className="flex shrink-0 gap-0.5 self-stretch">
+            {tags.map((t) => (
+              <span
+                key={t.color}
+                className="w-1 rounded-full"
+                style={{ backgroundColor: t.color }}
+              />
+            ))}
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-[#6B6B6B]">
+            {kindLabelFor(item)}
+            {tags.length > 0 && (
+              <span className="ml-1.5 font-semibold">
+                {" · "}
+                {tags.map((t, i) => (
+                  <span key={t.color}>
+                    {i > 0 && " + "}
+                    <span style={{ color: t.color }}>{t.label}</span>
+                  </span>
+                ))}
+              </span>
+            )}
+          </p>
+          <p className="text-sm font-semibold text-[#1A1A1A]">{item.title}</p>
+          <p className="text-xs text-[#6B6B6B]">
+            {item.startsAtLocal}
+            {item.endsAtLocal ? ` – ${item.endsAtLocal}` : ""}
+            {item.locationLabel ? ` · ${item.locationLabel}` : ""}
+          </p>
+          {item.meetingSlots && (
+            <p className="text-xs font-medium text-[#1A1A1A]">
+              {item.meetingSlots.count} × {item.meetingSlots.minutes}-min
+              meetings
+            </p>
+          )}
+          {rsvpSlug && (
+            <Link
+              href={`/events/${rsvpSlug}`}
+              className="mt-1 inline-block text-xs font-medium text-[#EE2A2E] hover:underline"
+            >
+              RSVP →
+            </Link>
+          )}
+          {children.length > 0 && (
+            <ul className="mt-2 space-y-2 border-l-2 border-[#E5E5E5] pl-3">
+              {children.map((child) => renderItem(child, childrenOf))}
+            </ul>
+          )}
+        </div>
+      </li>
+    );
+  };
+
   return (
     <section>
       {(heading || subheading || legend) && (
@@ -135,62 +237,12 @@ export default function ScheduleDayCards({
               {formatDayHeading(dayKey)}
             </h3>
             <ul className="mt-3 space-y-3">
-              {(byDay.get(dayKey) ?? []).map((item) => {
-                const tags = tierTagFor?.(item.id) ?? [];
-                const rsvpSlug = rsvpSlugByEntityId?.get(item.id);
-                return (
-                  <li
-                    key={item.id}
-                    className={tags.length > 0 ? "flex gap-2" : ""}
-                  >
-                    {tags.length > 0 && (
-                      <span className="flex shrink-0 gap-0.5 self-stretch">
-                        {tags.map((t) => (
-                          <span
-                            key={t.color}
-                            className="w-1 rounded-full"
-                            style={{ backgroundColor: t.color }}
-                          />
-                        ))}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium uppercase tracking-wide text-[#6B6B6B]">
-                        {kindLabelFor(item)}
-                        {tags.length > 0 && (
-                          <span className="ml-1.5 font-semibold">
-                            {" · "}
-                            {tags.map((t, i) => (
-                              <span key={t.color}>
-                                {i > 0 && " + "}
-                                <span style={{ color: t.color }}>
-                                  {t.label}
-                                </span>
-                              </span>
-                            ))}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-sm font-semibold text-[#1A1A1A]">
-                        {item.title}
-                      </p>
-                      <p className="text-xs text-[#6B6B6B]">
-                        {item.startsAtLocal}
-                        {item.endsAtLocal ? ` – ${item.endsAtLocal}` : ""}
-                        {item.locationLabel ? ` · ${item.locationLabel}` : ""}
-                      </p>
-                      {rsvpSlug && (
-                        <Link
-                          href={`/events/${rsvpSlug}`}
-                          className="mt-1 inline-block text-xs font-medium text-[#EE2A2E] hover:underline"
-                        >
-                          RSVP →
-                        </Link>
-                      )}
-                    </div>
-                  </li>
+              {(() => {
+                const { roots, childrenOf } = nestByEvent(
+                  byDay.get(dayKey) ?? [],
                 );
-              })}
+                return roots.map((item) => renderItem(item, childrenOf));
+              })()}
             </ul>
           </div>
         ))}
