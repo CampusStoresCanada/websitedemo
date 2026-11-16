@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import Link from "next/link";
+import AddProspectCompany from "@/components/admin/AddProspectCompany";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export default async function AdminContactPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Preview</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Received</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -102,6 +104,23 @@ export default async function AdminContactPage() {
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[row.status] ?? "bg-gray-100 text-gray-600"}`}>
                       {row.status.replace("_", " ")}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {/* A store or vendor that wrote in is the likeliest prospect
+                        there is. Pre-filled from the inquiry; staff decide. */}
+                    {row.status !== "resolved" && (
+                      <AddProspectCompany
+                        triggerLabel="Make a prospect"
+                        prefill={{
+                          company: row.organization ?? "",
+                          kind: row.subject === "membership" ? "member" : "partner",
+                          personName: row.name ?? "",
+                          personEmail: row.email ?? "",
+                          inquiryId: row.id,
+                          message: row.message ?? "",
+                        }}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}
