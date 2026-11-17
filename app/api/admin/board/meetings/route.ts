@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isMembersMeetingType } from "@/lib/governance/members-meetings";
 
 function generateSlug(title: string, startsAt: string): string {
   const date = new Date(startsAt).toISOString().slice(0, 10);
@@ -37,6 +38,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "meetingDate is required (YYYY-MM-DD)" }, { status: 400 });
   }
 
+  // ⛔ A members' meeting is not created here. This route hardcodes
+  // `audience_mode: "board"` and a fixed virtual time, which for an AGM makes
+  // an event the members cannot see and nowhere to say where it is held.
+  // POST /admin/members-meetings owns that, via scheduleMembersMeetingAction.
+  if (isMembersMeetingType(meetingType)) {
+    return NextResponse.json(
+      {
+        error:
+          "A meeting of the members is scheduled at /admin/members-meetings, " +
+          "which sets its date, times and venue and creates the members-only event page.",
+      },
+      { status: 400 }
+    );
+  }
+
   const db = createAdminClient();
 
   // Check for duplicate
@@ -50,10 +66,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A meeting already exists for that date" }, { status: 409 });
   }
 
-  const typeLabel =
-    meetingType === "agm"     ? "AGM" :
-    meetingType === "special" ? "Special Meeting" :
-    "Board Meeting";
+  const typeLabel = meetingType === "special" ? "Special Meeting" : "Board Meeting";
 
   const { data: meeting, error } = await db
     .from("board_meetings")

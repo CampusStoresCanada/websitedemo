@@ -10,7 +10,11 @@ export default function CreateMeetingButton() {
   const [error,   setError]   = useState<string | null>(null);
 
   const [date, setDate]  = useState("");
-  const [type, setType]  = useState<"regular" | "agm" | "special">("regular");
+  // ⛔ No "agm" here. A members' meeting is called from
+  // /admin/members-meetings, which sets its date, times and venue and creates
+  // the members-only event page. Creating one here made a board event with a
+  // board audience and no way to set where it was held.
+  const [type, setType]  = useState<"regular" | "special">("regular");
   const [notes, setNotes] = useState("");
 
   async function handleCreate() {
@@ -70,11 +74,10 @@ export default function CreateMeetingButton() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Meeting type</label>
                 <select
                   value={type}
-                  onChange={e => setType(e.target.value as "regular" | "agm" | "special")}
+                  onChange={e => setType(e.target.value as "regular" | "special")}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-[#163D6D] focus:outline-none focus:ring-1 focus:ring-[#163D6D]"
                 >
                   <option value="regular">Regular Meeting</option>
-                  <option value="agm">AGM</option>
                   <option value="special">Special Meeting</option>
                 </select>
               </div>

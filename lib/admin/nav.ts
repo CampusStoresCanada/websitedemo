@@ -136,10 +136,18 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         href: "/admin/board/meetings",
-        label: "Meetings",
+        label: "Board Meetings",
         title: "Board Meetings",
         description: "Meeting records and synced documents from OneDrive.",
         matchPrefix: "/admin/board/meetings",
+      },
+      {
+        href: "/admin/members-meetings",
+        label: "Members' Meetings",
+        title: "Members' Meetings",
+        description:
+          "Meetings of the member institutions, under By-Law Part VII. Set when and where the annual general meeting sits, and publish the page members see.",
+        matchPrefix: "/admin/members-meetings",
       },
       {
         href: "/admin/board/register",

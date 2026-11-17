@@ -79,6 +79,7 @@ import {
   evaluateNoticeWindow,
   evaluateProxyDeadline,
 } from "./agm-notice";
+import { agmEventSlug } from "@/lib/governance/members-meetings";
 import {
   notifyNominee,
   notifyCosigners,
@@ -2829,7 +2830,7 @@ export async function getNoticeState(slug: string, onDate = today()): Promise<No
     }
   }
 
-  const eventSlug = `csc-annual-general-meeting-${election.cycleYear}`;
+  const eventSlug = agmEventSlug(election.cycleYear);
   const { data: agmEvent } = await db
     .from("events")
     .select("status")
@@ -2898,7 +2899,7 @@ export async function sendAgmNotice(
   // notice would otherwise discharge a Part VII S4(b) obligation with a dead
   // link in it. Publishing the event is part of giving notice, not a separate
   // errand, so this refuses rather than sending something broken.
-  const eventSlug = `csc-annual-general-meeting-${election.cycleYear}`;
+  const eventSlug = agmEventSlug(election.cycleYear);
   const { data: agmEvent } = await db
     .from("events")
     .select("status")

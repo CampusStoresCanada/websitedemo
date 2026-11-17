@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import CreateMeetingButton from "@/components/admin/board/CreateMeetingButton";
+import { MEMBERS_MEETING_TYPES } from "@/lib/governance/members-meetings";
 
 export const metadata = {
   title: "Board Meetings | Admin | Campus Stores Canada",
@@ -18,7 +19,6 @@ export const revalidate = 0;
 const TYPE_LABELS: Record<string, string> = {
   regular: "Regular",
   special:  "Special",
-  agm:     "AGM",
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -39,9 +39,14 @@ export default async function BoardMeetingsPage() {
   const isSA = auth.ok && isSuperAdmin(auth.ctx.globalRole);
   const db = createAdminClient();
 
+  // Meetings OF THE BOARD. The annual general meeting is a meeting of the
+  // members — different attendees, different rules, different business — and it
+  // lives at /admin/members-meetings. It sat in this list for as long as this
+  // was the only list a meeting could be in.
   const { data: meetings } = await db
     .from("board_meetings")
     .select("id, title, meeting_date, meeting_type, status, notes, event_id")
+    .not("meeting_type", "in", `(${MEMBERS_MEETING_TYPES.join(",")})`)
     .order("meeting_date", { ascending: false });
 
   // Doc count per meeting
@@ -66,7 +71,7 @@ export default async function BoardMeetingsPage() {
     <main>
       <AdminPageHeader
         title="Board Meetings"
-        description="All board meeting records and associated documents."
+        description="Meetings of the board and their documents. Members' meetings, the AGM included, are under Members' Meetings."
         actions={
           <div className="flex items-center gap-2">
             {isSA && <CreateMeetingButton />}

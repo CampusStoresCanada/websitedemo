@@ -30,6 +30,7 @@ import { CSC_ELECTIONS_CONFIG, type ElectionsConfig } from "./config";
 import { resolveAgmDate, deriveSchedule, validateSchedule } from "./schedule";
 import { mintElectionActionItems, type MintedTask } from "./action-items";
 import { getElection, type Election } from "./service";
+import { agmEventSlug } from "@/lib/governance/members-meetings";
 
 /**
  * How far ahead of the nominations-open date a meeting can be and still be a
@@ -185,7 +186,7 @@ export async function ensureAgmMeetingAndEvent(input: {
 }): Promise<AgmScheduleResult> {
   const db = createAdminClient();
   const title = `CSC Annual General Meeting — ${input.agmDate}`;
-  const eventSlug = `csc-annual-general-meeting-${input.cycleYear}`;
+  const eventSlug = agmEventSlug(input.cycleYear);
 
   const { data: existingMeeting } = await db
     .from("board_meetings")
