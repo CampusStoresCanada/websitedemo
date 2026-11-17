@@ -49,6 +49,9 @@ export default async function BoardRegisterPage({
 
   const view = (t: (typeof register.holding)[number]) => ({
     assignmentId: t.assignmentId,
+    personContactId: t.personContactId,
+    personProfileId: t.personProfileId,
+    organizationId: t.organizationId,
     name: t.name,
     organizationName: t.organizationName,
     termStart: t.termStart,
@@ -99,6 +102,12 @@ export default async function BoardRegisterPage({
         }))}
         seatCount={register.body.seatCount}
         minSeatCount={register.body.minSeatCount}
+        offices={register.offices.map((o) => ({
+          contactId: o.contactId,
+          office: o.office,
+          heldUntil: o.heldUntil,
+        }))}
+        nextAgmDate={register.nextAgmDate}
         vacancies={register.vacancies}
         belowMinimum={register.belowMinimum}
         revalidate={`/admin/board/register${bodyParam ? `?body=${encodeURIComponent(bodyParam)}` : ""}`}

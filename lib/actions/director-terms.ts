@@ -24,6 +24,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { OFFICE_KEYS, type BoardOffice } from "@/lib/governance/register";
 
 export interface TermResult {
   success: boolean;
@@ -376,4 +377,132 @@ export async function appointToVacancy(input: {
 
   if (input.revalidate) revalidatePath(input.revalidate);
   return { success: true };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Offices.
+ *
+ * ⛔ Nothing in this application could write one until now. The five officer
+ * rows on the board were backfilled by hand in September, FROM the site_content
+ * slots on /about — their own notes say so — and `capability-appointments.ts`
+ * deliberately refuses them, because an office is not a capability you appoint
+ * somebody to. So a wrong title needed SQL, and /about reading the register
+ * made that worse rather than better.
+ *
+ * ⚠️ An office is ANNUAL (By-Law Part VI S1) and the board elects its officers
+ * at its first meeting after the AGM. So between the meeting that ends the
+ * board year and the one that starts it, THERE ARE NO OFFICERS — and the right
+ * behaviour is to show none, not to show last year's. That is what the end date
+ * is for, and why it defaults to the next AGM rather than being left open.
+ * ------------------------------------------------------------------------- */
+
+// ⛔ The office list is NOT declared here. This is a `"use server"` file and may
+// only export async functions; exporting a const array from one type-checks,
+// builds, and then 500s every page that imports it. It lives in
+// lib/governance/register.ts, which is a plain module, and is imported below.
+
+/**
+ * Record that somebody holds an office, until a date.
+ *
+ * ⛔ Ends the current holder of the same office first. Two Presidents at once
+ * is not a state the association can be in, and every reader here takes the
+ * rows it finds at face value — `getPublicBoard` would render both.
+ *
+ * `counts_toward_cap` is FALSE and must stay false: an office is not a board
+ * term, and counting it would push somebody toward the four-term limit for
+ * having been Treasurer. The existing rows all say so.
+ */
+export async function setBoardOffice(input: {
+  bodyId: string;
+  office: BoardOffice;
+  personContactId: string;
+  personProfileId: string | null;
+  organizationId: string | null;
+  heldFrom: string;
+  /** EXCLUSIVE, like every date here. Defaults to the next AGM on the form. */
+  heldUntil: string;
+  note: string;
+  revalidate?: string;
+}): Promise<TermResult> {
+  const admin = await requireAdmin();
+  if (!admin.ok) return { success: false, error: admin.error };
+  if (!(OFFICE_KEYS as readonly string[]).includes(input.office))
+    return { success: false, error: "That is not an office of the board." };
+  if (!ISO.test(input.heldFrom) || !ISO.test(input.heldUntil))
+    return { success: false, error: "Both dates are needed, as YYYY-MM-DD." };
+  if (input.heldUntil <= input.heldFrom)
+    return {
+      success: false,
+      error:
+        "The end date must be after the start. It is exclusive, so an office running to the 2027 meeting ends on the date of that meeting.",
+    };
+
+  const db = createAdminClient();
+
+  // Close whoever holds it now, as of the day the new holder takes it.
+  const { error: closeError } = await db
+    .from("governance_role_assignments")
+    .update({ term_end: input.heldFrom, updated_at: new Date().toISOString() })
+    .eq("body_id", input.bodyId)
+    .eq("role_key", input.office)
+    .lte("term_start", input.heldFrom)
+    .or(`term_end.is.null,term_end.gt.${input.heldFrom}`);
+  if (closeError) return { success: false, error: closeError.message };
+
+  const { error } = await db.from("governance_role_assignments").insert({
+    body_id: input.bodyId,
+    person_contact_id: input.personContactId,
+    person_profile_id: input.personProfileId,
+    organization_id: input.organizationId,
+    role_key: input.office,
+    term_start: input.heldFrom,
+    term_end: input.heldUntil,
+    counts_toward_cap: false,
+    notes: input.note.trim() || "Elected to office by the board.",
+  });
+  if (error) return { success: false, error: error.message };
+
+  if (input.revalidate) revalidatePath(input.revalidate);
+  return { success: true };
+}
+
+/**
+ * Every office lapses on a date — normally the AGM.
+ *
+ * The five rows backfilled in September are open-ended, so without this they
+ * would never expire and /about would show last year's officers through a
+ * board year they were not elected for. One press rather than five, because it
+ * is one decision: the board year ended.
+ */
+export async function lapseBoardOffices(input: {
+  bodyId: string;
+  on: string;
+  revalidate?: string;
+}): Promise<TermResult & { lapsed?: number }> {
+  const admin = await requireAdmin();
+  if (!admin.ok) return { success: false, error: admin.error };
+  if (!ISO.test(input.on)) return { success: false, error: "A date is needed, as YYYY-MM-DD." };
+
+  const db = createAdminClient();
+  const { data: open } = await db
+    .from("governance_role_assignments")
+    .select("id")
+    .eq("body_id", input.bodyId)
+    .in("role_key", OFFICE_KEYS as unknown as string[])
+    .lte("term_start", input.on)
+    .or(`term_end.is.null,term_end.gt.${input.on}`);
+
+  if (!open || open.length === 0) return { success: true, lapsed: 0 };
+
+  const { error } = await db
+    .from("governance_role_assignments")
+    .update({ term_end: input.on, updated_at: new Date().toISOString() })
+    .in(
+      "id",
+      open.map((r) => r.id as string)
+    );
+  if (error) return { success: false, error: error.message };
+
+  if (input.revalidate) revalidatePath(input.revalidate);
+  return { success: true, lapsed: open.length };
 }

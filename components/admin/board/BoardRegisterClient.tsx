@@ -16,11 +16,22 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resignDirector, appointToVacancy } from "@/lib/actions/director-terms";
+import {
+  resignDirector,
+  appointToVacancy,
+  setBoardOffice,
+  lapseBoardOffices,
+} from "@/lib/actions/director-terms";
+// ⛔ The list and labels come from the plain module, never from the
+// `"use server"` one — see the note on OFFICE_KEYS.
+import { OFFICE_KEYS, OFFICE_LABELS, type BoardOffice } from "@/lib/governance/register";
 import { searchContactsForSlot } from "@/lib/actions/site-content";
 
 export interface RegisterTermView {
   assignmentId: string;
+  personContactId: string | null;
+  personProfileId: string | null;
+  organizationId: string | null;
   name: string;
   organizationName: string | null;
   termStart: string;
@@ -49,6 +60,8 @@ export default function BoardRegisterClient({
   holding,
   incoming,
   withAccess,
+  offices,
+  nextAgmDate,
   seatCount,
   minSeatCount,
   vacancies,
@@ -60,6 +73,8 @@ export default function BoardRegisterClient({
   holding: RegisterTermView[];
   incoming: RegisterTermView[];
   withAccess: AccessOnlyView[];
+  offices: { contactId: string; office: string; heldUntil: string | null }[];
+  nextAgmDate: string | null;
   seatCount: number | null;
   minSeatCount: number | null;
   vacancies: number | null;
@@ -83,6 +98,15 @@ export default function BoardRegisterClient({
   const [apptEnd, setApptEnd] = useState("");
   const [apptCounts, setApptCounts] = useState(false);
   const [resolution, setResolution] = useState("");
+
+  const [officeFor, setOfficeFor] = useState<string | null>(null);
+  const [officePick, setOfficePick] = useState<BoardOffice | "">("");
+  const [officeFrom, setOfficeFrom] = useState(asOf);
+  const [officeUntil, setOfficeUntil] = useState(nextAgmDate ?? "");
+  const [officeNote, setOfficeNote] = useState("");
+
+  const officeByContact = new Map(offices.map((o) => [o.contactId, o]));
+  const openEndedOffices = offices.filter((o) => !o.heldUntil).length;
 
   // The end dates currently in use. A vacancy runs to the end of the term it
   // is filling, so offering the live cohort dates beats typing one out.
@@ -116,6 +140,30 @@ export default function BoardRegisterClient({
 
   return (
     <div className="space-y-5">
+      {openEndedOffices > 0 && nextAgmDate && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>
+            {openEndedOffices} office{openEndedOffices === 1 ? "" : "s"} with no end date.
+          </strong>{" "}
+          Offices are annual (By-Law Part VI S1) and lapse at the annual general meeting, but these
+          were recorded open-ended and so would carry last year&rsquo;s titles through a board year
+          nobody elected them for. Setting them to lapse is one decision, not {openEndedOffices}.
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => lapseBoardOffices({ bodyId, on: nextAgmDate, revalidate }),
+                () => undefined
+              )
+            }
+            className="ml-2 rounded border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Lapse them at {nextAgmDate}
+          </button>
+        </div>
+      )}
+
       {belowMinimum && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
           <strong>Below the minimum.</strong> {holding.length} director
@@ -164,6 +212,32 @@ export default function BoardRegisterClient({
                       </p>
                     )}
                   </div>
+                  {t.personContactId && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() =>
+                        setOfficeFor((id) => {
+                          const next = id === t.assignmentId ? null : t.assignmentId;
+                          const held = t.personContactId
+                            ? officeByContact.get(t.personContactId)
+                            : undefined;
+                          setOfficePick((held?.office as BoardOffice) ?? "");
+                          setOfficeFrom(asOf);
+                          setOfficeUntil(nextAgmDate ?? "");
+                          setOfficeNote("");
+                          return next;
+                        })
+                      }
+                      className="shrink-0 text-xs text-gray-500 underline hover:text-gray-900 disabled:opacity-50"
+                    >
+                      {officeFor === t.assignmentId
+                        ? "Cancel"
+                        : t.personContactId && officeByContact.has(t.personContactId)
+                          ? OFFICE_LABELS[officeByContact.get(t.personContactId)!.office as BoardOffice]
+                          : "Set an office"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={pending}
@@ -236,6 +310,90 @@ export default function BoardRegisterClient({
                       className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
                     >
                       Record the departure
+                    </button>
+                  </div>
+                )}
+
+                {officeFor === t.assignmentId && t.personContactId && (
+                  <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs font-medium text-gray-900">
+                      {t.name} holds an office
+                    </p>
+                    <p className="mt-1 text-[11px] text-gray-600">
+                      By-Law Part VI S1: officers are appointed annually, and the board elects them
+                      at its first meeting after the AGM. So an office ENDS at the meeting by
+                      default, and between that meeting and the next election of officers the board
+                      has none. Anyone already holding this office is ended on the start date.
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col gap-1 text-xs text-gray-600">
+                        Office
+                        <select
+                          value={officePick}
+                          onChange={(e) => setOfficePick(e.target.value as BoardOffice | "")}
+                          className="rounded border border-gray-300 px-2 py-1"
+                        >
+                          <option value="">— none —</option>
+                          {OFFICE_KEYS.map((o) => (
+                            <option key={o} value={o}>
+                              {OFFICE_LABELS[o]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-gray-600">
+                        Holds from
+                        <input
+                          type="date"
+                          value={officeFrom}
+                          onChange={(e) => setOfficeFrom(e.target.value)}
+                          className="rounded border border-gray-300 px-2 py-1"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-gray-600">
+                        Until (exclusive)
+                        <input
+                          type="date"
+                          value={officeUntil}
+                          onChange={(e) => setOfficeUntil(e.target.value)}
+                          className="rounded border border-gray-300 px-2 py-1"
+                        />
+                      </label>
+                    </div>
+                    {nextAgmDate && (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Defaulted to the next annual general meeting on record, {nextAgmDate}.
+                      </p>
+                    )}
+                    <input
+                      value={officeNote}
+                      onChange={(e) => setOfficeNote(e.target.value)}
+                      placeholder="The minute that elected them"
+                      className="mt-2 w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={pending || !officePick || !officeFrom || !officeUntil}
+                      onClick={() =>
+                        run(
+                          () =>
+                            setBoardOffice({
+                              bodyId,
+                              office: officePick as BoardOffice,
+                              personContactId: t.personContactId!,
+                              personProfileId: t.personProfileId,
+                              organizationId: t.organizationId,
+                              heldFrom: officeFrom,
+                              heldUntil: officeUntil,
+                              note: officeNote,
+                              revalidate,
+                            }),
+                          () => setOfficeFor(null)
+                        )
+                      }
+                      className="mt-2 rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      Record the office
                     </button>
                   </div>
                 )}

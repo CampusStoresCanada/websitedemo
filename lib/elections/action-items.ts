@@ -165,6 +165,16 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     dueOn: (e) => e.schedule.agmDate,
     owners: ["nominating_committee_chair", "past_president", "president"],
   },
+  {
+    key: "elect_officers",
+    title: "Elect the board's officers for {year}",
+    description:
+      "By-Law Part VI S1: the officers are appointed annually, and the board elects them at its first meeting after the annual general meeting. Until it does, the board HAS no officers \u2014 the previous year's titles lapse at the meeting and are not carried over.\n\nThat matters beyond tidiness. The public board page at /about takes its titles from the register, so between the AGM and this election it will show the directors with no offices against their names, which is the truthful state. It is also the window in which nothing can be signed by the Treasurer, because nobody is.\n\nHOW: Admin \u2192 Board Portal \u2192 Register. Each director has a Set an office control; choose the office, the date the board elected them, and the date it runs to \u2014 which defaults to the next annual general meeting, because that is when it lapses. Recording an office ends whoever held it before, so there is never more than one Treasurer. Record the minute that elected them in the note.\n\n\u26a0\ufe0f Officers are not appointable capabilities and never appear in the appointment panel \u2014 an office is not a permission you grant, it is one the board confers.",
+    // The board cannot elect officers before it exists. Due at the meeting
+    // where the new board first sits, which is the AGM itself at the earliest.
+    dueOn: (e) => e.schedule.agmDate,
+    owners: ["executive_director", "past_president"],
+  },
 ];
 
 export interface MintedTask {

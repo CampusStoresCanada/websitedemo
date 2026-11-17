@@ -179,3 +179,124 @@ describe("the mailing list asks the access question, not the seat question", () 
     expect(sync).not.toContain('.lte("term_start", asOf)');
   });
 });
+
+/**
+ * Offices.
+ *
+ * Steve, 2026-11-17: "between the AGM and the meeting there is a time where we
+ * drop all the titles. The only thing that needs to be added is a reminder."
+ *
+ * So the correct behaviour in that window is NO officers — not last year's —
+ * and the gap is closed by a person being reminded, not by the software
+ * carrying a stale title forward.
+ */
+const actions = readFileSync("lib/actions/director-terms.ts", "utf8");
+const tasks = readFileSync("lib/elections/action-items.ts", "utf8");
+
+describe("an office is annual and lapses", () => {
+  it("is written with an end date, defaulted to the next AGM", () => {
+    const client = readFileSync("components/admin/board/BoardRegisterClient.tsx", "utf8");
+    expect(client).toContain("useState(nextAgmDate ?? \"\")");
+    expect(actions).toContain("heldUntil: string;");
+  });
+
+  it("refuses an end on or before the start", () => {
+    const fn = actions.slice(actions.indexOf("export async function setBoardOffice"));
+    expect(fn).toContain("input.heldUntil <= input.heldFrom");
+  });
+
+  it("⛔ ends the previous holder, so there are never two Treasurers", () => {
+    const fn = actions.slice(actions.indexOf("export async function setBoardOffice"));
+    expect(fn).toContain('.eq("role_key", input.office)');
+    expect(fn).toContain("term_end: input.heldFrom");
+  });
+
+  it("⛔ an office never counts toward the four-term cap", () => {
+    const fn = actions.slice(actions.indexOf("export async function setBoardOffice"));
+    expect(fn).toContain("counts_toward_cap: false");
+  });
+
+  it("can lapse every open-ended office in one act", () => {
+    const fn = actions.slice(actions.indexOf("export async function lapseBoardOffices"));
+    expect(fn).toContain("term_end: input.on");
+    expect(fn).toContain("OFFICE_KEYS");
+  });
+
+  it("the register reports offices only while they are held on the date asked", () => {
+    expect(source).toContain("start <= input.asOf && (!end || end > input.asOf)");
+  });
+});
+
+describe("the gap is closed by a reminder, not by a stale title", () => {
+  it("the board is told to elect officers, as a dated obligation", () => {
+    expect(tasks).toContain('key: "elect_officers"');
+    expect(tasks).toContain("Elect the board's officers for {year}");
+  });
+
+  it("the reminder's owner is not an office that has just lapsed", () => {
+    // president and past_president both lapse at the AGM; the Executive
+    // Director is staff and does not.
+    const t = tasks.slice(tasks.indexOf('key: "elect_officers"'));
+    const owners = t.slice(t.indexOf("owners:"), t.indexOf("owners:") + 120);
+    expect(owners).toContain("executive_director");
+  });
+
+  it("the title carries the year, or minting silently skips it", () => {
+    // Deduped by title across every action item with no year scoping — nine
+    // obligations were once skipped for exactly this reason.
+    const t = tasks.slice(tasks.indexOf('key: "elect_officers"'));
+    expect(t.slice(0, 200)).toContain("{year}");
+  });
+});
+
+/**
+ * ⛔ A `"use server"` file may export ONLY async functions.
+ *
+ * I exported a const array from `lib/actions/director-terms.ts`. `tsc --noEmit`
+ * passed. `next build` passed. 3212 tests passed. The first page load threw
+ * `A "use server" file can only export async functions, found object` and 500'd
+ * the board register — and because the module never evaluated, the button I was
+ * testing did nothing at all.
+ *
+ * CLAUDE.md warns about exactly this and says only loading a page catches it.
+ * This catches it in the suite instead.
+ */
+describe("\"use server\" files export only async functions", () => {
+  const serverActionFiles = [
+    "lib/actions/director-terms.ts",
+    "lib/actions/capability-appointments.ts",
+    "lib/actions/site-content.ts",
+  ];
+
+  for (const file of serverActionFiles) {
+    it(`${file} exports nothing but async functions and types`, () => {
+      const src = readFileSync(file, "utf8");
+      if (!/^\s*["']use server["']/m.test(src)) return;
+
+      const offenders: string[] = [];
+      for (const m of src.matchAll(/^export\s+(?!type\b|interface\b)(\w+)/gm)) {
+        const kind = m[1];
+        // `export async function` is the only runtime export permitted.
+        if (kind === "async") continue;
+        offenders.push(kind);
+      }
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it("the office list therefore lives in a plain module", () => {
+    const actions = readFileSync("lib/actions/director-terms.ts", "utf8");
+    expect(actions).not.toContain("export const BOARD_OFFICES");
+    expect(actions).toContain('from "@/lib/governance/register"');
+    expect(source).toContain("export const OFFICE_KEYS");
+  });
+
+  it("and there is ONE list, not a mirror of one", () => {
+    const actions = readFileSync("lib/actions/director-terms.ts", "utf8");
+    const client = readFileSync("components/admin/board/BoardRegisterClient.tsx", "utf8");
+    for (const f of [actions, client]) {
+      expect(f).not.toMatch(/const\s+\w*OFFICE\w*\s*=\s*\[/);
+      expect(f).not.toMatch(/vice_president:\s*"Vice President"/);
+    }
+  });
+});

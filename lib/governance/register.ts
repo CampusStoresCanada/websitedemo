@@ -84,7 +84,48 @@ export interface BoardRegister {
   vacancies: number | null;
   /** Below the by-law floor — a real governance problem, not a tidiness one. */
   belowMinimum: boolean;
+  /**
+   * Who holds which office on `asOf`, by contact.
+   *
+   * ⚠️ Offices are ANNUAL and lapse at the AGM (By-Law Part VI S1), so this is
+   * EMPTY between the meeting that ends a board year and the one where the new
+   * board elects its officers. That gap is correct and must be shown as it is;
+   * displaying last year's President through it is the bug.
+   */
+  offices: { contactId: string; office: string; assignmentId: string; heldUntil: string | null }[];
+  /** The next annual general meeting on record, for defaulting an office's end. */
+  nextAgmDate: string | null;
 }
+
+/**
+ * The offices the board fills.
+ *
+ * ⛔ Lives HERE, not beside the action that writes it. `lib/actions/director-terms.ts`
+ * is a `"use server"` file, and such a file may only export async functions —
+ * exporting this array from there type-checks, BUILDS, and then 500s every page
+ * that imports it the moment one is loaded. It did exactly that.
+ *
+ * It was also duplicated: the action file had its own copy and a comment calling
+ * this one a mirror. A mirror is a defect; there is one list.
+ */
+export const OFFICE_KEYS = [
+  "president",
+  "vice_president",
+  "secretary",
+  "treasurer",
+  "past_president",
+] as const;
+
+export type BoardOffice = (typeof OFFICE_KEYS)[number];
+
+/** Office key → the words a person reads. */
+export const OFFICE_LABELS: Record<BoardOffice, string> = {
+  president: "President",
+  vice_president: "Vice President",
+  secretary: "Secretary",
+  treasurer: "Treasurer",
+  past_president: "Past President",
+};
 
 const SELECT =
   "id, person_contact_id, person_profile_id, organization_id, term_start, term_end, access_from, access_until, counts_toward_cap, elected_at_election_id, appointing_resolution, notes, profiles:person_profile_id(display_name), contacts:person_contact_id(first_name, last_name), organizations:organization_id(name)";
@@ -275,6 +316,37 @@ export async function loadBoardRegister(input: {
   holding.sort((a, b) => a.name.localeCompare(b.name));
   incoming.sort((a, b) => a.termStart.localeCompare(b.termStart) || a.name.localeCompare(b.name));
 
+  // Offices live on the same body as their own assignments, with their own
+  // dates. Read separately because they answer a different question from the
+  // seat and must be allowed to be absent.
+  const { data: officeRows } = await db
+    .from("governance_role_assignments")
+    .select("id, person_contact_id, role_key, term_start, term_end")
+    .eq("body_id", body.id as string)
+    .in("role_key", OFFICE_KEYS as unknown as string[]);
+
+  const offices = (officeRows ?? [])
+    .filter((o) => {
+      const start = o.term_start as string;
+      const end = o.term_end as string | null;
+      return start <= input.asOf && (!end || end > input.asOf);
+    })
+    .map((o) => ({
+      contactId: o.person_contact_id as string,
+      office: o.role_key as string,
+      assignmentId: o.id as string,
+      heldUntil: o.term_end as string | null,
+    }));
+
+  const { data: agm } = await db
+    .from("board_meetings")
+    .select("meeting_date")
+    .eq("meeting_type", "agm")
+    .gte("meeting_date", input.asOf)
+    .order("meeting_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
   const seatCount = (body.seat_count as number | null) ?? null;
   const minSeatCount = (body.min_seat_count as number | null) ?? null;
 
@@ -294,5 +366,7 @@ export async function loadBoardRegister(input: {
     withAccessNotHolding,
     vacancies: seatCount === null ? null : Math.max(0, seatCount - holding.length),
     belowMinimum: minSeatCount !== null && holding.length < minSeatCount,
+    offices,
+    nextAgmDate: (agm?.meeting_date as string | null) ?? null,
   };
 }
