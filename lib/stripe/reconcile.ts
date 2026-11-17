@@ -162,3 +162,77 @@ export async function stripeInboundReconcileRun(): Promise<StripeReconcileJobRes
 
   return result;
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Invoices made in the Stripe dashboard
+// ─────────────────────────────────────────────────────────────────
+
+export interface UntrackedStripeInvoice {
+  stripeInvoiceId: string;
+  number: string | null;
+  status: string;
+  customer: string | null;
+  totalCents: number;
+  createdAt: string;
+}
+
+/** How far back the daily sweep looks. An invoice older than this was either caught or closed by hand. */
+const UNTRACKED_LOOKBACK_DAYS = 30;
+
+/**
+ * The Stripe invoices nothing here knows about: a finalized invoice (open or
+ * paid) whose id is on no `invoices` row and no shipment.
+ *
+ * Everything the site bills gets a row first, so these are invoices somebody
+ * made in the Stripe dashboard. The site cannot post one to QuickBooks or tie
+ * it to an order: eight existed between August and September 2026 and each was
+ * entered in QuickBooks by hand. Drafts and voids are left out, since neither
+ * asks anyone for money.
+ */
+export function untrackedStripeInvoices(
+  stripeInvoices: Array<Pick<Stripe.Invoice, "id" | "number" | "status" | "total" | "created" | "customer_name" | "customer_email">>,
+  knownStripeInvoiceIds: ReadonlySet<string>
+): UntrackedStripeInvoice[] {
+  return stripeInvoices
+    .filter((inv) => (inv.status === "open" || inv.status === "paid") && !!inv.id && !knownStripeInvoiceIds.has(inv.id))
+    .map((inv) => ({
+      stripeInvoiceId: inv.id as string,
+      number: inv.number ?? null,
+      status: inv.status as string,
+      customer: inv.customer_name ?? inv.customer_email ?? null,
+      totalCents: inv.total,
+      createdAt: new Date(inv.created * 1000).toISOString(),
+    }));
+}
+
+/** Reads the last 30 days of Stripe invoices and returns the ones the site has no record of. */
+export async function findUntrackedStripeInvoices(now: Date = new Date()): Promise<UntrackedStripeInvoice[]> {
+  const db = createAdminClient();
+  const since = Math.floor(now.getTime() / 1000) - UNTRACKED_LOOKBACK_DAYS * 86_400;
+
+  const recent: Stripe.Invoice[] = [];
+  for await (const inv of stripe.invoices.list({ created: { gte: since }, limit: 100 })) {
+    recent.push(inv);
+  }
+  if (recent.length === 0) return [];
+
+  // Look the ids up rather than loading every invoice row: the table is past
+  // the API's 1,000-row cap, and a cut list would report real invoices as
+  // untracked.
+  const ids = recent.map((inv) => inv.id).filter((id): id is string => !!id);
+  const known = new Set<string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const [invoiceRes, shipmentRes] = await Promise.all([
+      db.from("invoices").select("stripe_invoice_id").in("stripe_invoice_id", chunk),
+      db.from("shipments").select("stripe_invoice_id").in("stripe_invoice_id", chunk),
+    ]);
+    if (invoiceRes.error) throw new Error(`Could not read invoices: ${invoiceRes.error.message}`);
+    if (shipmentRes.error) throw new Error(`Could not read shipments: ${shipmentRes.error.message}`);
+    for (const row of [...(invoiceRes.data ?? []), ...(shipmentRes.data ?? [])]) {
+      if (row.stripe_invoice_id) known.add(row.stripe_invoice_id);
+    }
+  }
+
+  return untrackedStripeInvoices(recent, known);
+}

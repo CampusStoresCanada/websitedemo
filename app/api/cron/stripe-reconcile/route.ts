@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripeInboundReconcileRun } from "@/lib/stripe/reconcile";
+import { findUntrackedStripeInvoices, stripeInboundReconcileRun } from "@/lib/stripe/reconcile";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,30 @@ export async function GET(request: NextRequest) {
         details: { errors: result.errors.slice(0, 20) },
       });
     }
-    return NextResponse.json(result);
+
+    // One alert per invoice made in the Stripe dashboard. Resolving it is how
+    // staff say "entered in QuickBooks by hand"; nothing raises it again.
+    let untracked: Awaited<ReturnType<typeof findUntrackedStripeInvoices>> = [];
+    try {
+      untracked = await findUntrackedStripeInvoices();
+      for (const inv of untracked) {
+        const dollars = (inv.totalCents / 100).toLocaleString("en-CA", { style: "currency", currency: "CAD" });
+        await raiseAlertIfNotOpen({
+          ruleKey: `stripe_invoice_untracked:${inv.stripeInvoiceId}`,
+          severity: "warning",
+          message:
+            `${inv.customer ?? "A customer"} has a ${inv.status} Stripe invoice for ${dollars}` +
+            `${inv.number ? ` (${inv.number})` : ""} that was made in the Stripe dashboard. ` +
+            `The site has no record of it, so it will not reach QuickBooks on its own. ` +
+            `Enter it in QuickBooks by hand, then resolve this alert.`,
+          details: { ...inv },
+        });
+      }
+    } catch (err) {
+      console.error("[cron/stripe-reconcile] untracked sweep failed:", err);
+    }
+
+    return NextResponse.json({ ...result, untracked: untracked.length });
   } catch (error) {
     console.error("[cron/stripe-reconcile] Unhandled error:", error);
     return NextResponse.json(
