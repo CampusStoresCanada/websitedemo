@@ -7,7 +7,6 @@ import {
 } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEffectivePolicy } from "@/lib/policy/engine";
-import { enqueueCircleSync } from "@/lib/circle/sync";
 import { sendTransactional } from "@/lib/comms/send";
 import { resetOnboardingForNewOrgAdmin } from "@/lib/actions/applications";
 
@@ -230,25 +229,10 @@ export async function acceptAdminTransfer(
       "org_admin_changed"
     );
 
-    // Circle sync: update tags for both old and new admin
-    if (request.to_user_id) {
-      await enqueueCircleSync({
-        operation: "add_tag",
-        entityType: "contact",
-        entityId: request.to_user_id,
-        payload: { orgId: request.organization_id, newRole: "org_admin" },
-        orgId: request.organization_id,
-        idempotencyKey: `transfer-accept-to:${requestId}`,
-      });
-    }
-    await enqueueCircleSync({
-      operation: "add_tag",
-      entityType: "contact",
-      entityId: request.from_user_id,
-      payload: { orgId: request.organization_id, newRole: "member" },
-      orgId: request.organization_id,
-      idempotencyKey: `transfer-accept-from:${requestId}`,
-    });
+    // No Circle job here. A transfer changes who the admin is, and Circle has no
+    // tag for that: both people already carry the org's tag. The add_tag jobs this
+    // used to queue carried only { orgId, newRole }, which the handler rejects, so
+    // every transfer left two failed rows in circle_sync_queue.
 
     // Fire-and-forget: send confirmation emails to both parties
     Promise.all([
@@ -450,24 +434,6 @@ export async function adminTransferTimeoutCheck(): Promise<{
             transfer.to_user_id,
             "org_admin_changed"
           );
-
-          // Circle sync: update tags for auto-approved transfer
-          await enqueueCircleSync({
-            operation: "add_tag",
-            entityType: "contact",
-            entityId: transfer.to_user_id,
-            payload: { orgId: transfer.organization_id, newRole: "org_admin" },
-            orgId: transfer.organization_id,
-            idempotencyKey: `transfer-auto-to:${transfer.id}`,
-          });
-          await enqueueCircleSync({
-            operation: "add_tag",
-            entityType: "contact",
-            entityId: transfer.from_user_id,
-            payload: { orgId: transfer.organization_id, newRole: "member" },
-            orgId: transfer.organization_id,
-            idempotencyKey: `transfer-auto-from:${transfer.id}`,
-          });
 
           // Fire-and-forget: send auto-approval notifications to both parties
           Promise.all([
