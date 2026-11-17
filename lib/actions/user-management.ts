@@ -5,7 +5,6 @@ import {
   canManageOrganization,
 } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { enqueueCircleSync } from "@/lib/circle/sync";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { sendTransactional } from "@/lib/comms/send";
 import {
@@ -200,15 +199,10 @@ export async function reactivateOrgUser(
       return { success: false, error: "Failed to reactivate user" };
     }
 
-    // Circle sync: restore user to Circle spaces
-    await enqueueCircleSync({
-      operation: "add_to_space",
-      entityType: "contact",
-      entityId: userId,
-      payload: { orgId },
-      orgId,
-      idempotencyKey: `reactivate:${userId}:${orgId}:${Date.now()}`,
-    });
+    // No Circle job here. This used to queue add_to_space with only { orgId },
+    // and the handler needs a spaceId and an email, so it could only fail. There
+    // is nothing to restore either: the remove_from_space that deactivation
+    // queues carries the same payload and does nothing in Circle.
 
     Promise.all([
       adminClient.auth.admin.getUserById(userId),
