@@ -315,7 +315,15 @@ export class CircleAdminClient {
     });
   }
 
-  /** Community member ids of a space's active members (paginated, 100/page). */
+  /**
+   * Community member ids of everyone in a space (paginated, 100/page).
+   *
+   * ⚠️ `status: "all"`, not `"active"`. Someone who has never accepted their
+   * community invite is in the space with status `inactive`. Reading only the
+   * active ones made the conference reconciler think they were missing and
+   * re-add them every day; Circle answers 422 to an add for someone already
+   * there (about 90 people a day, 2,355 failed queue rows by 2026-11-17).
+   */
   async listSpaceMemberIds(spaceId: number): Promise<number[]> {
     const ids: number[] = [];
     let page = 1;
@@ -324,7 +332,7 @@ export class CircleAdminClient {
         records: { community_member_id: number }[];
         has_next_page: boolean;
       }>("GET", "/space_members", {
-        params: { space_id: spaceId, status: "active", per_page: 100, page },
+        params: { space_id: spaceId, status: "all", per_page: 100, page },
       });
       const records = result.records ?? [];
       for (const row of records) {

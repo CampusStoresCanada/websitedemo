@@ -121,7 +121,7 @@ type SpaceResult = {
   noCircleAccount: number;
   inSpace: number;
   queuedAdds: number;
-  /** Refused by Circle in the last day (usually an unaccepted invite). */
+  /** Refused by Circle in the last day; held back from another try until tomorrow. */
   waitingOnInvite: number;
   queuedRemoves: number;
 };
@@ -229,9 +229,10 @@ async function syncOneSpace(
 
   const { toAdd: diffAdds, toRemove } = diffSpace(wanted, roster, [...added.values()]);
 
-  // Circle refuses (422) to add someone who never accepted their community
-  // invite. Retrying every hour just repeats the refusal, so after one, wait a
-  // day: once they accept, the next day's run adds them.
+  // When Circle refuses an add (422), retrying every hour just repeats the
+  // refusal, so after one, wait a day. An unaccepted invite is NOT such a
+  // refusal: that person is added and sits in the roster as inactive, which is
+  // why the roster read asks for every status.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: refused, error: refusedErr } = await db
     .from("circle_sync_queue")
