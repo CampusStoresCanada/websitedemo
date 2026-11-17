@@ -129,6 +129,40 @@ type SeatDb = {
   };
 };
 
+/** The API returns at most this many rows for one read, and says nothing when it cuts a list short. */
+const API_ROW_CAP = 1000;
+const HOLDER_LOOKUP_CHUNK = 150;
+
+/**
+ * Every row a query matches, not just the first thousand.
+ *
+ * One read is enough for a short list. A list that comes back exactly at the
+ * cap may have been cut, so it is read again in ordered pages until a short
+ * page says the end was reached. Without this a conference past 1,000 seats
+ * (or 1,000 catalogue links; 2027 had 619 in November) would lose the rest
+ * with no error: seats missing from badges, rosters and the Circle job.
+ */
+async function readEveryRow(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  build: () => any,
+  failure: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any[]> {
+  const first = await build();
+  if (first.error) throw new Error(`${failure}: ${first.error.message}`);
+  const firstRows = first.data ?? [];
+  if (firstRows.length < API_ROW_CAP) return firstRows;
+
+  const all = [];
+  for (let from = 0; ; from += API_ROW_CAP) {
+    const page = await build().order("id").range(from, from + API_ROW_CAP - 1);
+    if (page.error) throw new Error(`${failure}: ${page.error.message}`);
+    const rows = page.data ?? [];
+    all.push(...rows);
+    if (rows.length < API_ROW_CAP) return all;
+  }
+}
+
 /**
  * Load seat holdings, resolved against the catalogue.
  *
@@ -147,26 +181,37 @@ export async function loadSeatHoldings(
   db: SeatDb,
   query: SeatQuery
 ): Promise<{ seats: SeatHolding[]; entitiesById: Map<string, BuildEntity> }> {
-  let seatQuery = db.from("entity_balance_seats").select(SEAT_SELECT).eq("conference_id", query.conferenceId);
-  if (query.organizationId) seatQuery = seatQuery.eq("organization_id", query.organizationId);
-  if (query.holderPersonId) seatQuery = seatQuery.eq("holder_person_id", query.holderPersonId);
-  if (query.assigned === true) seatQuery = seatQuery.not("holder_person_id", "is", null);
-  if (query.assigned === false) seatQuery = seatQuery.is("holder_person_id", null);
-  if (query.balanceIds) seatQuery = seatQuery.in("balance_id", query.balanceIds);
-  if (query.seatIds) seatQuery = seatQuery.in("id", query.seatIds);
+  // Built fresh each time it is read, because a query can only be awaited once
+  // and a long result is read again in pages (readEveryRow).
+  const seatQuery = () => {
+    let q = db.from("entity_balance_seats").select(SEAT_SELECT).eq("conference_id", query.conferenceId);
+    if (query.organizationId) q = q.eq("organization_id", query.organizationId);
+    if (query.holderPersonId) q = q.eq("holder_person_id", query.holderPersonId);
+    if (query.assigned === true) q = q.not("holder_person_id", "is", null);
+    if (query.assigned === false) q = q.is("holder_person_id", null);
+    if (query.balanceIds) q = q.in("balance_id", query.balanceIds);
+    if (query.seatIds) q = q.in("id", query.seatIds);
+    return q;
+  };
 
-  const [seatRes, entityRes, refRes] = await Promise.all([
-    seatQuery,
-    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", query.conferenceId),
-    db
-      .from("conference_entity_refs")
-      .select("from_entity_id, to_entity_id, role, quantity")
-      .eq("conference_id", query.conferenceId),
+  const [seatRows, entityRows, refRows] = await Promise.all([
+    readEveryRow(seatQuery, "Could not load conference seats"),
+    readEveryRow(
+      () => db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", query.conferenceId),
+      "Could not load the conference catalog"
+    ),
+    readEveryRow(
+      () =>
+        db
+          .from("conference_entity_refs")
+          .select("id, from_entity_id, to_entity_id, role, quantity")
+          .eq("conference_id", query.conferenceId),
+      "Could not load the conference catalog"
+    ),
   ]);
-
-  if (seatRes.error) throw new Error(`Could not load conference seats: ${seatRes.error.message}`);
-  if (entityRes.error) throw new Error(`Could not load the conference catalog: ${entityRes.error.message}`);
-  if (refRes.error) throw new Error(`Could not load the conference catalog: ${refRes.error.message}`);
+  const seatRes = { data: seatRows };
+  const entityRes = { data: entityRows };
+  const refRes = { data: refRows };
 
   const byId = new Map<string, BuildEntity>(
     buildEntityGraph(entityRes.data ?? [], refRes.data ?? []).map((e) => [e.id, e])
@@ -218,15 +263,22 @@ export async function loadSeatHoldings(
    */
   const holderIds = [...new Set(out.map((r) => r.holderPersonId).filter((id): id is string => !!id))];
   if (holderIds.length > 0) {
-    const peopleRes = await db
-      .from("conference_people")
-      .select("id, display_name, user_id, contact_id, canonical_person_id")
-      .in("id", holderIds);
-    if (peopleRes.error) {
-      throw new Error(`Could not load seat holders: ${peopleRes.error.message}`);
+    // In chunks: the ids travel in the request address, and a few hundred of
+    // them make it too long ("Bad Request"). With every holder in one request
+    // this threw for the whole conference once enough seats were named.
+    const people: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < holderIds.length; i += HOLDER_LOOKUP_CHUNK) {
+      const peopleRes = await db
+        .from("conference_people")
+        .select("id, display_name, user_id, contact_id, canonical_person_id")
+        .in("id", holderIds.slice(i, i + HOLDER_LOOKUP_CHUNK));
+      if (peopleRes.error) {
+        throw new Error(`Could not load seat holders: ${peopleRes.error.message}`);
+      }
+      people.push(...((peopleRes.data ?? []) as Array<Record<string, unknown>>));
     }
     const byPersonId = new Map(
-      ((peopleRes.data ?? []) as Array<Record<string, unknown>>).map((r) => [
+      people.map((r) => [
         r.id as string,
         {
           name: typeof r.display_name === "string" ? r.display_name : null,

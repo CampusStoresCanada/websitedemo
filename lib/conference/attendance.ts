@@ -38,6 +38,7 @@
  * other would be wrong in opposite directions.
  */
 
+import { selectInChunks } from "@/lib/supabase/select-in-chunks";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
 import { dropDeclinedSeats, loadSeatHoldings, loadUsageIntents } from "@/lib/conference/seats";
 import { isFundedOffer } from "@/lib/conference/entity-pricing";
@@ -261,7 +262,9 @@ export async function loadDoorRoster(
     { data: contacts, error: contactError },
   ] = await Promise.all([
     orgIds.length
-      ? db.from("organizations").select("id, name").in("id", orgIds)
+      ? selectInChunks<{ id: string; name: string }>(orgIds, (ids) =>
+          db.from("organizations").select("id, name").in("id", ids)
+        )
       : Promise.resolve({ data: [], error: null }),
     entityId
       ? db
@@ -272,7 +275,9 @@ export async function loadDoorRoster(
           .in("result_state", ["valid", "not_on_ticket"])
       : Promise.resolve({ data: [], error: null }),
     contactIds.length
-      ? db.from("contacts").select("id, first_name, last_name").in("id", contactIds)
+      ? selectInChunks<{ id: string; first_name: string | null; last_name: string | null }>(contactIds, (ids) =>
+          db.from("contacts").select("id, first_name, last_name").in("id", ids)
+        )
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (orgError) throw new Error(`Could not load organisations: ${orgError.message}`);

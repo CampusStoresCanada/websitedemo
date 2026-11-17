@@ -1,3 +1,4 @@
+import { selectInChunks } from "@/lib/supabase/select-in-chunks";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { declinedSeatIds, loadSeatHoldings, loadUsageIntents } from "@/lib/conference/seats";
 import { getBadgeScanRules } from "@/lib/conference/badges/rules";
@@ -167,10 +168,14 @@ export async function resolveBadgeRun(
 
   const [contactsRes, orgsRes] = await Promise.all([
     canonicalIds.length
-      ? db.from("contacts").select("id, first_name, last_name, role_title").in("id", canonicalIds)
+      ? selectInChunks<Record<string, unknown>>(canonicalIds, (ids) =>
+          db.from("contacts").select("id, first_name, last_name, role_title").in("id", ids)
+        )
       : Promise.resolve({ data: [], error: null }),
     orgIds.length
-      ? db.from("organizations").select("id, name, city, province, is_test").in("id", orgIds)
+      ? selectInChunks<Record<string, unknown>>(orgIds, (ids) =>
+          db.from("organizations").select("id, name, city, province, is_test").in("id", ids)
+        )
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (contactsRes.error) throw new Error(`Could not load badge identities: ${contactsRes.error.message}`);

@@ -1,3 +1,4 @@
+import { selectInChunks } from "@/lib/supabase/select-in-chunks";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import { measureLogos } from "@/lib/conference/badges/logo-fit";
 import {
@@ -633,10 +634,9 @@ export async function buildBadgeJobDocument(params: {
   );
   const personIds = [...canonicalPersonIdsFromRows];
   if (userIds.length > 0) {
-    const { data: userRows } = await db
-      .from("users")
-      .select("id, person_id")
-      .in("id", userIds);
+    const { data: userRows } = await selectInChunks<UserIdentityRow>(userIds, (ids) =>
+      db.from("users").select("id, person_id").in("id", ids)
+    );
     const validUsers = ((userRows as UserIdentityRow[] | null) ?? []).filter(
       (row): row is UserIdentityRow =>
         typeof row.id === "string" &&
@@ -650,10 +650,12 @@ export async function buildBadgeJobDocument(params: {
     }
   }
   if (personIds.length > 0) {
-    const { data: peopleIdentityRows } = await db
-      .from("contacts")
-      .select("id, first_name, last_name, primary_email:work_email, title:role_title")
-      .in("id", personIds);
+    const { data: peopleIdentityRows } = await selectInChunks<CanonicalPersonRow>(personIds, (ids) =>
+      db
+        .from("contacts")
+        .select("id, first_name, last_name, primary_email:work_email, title:role_title")
+        .in("id", ids)
+    );
     for (const row of (peopleIdentityRows as CanonicalPersonRow[] | null) ?? []) {
       canonicalPersonById.set(row.id, row);
     }
