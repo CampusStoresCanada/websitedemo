@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getStats, getSiteContent, getCSCStaff } from "@/lib/data";
+import { getStats, getSiteContent, getCSCStaff, getPublicBoard } from "@/lib/data";
 import AboutHero from "@/components/about/AboutHero";
 import MissionSection from "@/components/about/MissionSection";
 import StatsSection from "@/components/home/StatsSection";
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 export default async function AboutPage() {
   const [stats, boardMembers, staffContacts, heroContent, missionContent, whatWeDoItems] = await Promise.all([
     getStats(),
-    getSiteContent("board_of_directors"),
+    getPublicBoard(),
     getCSCStaff(),
     getSiteContent("about_hero"),
     getSiteContent("about_mission"),

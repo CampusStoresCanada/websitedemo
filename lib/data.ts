@@ -861,3 +861,162 @@ export async function getSiteContent(section: string): Promise<SiteContentWithCo
   console.error(`Error fetching site content (${section}):`, anonResult.error);
   return [];
 }
+
+/**
+ * The board as the public sees it, driven by the register rather than by hand.
+ *
+ * Until now `/about` read nine `site_content` slots and nothing else. Those
+ * slots are where the governance register was originally backfilled FROM — the
+ * officer rows still say "sourced from the site_content board_of_directors/staff
+ * slots" — so the public page was the older source of truth and nothing synced
+ * the two in either direction. A director elected in January stayed off the page
+ * until somebody typed them in; one who left stayed on it until somebody deleted
+ * them.
+ *
+ * ⛔ Membership comes from `holdsOn`, NOT `hasBoardAccessOn`. Those are
+ * deliberately different: the access window keeps an outgoing director on the
+ * mailing list through the conference, and lets an incoming one into the board
+ * space early, but neither makes them a director. This page answers "who IS the
+ * board", so it tracks the seat. Shawn Davies drops off the day his term ends;
+ * Jackie Nguyen appears the day hers begins, and not in November when she is let
+ * into the board space.
+ *
+ * The slot is still the editorial record — display order, photograph, any
+ * wording — and is joined on by contact. What the slot no longer decides is
+ * WHO IS ON IT.
+ *
+ * ⚠️ Falls back to the raw slots if the register comes back empty. A public page
+ * showing no board at all is a worse failure than a stale one, and these three
+ * governance tables read zero rows through the wrong client without erroring.
+ */
+const BOARD_OFFICER_TITLES: Record<string, string> = {
+  president: "President",
+  vice_president: "Vice President",
+  secretary: "Secretary",
+  treasurer: "Treasurer",
+  past_president: "Past President",
+};
+
+export async function getPublicBoard(asOfOverride?: string): Promise<SiteContentWithContact[]> {
+  const slots = await getSiteContent("board_of_directors");
+
+  try {
+    const { loadBoardRegister } = await import("@/lib/governance/register");
+    const asOf =
+      asOfOverride ??
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+
+    const register = await loadBoardRegister({ asOf });
+    if (!register || register.holding.length === 0) return slots;
+
+    // ⛔ An incomplete register must not quietly shrink the public board.
+    //
+    // On 2027-01-01 four terms end on the same day. If the incoming four have
+    // not been recorded yet — certification is a button somebody has to press —
+    // the register holds five against a by-law floor of seven, and rendering
+    // that would tell the membership the board had halved overnight. Below the
+    // floor is far more likely to mean "not entered yet" than "four directors
+    // resigned", so fall back to the editorial slots and stay stale on purpose.
+    if (register.belowMinimum) {
+      console.warn(
+        `[getPublicBoard] register holds ${register.holding.length} as at ${asOf}, below the minimum of ${register.body.minSeatCount}. Showing the site_content slots instead — the terms are probably not recorded yet.`
+      );
+      return slots;
+    }
+
+    // Offices are their own assignments on the same body, open-ended and not
+    // counting toward the cap. They are what turns "Director" into "Treasurer".
+    const adminClient = createAdminClient();
+    const { data: officerRows } = await adminClient
+      .from("governance_role_assignments")
+      .select("person_contact_id, role_key, term_start, term_end")
+      .eq("body_id", register.body.id)
+      .in("role_key", Object.keys(BOARD_OFFICER_TITLES));
+
+    const officeFor = new Map<string, string>();
+    for (const o of officerRows ?? []) {
+      const start = o.term_start as string;
+      const end = o.term_end as string | null;
+      if (start > asOf) continue;
+      if (end && end <= asOf) continue;
+      const title = BOARD_OFFICER_TITLES[o.role_key as string];
+      if (title && o.person_contact_id) officeFor.set(o.person_contact_id as string, title);
+    }
+
+    const slotByContact = new Map<string, SiteContentWithContact>();
+    for (const s of slots) if (s.contact_id) slotByContact.set(s.contact_id, s);
+
+    // Directors with no slot still need a contact card, fetched with the same
+    // join the slots use so both render identically.
+    const unslotted = register.holding
+      .map((t) => t.personContactId)
+      .filter((id): id is string => Boolean(id) && !slotByContact.has(id as string));
+
+    const extraContacts = new Map<string, SiteContentWithContact["contact"]>();
+    if (unslotted.length > 0) {
+      const { data: rows } = await adminClient
+        .from("contacts")
+        .select(
+          `id, name, profile_picture_url, role_title, circle_id,
+           organization:organizations!contacts_organization_id_fkey(id, slug, logo_url, type, membership_status, archived_at, brand_colors(hex, sort_order))`
+        )
+        .in("id", unslotted);
+      for (const r of rows ?? [])
+        extraContacts.set(
+          r.id as string,
+          r as unknown as NonNullable<SiteContentWithContact["contact"]>
+        );
+    }
+
+    const members: SiteContentWithContact[] = [];
+    for (const term of register.holding) {
+      const contactId = term.personContactId;
+      if (!contactId) continue;
+      const office = officeFor.get(contactId) ?? "Director";
+      const slot = slotByContact.get(contactId);
+
+      if (slot) {
+        // Keep the slot's editorial content; the register decides the title.
+        members.push({ ...slot, subtitle: office });
+        continue;
+      }
+      const contact = extraContacts.get(contactId);
+      if (!contact) continue;
+      members.push({
+        ...(slots[0] ?? ({} as SiteContentWithContact)),
+        id: `register-${term.assignmentId}`,
+        section: "board_of_directors",
+        contact_id: contactId,
+        title: term.name,
+        subtitle: office,
+        body: null,
+        image_url: null,
+        display_order: 999,
+        is_active: true,
+        contact,
+      } as SiteContentWithContact);
+    }
+
+    // Editorial order where a slot gave one; everyone else after, by name.
+    members.sort((a, b) => {
+      const ao = a.display_order ?? 999;
+      const bo = b.display_order ?? 999;
+      return ao - bo || (a.title ?? "").localeCompare(b.title ?? "");
+    });
+
+    // ⚠️ A slot with no contact linked cannot be checked against the register,
+    // so it is kept rather than silently dropped. Deleting content nobody can
+    // verify is the wrong direction to fail in.
+    for (const s of slots) if (!s.contact_id) members.push(s);
+
+    return members;
+  } catch (err) {
+    console.error("[getPublicBoard] falling back to site_content slots:", err);
+    return slots;
+  }
+}
