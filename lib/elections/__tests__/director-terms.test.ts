@@ -186,3 +186,71 @@ describe("the transition moves access, and no longer writes terms", () => {
     expect(reg).toContain("term.accessUntil ?? term.termEnd");
   });
 });
+
+/**
+ * The presses that are not decisions.
+ *
+ * Steve, 2026-11-17, on the access window: "Press three isn't real... the
+ * second we have a solution and the winning parties are notified the rest is
+ * just included. We put them into the transition."
+ *
+ * He was right about that one and about the one before it. Of the three presses
+ * Jackie needed, two asked a person to confirm something the system already
+ * knew: the term dates are derived, and both ends of the access window are
+ * dates already on record. Only the first — certifying — is an act.
+ */
+describe("certifying records the board, in the same act", () => {
+  it("writes the terms on the acclaimed path", () => {
+    const fn = service.slice(service.indexOf("export async function certifyElection"));
+    const body = fn.slice(0, fn.indexOf("\nexport "));
+    expect(body).toContain("await writeElectedTerms(db, slug)");
+  });
+
+  it("and on the balloted path, or a ballot would leave the board unrecorded", () => {
+    const fn = service.slice(service.indexOf("export async function certifyElection"));
+    const body = fn.slice(0, fn.indexOf("\nexport "));
+    expect(body.match(/await writeElectedTerms\(db, slug\)/g)?.length).toBe(2);
+  });
+
+  it("is idempotent, so certifying twice seats nobody twice", () => {
+    expect(service).toContain("const toWrite = proposal.terms.filter((t) => !t.alreadyRecorded)");
+  });
+});
+
+describe("telling the winners puts them into the transition", () => {
+  it("stamps the window as part of notifying, not as a later press", () => {
+    const fn = service.slice(service.indexOf("export async function notifyCandidates"));
+    expect(fn).toContain("await stampTransitionAccess(db, slug, sentOn)");
+  });
+
+  it("opens the incoming window on the day they were told", () => {
+    const start = service.indexOf("async function stampTransitionAccess");
+    const fn = service.slice(start, service.indexOf("\nexport ", start));
+    expect(fn).toContain("access_from: from");
+    // The date is the caller's `today()` at the moment of sending, passed in —
+    // not re-derived here, where a later run would silently move it.
+    const notify = service.slice(service.indexOf("export async function notifyCandidates"));
+    expect(notify).toContain("const sentOn = today();");
+    expect(fn).not.toContain("today()");
+  });
+
+  it("closes the outgoing window at the conference, or the meeting if there is none", () => {
+    const start = service.indexOf("async function stampTransitionAccess");
+    const fn = service.slice(start, service.indexOf("\nexport ", start));
+    expect(fn).toContain("state.conferenceEndsOn ?? election.schedule.agmDate");
+    expect(fn).toContain("access_until: until");
+  });
+
+  it("⛔ never touches a protected role", () => {
+    const start = service.indexOf("async function stampTransitionAccess");
+    const fn = service.slice(start, service.indexOf("\nexport ", start));
+    expect(fn).toContain("filter((p) => !p.protectedRole)");
+  });
+
+  it("⛔ writes ACCESS only — an incoming director still holds no seat", () => {
+    const start = service.indexOf("async function stampTransitionAccess");
+    const fn = service.slice(start, service.indexOf("\nexport ", start));
+    expect(fn).not.toContain("term_start:");
+    expect(fn).not.toContain("counts_toward_cap");
+  });
+});

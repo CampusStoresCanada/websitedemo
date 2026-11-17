@@ -82,7 +82,7 @@ export default function ElectedTermsPanel({
         <h2 className="text-sm font-semibold text-gray-900">Board register</h2>
         <p className="mt-1 text-sm text-gray-700">
           All {recorded.length} elected director{recorded.length === 1 ? " is" : "s are"} on the
-          register for {cycleYear}.
+          register for {cycleYear}, written when the result was certified.
         </p>
         <ul className="mt-2 space-y-1 text-xs text-gray-600">
           {recorded.map((t) => (
@@ -97,11 +97,12 @@ export default function ElectedTermsPanel({
 
   return (
     <section className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
-      <h2 className="text-sm font-semibold text-gray-900">Record the terms on the board register</h2>
+      <h2 className="text-sm font-semibold text-gray-900">Terms still to record</h2>
       <p className="mt-1 text-xs text-gray-700">
-        The result is certified, but these directors are not yet on the register, so nothing that
-        asks &ldquo;who is on the board&rdquo; can see them — the term-limit check and the
-        governance mailing list included.
+        Certifying writes these by itself, so this should normally be empty. Seeing names here
+        means the result was certified before it did — press it once and they are on the register.
+        Nothing that asks &ldquo;who is on the board&rdquo; can see them until they are: the
+        term-limit check and the governance mailing list included.
       </p>
 
       <ul className="mt-3 divide-y divide-amber-200 rounded border border-amber-200 bg-white">

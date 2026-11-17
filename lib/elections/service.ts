@@ -2616,6 +2616,9 @@ export async function certifyElection(
       .update({ status: "certified", updated_at: new Date().toISOString() })
       .eq("id", election.id);
 
+    // The board register, in the same act. See writeElectedTerms.
+    await writeElectedTerms(db, slug);
+
     return ok({
       elected: outcomes.elected.map((c, i) => ({
         nominationId: c.nominationId,
@@ -2672,6 +2675,10 @@ export async function certifyElection(
     .from("elections")
     .update({ status: "certified", updated_at: new Date().toISOString() })
     .eq("id", election.id);
+
+  // The board register, in the same act — both branches, or a balloted result
+  // would leave the board unrecorded where an acclaimed one did not.
+  await writeElectedTerms(db, slug);
 
   return ok({ elected: counted.data.results.filter((r) => r.elected), reconciled });
 }
@@ -4531,6 +4538,59 @@ export async function applyBoardTransition(
  * confirms they did it another way, so the ordering is enforced without taking
  * the human option away.
  */
+/**
+ * Open the incoming window and close the outgoing one, from records.
+ *
+ * ⛔ Nothing here is a choice. `from` is the day the winners were told, which
+ * the caller has just done; `until` is the end of the conference following the
+ * meeting, or the meeting itself where no conference is on record. Both come
+ * off the transition state that the board transition panel already reads — the
+ * same `resolveEffectiveDate` anchors, resolved rather than asked for.
+ *
+ * Writes ACCESS only, never a term. An incoming director gets the mailing list
+ * and the board space; they are still not a director, do not hold a seat, and
+ * do not count toward the floor of seven until their term starts.
+ */
+async function stampTransitionAccess(
+  db: ReturnType<typeof createAdminClient>,
+  slug: string,
+  from: string
+): Promise<void> {
+  const state = await getBoardTransition(slug);
+  if (!state) return;
+  const election = await getElection(slug);
+  if (!election) return;
+
+  const until = state.conferenceEndsOn ?? election.schedule.agmDate;
+
+  const incoming = state.plan.incoming.map((p) => p.contactId);
+  if (incoming.length > 0) {
+    const { error } = await db
+      .from("governance_role_assignments")
+      .update({ access_from: from, updated_at: new Date().toISOString() })
+      .eq("body_id", election.bodyId)
+      .eq("role_key", "director")
+      .eq("elected_at_election_id", election.id)
+      .in("person_contact_id", incoming);
+    if (error) console.error("[notifyCandidates] incoming access not stamped:", error.message);
+  }
+
+  // ⛔ Never a protected role: CSC staff and the Executive Director hold access
+  // because of their job, not their seat.
+  const outgoing = state.plan.outgoing.filter((p) => !p.protectedRole).map((p) => p.contactId);
+  if (outgoing.length > 0) {
+    const { error } = await db
+      .from("governance_role_assignments")
+      .update({ access_until: until, updated_at: new Date().toISOString() })
+      .eq("body_id", election.bodyId)
+      .eq("role_key", "director")
+      .in("person_contact_id", outgoing)
+      .lte("term_start", until)
+      .or(`term_end.is.null,term_end.lte.${until}`);
+    if (error) console.error("[notifyCandidates] outgoing access not stamped:", error.message);
+  }
+}
+
 export async function notifyCandidates(
   slug: string,
   sentByProfileId: string
@@ -4562,6 +4622,8 @@ export async function notifyCandidates(
   const { notifyCandidateResults } = await import("./notify");
   const summary = summarizeOutcomes(await notifyCandidateResults(election, outcomes));
 
+  const sentOn = today();
+
   await db
     .from("elections")
     .update({
@@ -4575,6 +4637,24 @@ export async function notifyCandidates(
       updated_at: new Date().toISOString(),
     })
     .eq("id", election.id);
+
+  // ⛔ Telling the winners IS putting them into the transition.
+  //
+  // This used to be a third button with a date picker, and there was nothing on
+  // it for a person to decide: both ends of the window are facts the system
+  // already holds. Steve: "the second we have a solution and the winning
+  // parties are notified the rest is just included. We put them into the
+  // transition."
+  //
+  //   incoming access FROM  the day they were told — this moment
+  //   outgoing access UNTIL the end of the conference that follows the meeting,
+  //                         which resolveEffectiveDate already reads; the AGM
+  //                         itself when no conference is on record, since that
+  //                         is the other anchor the by-law gives.
+  //
+  // ⚠️ Access only. The TERM is untouched: an incoming director is still not a
+  // director until their term starts, and still does not count toward quorum.
+  await stampTransitionAccess(db, slug, sentOn);
 
   return ok({
     elected: outcomes.elected.length,
@@ -4796,6 +4876,51 @@ export async function getElectionTimeline(
  * the write idempotent. Before this existed that column was null in all 56
  * rows of the table.
  */
+/**
+ * Write the terms certification just established.
+ *
+ * ⛔ Called BY `certifyElection`, both branches, so recording the result and
+ * recording the board are one act. They were two, and the second was a button
+ * I added: a panel showing a proposal with nothing on it to choose, since the
+ * dates are derived and `counts_toward_cap` is true for every full term off a
+ * general election. Steve asked why it was not automatic, I answered that the
+ * person pressing Certify is already making the declaration, and then built the
+ * confirmation anyway.
+ *
+ * Idempotent on `elected_at_election_id`, so certifying twice seats nobody
+ * twice, and safe to call from a path that may already have run.
+ */
+async function writeElectedTerms(
+  db: ReturnType<typeof createAdminClient>,
+  slug: string
+): Promise<{ written: number; skipped: number }> {
+  const proposal = await getElectedTermsProposal(slug);
+  if (!proposal) return { written: 0, skipped: 0 };
+
+  const toWrite = proposal.terms.filter((t) => !t.alreadyRecorded);
+  if (toWrite.length === 0) return { written: 0, skipped: proposal.terms.length };
+
+  const { error } = await db.from("governance_role_assignments").insert(
+    toWrite.map((p) => ({
+      body_id: proposal.election.bodyId,
+      person_contact_id: p.personContactId,
+      person_profile_id: p.personProfileId,
+      organization_id: p.organizationId,
+      role_key: "director",
+      term_start: p.termStart,
+      term_end: p.termEnd,
+      counts_toward_cap: p.countsTowardCap,
+      elected_at_election_id: proposal.election.id,
+      notes: `Elected at the ${proposal.election.cycleYear} annual general meeting; recorded when the result was certified.`,
+    }))
+  );
+  if (error) {
+    console.error("[certifyElection] the terms did not save:", error.message);
+    return { written: 0, skipped: proposal.terms.length };
+  }
+  return { written: toWrite.length, skipped: proposal.terms.length - toWrite.length };
+}
+
 export async function getElectedTermsProposal(slug: string): Promise<{
   election: { id: string; bodyId: string; cycleYear: number; status: string };
   terms: ProposedTerm[];
