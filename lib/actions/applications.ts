@@ -716,6 +716,12 @@ export async function approveApplication(
     confirmDuplicates?: boolean;
     /** When the first invoice falls due, if CSC agreed later terms (YYYY-MM-DD). */
     invoiceDueDate?: string;
+    /**
+     * Partner only: no dues invoice is sent now. The partner goes straight to
+     * grace, and the dues ride on the invoice for their conference order (the
+     * cart adds the dues line to a booth for a partner with no paid coverage).
+     */
+    duesOnConferenceInvoice?: boolean;
   }
 ): Promise<{ success: boolean; error?: string; duplicates?: DuplicateOrgMatch[] }> {
   const auth = await requireAdmin();
@@ -748,6 +754,8 @@ export async function approveApplication(
 
   const appData = app.application_data as Record<string, unknown>;
   const applicationType = app.application_type as "member" | "partner";
+  const duesOnConferenceInvoice =
+    options?.duesOnConferenceInvoice === true && applicationType === "partner";
 
   const orgName =
     (appData.organization_name as string) ||
@@ -945,6 +953,24 @@ export async function approveApplication(
       console.error("Booth minting / membership activation failed for pay-first application:", err);
       // Non-fatal — admin can reconcile manually; the org and payment record still exist.
     }
+  } else if (duesOnConferenceInvoice) {
+    // No dues invoice. A sponsor billed booth, sponsorship and dues together
+    // (Kivuto, 2026-11) used to get this standalone invoice by email and then
+    // see it voided minutes later, when the conference invoice replaced it.
+    // Same state Revive & bill reaches (in, not yet paid), without its bill.
+    // If the conference invoice never goes out, Revive & bill still raises the
+    // dues invoice on its own.
+    const moved = await transitionMembershipState(
+      org.id,
+      "grace",
+      "admin",
+      userId,
+      "Approved with dues billed on their conference invoice",
+      { revived_from: "approved", dues_on_conference_invoice: true }
+    );
+    if (!moved.success) {
+      console.error(`approveApplication: could not move ${org.id} to grace: ${moved.error}`);
+    }
   } else {
     stripeInvoiceUrl = await invoiceFirstMembershipPeriod(org.id, app.applicant_email, options?.invoiceDueDate);
   }
@@ -1015,7 +1041,9 @@ export async function approveApplication(
   // asking them to "complete payment" (and pointing that link at a billing
   // page with nothing owed) would be wrong. The account invite in step 6
   // already gets them into the app and on to the next onboarding step.
-  if (app.applicant_email && !isPaidFirstBoothApplication) {
+  // Also skipped when the dues ride on the conference invoice: there is nothing
+  // to pay yet, and that invoice is the one that asks.
+  if (app.applicant_email && !isPaidFirstBoothApplication && !duesOnConferenceInvoice) {
     await sendApplicationApprovedEmail(
       app.applicant_email,
       app.applicant_name,

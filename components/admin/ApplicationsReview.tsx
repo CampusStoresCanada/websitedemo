@@ -94,6 +94,9 @@ export function ApplicationsReview({
   // Per application: blank means the usual 30 days. Set only when CSC agreed
   // later terms (Kivuto, 2026-11: dues due January 1).
   const [invoiceDueDates, setInvoiceDueDates] = useState<Record<string, string>>({});
+  // Per application: dues go on the partner's conference invoice, so approval
+  // sends no dues invoice of its own.
+  const [duesOnConference, setDuesOnConference] = useState<Record<string, boolean>>({});
   const [duplicateWarning, setDuplicateWarning] = useState<{
     id: string;
     matches: DuplicateOrgMatch[];
@@ -138,7 +141,11 @@ export function ApplicationsReview({
     setActionLoading(id);
 
     const invoiceDueDate = invoiceDueDates[id] || undefined;
-    const result = await approveApplication(id, { confirmDuplicates, invoiceDueDate });
+    const result = await approveApplication(id, {
+      confirmDuplicates,
+      invoiceDueDate,
+      duesOnConferenceInvoice: duesOnConference[id] === true,
+    });
 
     setActionLoading(null);
 
@@ -340,6 +347,10 @@ export function ApplicationsReview({
                           onInvoiceDueDateChange={(v) =>
                             setInvoiceDueDates((prev) => ({ ...prev, [app.id]: v }))
                           }
+                          duesOnConference={duesOnConference[app.id] === true}
+                          onDuesOnConferenceChange={(v) =>
+                            setDuesOnConference((prev) => ({ ...prev, [app.id]: v }))
+                          }
                           onApprove={() => handleApprove(app.id)}
                           onConfirmApproveAnyway={() => handleApprove(app.id, true)}
                           onCancelDuplicateWarning={() => setDuplicateWarning(null)}
@@ -449,6 +460,8 @@ function ExpandedView({
   boardVote,
   invoiceDueDate,
   onInvoiceDueDateChange,
+  duesOnConference,
+  onDuesOnConferenceChange,
   onApprove,
   onConfirmApproveAnyway,
   onCancelDuplicateWarning,
@@ -477,6 +490,8 @@ function ExpandedView({
   boardVote: BoardVoteSummary | null;
   invoiceDueDate: string;
   onInvoiceDueDateChange: (v: string) => void;
+  duesOnConference: boolean;
+  onDuesOnConferenceChange: (v: boolean) => void;
   onApprove: () => void;
   onConfirmApproveAnyway: () => void;
   onCancelDuplicateWarning: () => void;
@@ -796,12 +811,26 @@ function ExpandedView({
                   type="date"
                   value={invoiceDueDate}
                   onChange={(e) => onInvoiceDueDateChange(e.target.value)}
-                  disabled={isLoading}
-                  className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                  disabled={isLoading || duesOnConference}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-50"
                   aria-label="First invoice due date, blank for 30 days"
                 />
-                {!invoiceDueDate && <span className="text-gray-400">30 days</span>}
+                {!invoiceDueDate && !duesOnConference && <span className="text-gray-400">30 days</span>}
               </label>
+              {app.application_type === "partner" && (
+                <label
+                  className="flex items-center gap-1.5 text-xs text-gray-500"
+                  title="No dues invoice is sent now. They get access straight away, and the dues are added to the invoice for their booth."
+                >
+                  <input
+                    type="checkbox"
+                    checked={duesOnConference}
+                    onChange={(e) => onDuesOnConferenceChange(e.target.checked)}
+                    disabled={isLoading}
+                  />
+                  Bill dues with their booth
+                </label>
+              )}
               <button
                 onClick={onStartReject}
                 disabled={isLoading}
