@@ -57,6 +57,10 @@
       "schedule": "0 */4 * * *"
     },
     {
+      "path": "/api/cron/stripe-reconcile",
+      "schedule": "0 10 * * *"
+    },
+    {
       "path": "/api/cron/qbo-tax-reconcile",
       "schedule": "30 6 * * *"
     },
