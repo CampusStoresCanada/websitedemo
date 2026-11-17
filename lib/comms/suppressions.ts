@@ -52,7 +52,15 @@ export function normalizeEmail(email: string): string {
  * commercial-only. The separate deliverability filter that transactional
  * sends do respect is `loadHardBouncedEmails`, enforced centrally in
  * lib/email/send.ts.
+ *
+ * ⛔ Fails CLOSED: if the lookup errors this throws, and the caller must not
+ * send. It used to return the full list on an error, which mailed everyone,
+ * unsubscribes included. And the error was not rare: the lookup put every
+ * address in one request, which the API rejects ("Bad Request") once the list
+ * passes a few hundred addresses. So it reads in chunks.
  */
+const SUPPRESSION_LOOKUP_CHUNK = 100;
+
 export async function filterSuppressedRecipients(
   supabase: AdminClient,
   recipients: ResolvedRecipient[],
@@ -63,19 +71,22 @@ export async function filterSuppressedRecipients(
   const emails = [...new Set(recipients.map((r) => normalizeEmail(r.email)))];
   const categoriesToCheck = category ? [GLOBAL_SUPPRESSION_CATEGORY, category] : [GLOBAL_SUPPRESSION_CATEGORY];
 
-  const { data: suppressions, error } = await supabase
-    .from("comms_suppressions")
-    .select("email, category")
-    .in("email", emails)
-    .in("category", categoriesToCheck);
+  const suppressedEmails = new Set<string>();
+  for (let i = 0; i < emails.length; i += SUPPRESSION_LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from("comms_suppressions")
+      .select("email")
+      .in("email", emails.slice(i, i + SUPPRESSION_LOOKUP_CHUNK))
+      .in("category", categoriesToCheck);
 
-  if (error) {
-    console.error("[comms/suppressions] filterSuppressedRecipients error:", error);
-    return recipients;
+    if (error) {
+      console.error("[comms/suppressions] filterSuppressedRecipients error:", error);
+      throw new Error(`Could not check the unsubscribe list, so nothing was sent: ${error.message}`);
+    }
+    for (const row of data ?? []) suppressedEmails.add(normalizeEmail(row.email as string));
   }
-  if (!suppressions?.length) return recipients;
 
-  const suppressedEmails = new Set(suppressions.map((s) => s.email));
+  if (suppressedEmails.size === 0) return recipients;
   return recipients.filter((r) => !suppressedEmails.has(normalizeEmail(r.email)));
 }
 
@@ -129,18 +140,25 @@ export async function loadHardBouncedEmails(emails: string[]): Promise<Set<strin
   if (emails.length === 0) return new Set();
   const unique = [...new Set(emails.map(normalizeEmail))];
 
+  // In chunks, for the same reason as filterSuppressedRecipients: one request
+  // carrying a few hundred addresses is rejected, and failing open on that
+  // would mail every dead mailbox on any large send.
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("comms_suppressions")
-    .select("email")
-    .eq("kind", TRANSACTIONAL_BLOCKING_KIND)
-    .in("email", unique);
+  const bounced = new Set<string>();
+  for (let i = 0; i < unique.length; i += SUPPRESSION_LOOKUP_CHUNK) {
+    const { data, error } = await supabase
+      .from("comms_suppressions")
+      .select("email")
+      .eq("kind", TRANSACTIONAL_BLOCKING_KIND)
+      .in("email", unique.slice(i, i + SUPPRESSION_LOOKUP_CHUNK));
 
-  if (error) {
-    console.error("[comms/suppressions] loadHardBouncedEmails error:", error);
-    return new Set();
+    if (error) {
+      console.error("[comms/suppressions] loadHardBouncedEmails error:", error);
+      continue;
+    }
+    for (const r of data ?? []) bounced.add(normalizeEmail(r.email as string));
   }
-  return new Set((data ?? []).map((r) => normalizeEmail(r.email as string)));
+  return bounced;
 }
 
 export async function resubscribeEmail(

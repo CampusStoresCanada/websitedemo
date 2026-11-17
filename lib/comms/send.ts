@@ -176,7 +176,23 @@ export async function executeCampaignSend(
   // CASL: transactional templates are exempt and always go through;
   // everything else respects per-category and global unsubscribes.
   if (!template?.is_transactional) {
-    recipients = await filterSuppressedRecipients(supabase, recipients, template?.category ?? null);
+    try {
+      recipients = await filterSuppressedRecipients(supabase, recipients, template?.category ?? null);
+    } catch (err) {
+      // No unsubscribe check, no send. A dry run changes nothing, so it only
+      // reports; a real send is marked failed so it can be sent again.
+      const message = err instanceof Error ? err.message : "Could not check the unsubscribe list";
+      if (!options.dryRun) {
+        await supabase.from("message_campaigns").update({ status: "failed" }).eq("id", campaignId);
+      }
+      return {
+        campaignId,
+        recipientCount: recipients.length,
+        sentCount: 0,
+        failedCount: options.dryRun ? 0 : recipients.length,
+        errors: [message],
+      };
+    }
   }
 
   if (options.dryRun) {
