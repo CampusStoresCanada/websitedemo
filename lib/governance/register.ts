@@ -36,6 +36,14 @@ export interface RegisterTerm {
   /** EXCLUSIVE. Null means open-ended. */
   termEnd: string | null;
   countsTowardCap: boolean;
+  /**
+   * When board access begins, if it is not simply `termStart`. NULL means the
+   * term's own start. See the access-window migration for why these are
+   * separate facts.
+   */
+  accessFrom: string | null;
+  /** When board access ends, EXCLUSIVE. NULL means `termEnd`. */
+  accessUntil: string | null;
   electedAtElectionId: string | null;
   appointingResolution: string | null;
   notes: string | null;
@@ -64,6 +72,14 @@ export interface BoardRegister {
   past: RegisterTerm[];
   /** Markers, kept out of every count above. */
   markers: RegisterTerm[];
+  /**
+   * Board ACCESS on `asOf` without a seat on it — incoming directors let in
+   * early, outgoing ones kept on through the handover. These are exactly the
+   * people the mailing list and the board space should reach and the quorum
+   * count must not include, which is why they are their own list rather than
+   * folded into `holding`.
+   */
+  withAccessNotHolding: { term: RegisterTerm; standing: AccessStanding }[];
   /** Seats on the body with nobody in them, or null when the body has no fixed size. */
   vacancies: number | null;
   /** Below the by-law floor — a real governance problem, not a tidiness one. */
@@ -71,7 +87,7 @@ export interface BoardRegister {
 }
 
 const SELECT =
-  "id, person_contact_id, person_profile_id, organization_id, term_start, term_end, counts_toward_cap, elected_at_election_id, appointing_resolution, notes, profiles:person_profile_id(display_name), contacts:person_contact_id(first_name, last_name), organizations:organization_id(name)";
+  "id, person_contact_id, person_profile_id, organization_id, term_start, term_end, access_from, access_until, counts_toward_cap, elected_at_election_id, appointing_resolution, notes, profiles:person_profile_id(display_name), contacts:person_contact_id(first_name, last_name), organizations:organization_id(name)";
 
 type Row = {
   id: string;
@@ -80,6 +96,8 @@ type Row = {
   organization_id: string | null;
   term_start: string;
   term_end: string | null;
+  access_from: string | null;
+  access_until: string | null;
   counts_toward_cap: boolean;
   elected_at_election_id: string | null;
   appointing_resolution: string | null;
@@ -109,6 +127,8 @@ function toTerm(row: Row): RegisterTerm {
     organizationName: row.organizations?.name ?? null,
     termStart: row.term_start,
     termEnd: row.term_end,
+    accessFrom: row.access_from,
+    accessUntil: row.access_until,
     countsTowardCap: row.counts_toward_cap,
     electedAtElectionId: row.elected_at_election_id,
     appointingResolution: row.appointing_resolution,
@@ -133,6 +153,65 @@ export function holdsOn(
   if (term.isNoServiceMarker) return false;
   if (term.termStart > asOf) return false;
   return !term.termEnd || term.termEnd > asOf;
+}
+
+/**
+ * Does this term give its holder BOARD ACCESS on `asOf`?
+ *
+ * ⛔ Not the same question as `holdsOn`, and the difference is the whole point
+ * of the access columns. `holdsOn` answers the governance question — quorum,
+ * voting, the four-term cap — and is the one that must stay strict. This
+ * answers the operational one: the mailing list, the board space, the papers.
+ *
+ *   incoming  Jackie Nguyen is acclaimed in October for a term starting
+ *             2027-01-01, and the Executive Director invites her to the board
+ *             in November. `hasBoardAccessOn` → true. `holdsOn` → FALSE, and it
+ *             has to be: she is not a director yet, and counting her toward the
+ *             floor of seven would report a board that does not exist.
+ *
+ *   outgoing  Shawn Davies's term ends 2027-01-01 and he stays through the
+ *             conference that follows the AGM. `hasBoardAccessOn` → true until
+ *             the date the transition stamped. `holdsOn` → false from 01-01.
+ *
+ * ⛔ NULL coalesces to the term's own dates, so every row written before these
+ * columns existed answers exactly as it did before.
+ *
+ * A no-service marker grants nothing: it is a statement that somebody has NOT
+ * served, not a term, and it must never put anyone on a mailing list.
+ */
+export function hasBoardAccessOn(
+  term: Pick<
+    RegisterTerm,
+    "termStart" | "termEnd" | "accessFrom" | "accessUntil" | "isNoServiceMarker"
+  >,
+  asOf: string
+): boolean {
+  if (term.isNoServiceMarker) return false;
+  const from = term.accessFrom ?? term.termStart;
+  const until = term.accessUntil ?? term.termEnd;
+  if (from > asOf) return false;
+  return !until || until > asOf;
+}
+
+/**
+ * Why somebody has board access, in the words the screens use.
+ *
+ * Derived, never stored — a stored status is a second source of truth that
+ * someone has to remember to flip, and the dates already say it.
+ */
+export type AccessStanding = "holding" | "incoming" | "outgoing" | "none";
+
+export function accessStandingOn(
+  term: Pick<
+    RegisterTerm,
+    "termStart" | "termEnd" | "accessFrom" | "accessUntil" | "isNoServiceMarker"
+  >,
+  asOf: string
+): AccessStanding {
+  if (holdsOn(term, asOf)) return "holding";
+  if (!hasBoardAccessOn(term, asOf)) return "none";
+  // Access without the seat: before it starts, or after it ended.
+  return term.termStart > asOf ? "incoming" : "outgoing";
 }
 
 /**
@@ -172,6 +251,7 @@ export async function loadBoardRegister(input: {
   const incoming: RegisterTerm[] = [];
   const past: RegisterTerm[] = [];
   const markers: RegisterTerm[] = [];
+  const withAccessNotHolding: { term: RegisterTerm; standing: AccessStanding }[] = [];
 
   for (const raw of (rows ?? []) as unknown as Row[]) {
     const term = toTerm(raw);
@@ -179,8 +259,16 @@ export async function loadBoardRegister(input: {
       markers.push(term);
       continue;
     }
-    if (holdsOn(term, input.asOf)) holding.push(term);
-    else if (term.termStart > input.asOf) incoming.push(term);
+    if (holdsOn(term, input.asOf)) {
+      holding.push(term);
+      continue;
+    }
+    // Not a seat, but possibly still access. Both lists matter: `incoming` and
+    // `past` are about the TERM, this is about the door.
+    const standing = accessStandingOn(term, input.asOf);
+    if (standing === "incoming" || standing === "outgoing")
+      withAccessNotHolding.push({ term, standing });
+    if (term.termStart > input.asOf) incoming.push(term);
     else past.push(term);
   }
 
@@ -203,6 +291,7 @@ export async function loadBoardRegister(input: {
     incoming,
     past,
     markers,
+    withAccessNotHolding,
     vacancies: seatCount === null ? null : Math.max(0, seatCount - holding.length),
     belowMinimum: minSeatCount !== null && holding.length < minSeatCount,
   };

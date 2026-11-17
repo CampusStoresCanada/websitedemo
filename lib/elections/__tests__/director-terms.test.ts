@@ -145,3 +145,44 @@ describe("leaving the board, and filling the seat", () => {
     expect(appoint).toContain("appointing_resolution:");
   });
 });
+
+/**
+ * One writer for the term, one writer for the door.
+ *
+ * `applyBoardTransition` used to insert the elected term itself, dated from the
+ * MEETING, while `recordElectedTerms` writes the same row at certification on
+ * the nominal January-1 convention. Two writers disagreeing about the dates on
+ * one row, and the meeting-dated one was wrong: it opened a twenty-day gap in
+ * which the seat had no holder.
+ */
+describe("the transition moves access, and no longer writes terms", () => {
+  it("stopped inserting a term of its own", () => {
+    const fn = service.slice(service.indexOf("export async function applyBoardTransition"));
+    const body = fn.slice(0, fn.indexOf("\nexport "));
+    expect(body).not.toContain('role_key: "director",\n        term_start: input.effectiveOn');
+    expect(body).not.toContain("elected_at_election_id: election.id,\n        notes: `Elected");
+  });
+
+  it("stamps access_from across the incoming cohort", () => {
+    const fn = service.slice(service.indexOf("export async function applyBoardTransition"));
+    expect(fn).toContain("access_from: input.effectiveOn");
+    expect(fn).toContain(".in(\"person_contact_id\", incomingContactIds)");
+  });
+
+  it("stamps access_until across the outgoing cohort, skipping protected roles", () => {
+    const fn = service.slice(service.indexOf("export async function applyBoardTransition"));
+    expect(fn).toContain("access_until: input.effectiveOn");
+    expect(fn).toContain("filter((p) => !p.protectedRole)");
+  });
+
+  it("refuses to grant access when certification never recorded the terms", () => {
+    const fn = service.slice(service.indexOf("export async function applyBoardTransition"));
+    expect(fn).toContain("No terms are on the register for this election yet");
+  });
+
+  it("the access columns default to the term, so existing rows are unaffected", () => {
+    const reg = readFileSync("lib/governance/register.ts", "utf8");
+    expect(reg).toContain("term.accessFrom ?? term.termStart");
+    expect(reg).toContain("term.accessUntil ?? term.termEnd");
+  });
+});

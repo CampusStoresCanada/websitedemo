@@ -54,6 +54,8 @@ export default async function BoardRegisterPage({
     termStart: t.termStart,
     termEnd: t.termEnd,
     countsTowardCap: t.countsTowardCap,
+    accessFrom: t.accessFrom,
+    accessUntil: t.accessUntil,
     appointingResolution: t.appointingResolution,
     notes: t.notes,
   });
@@ -91,6 +93,10 @@ export default async function BoardRegisterPage({
         asOf={asOf}
         holding={register.holding.map(view)}
         incoming={register.incoming.map(view)}
+        withAccess={register.withAccessNotHolding.map((w) => ({
+          ...view(w.term),
+          standing: w.standing as "incoming" | "outgoing",
+        }))}
         seatCount={register.body.seatCount}
         minSeatCount={register.body.minSeatCount}
         vacancies={register.vacancies}

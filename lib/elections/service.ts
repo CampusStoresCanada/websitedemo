@@ -4324,22 +4324,45 @@ export async function applyBoardTransition(
   const skipped: string[] = [];
 
   if (input.side === "incoming") {
-    for (const p of state.plan.incoming) {
-      // The register entry, which is what the term-limit check and the roster
-      // read. Two years from the meeting, end-exclusive like every other row.
-      const termEnd = `${Number(input.effectiveOn.slice(0, 4)) + 2}${input.effectiveOn.slice(4)}`;
-      await db.from("governance_role_assignments").insert({
-        body_id: election.bodyId,
-        person_contact_id: p.contactId,
-        person_profile_id: p.profileId,
-        role_key: "director",
-        term_start: input.effectiveOn,
-        term_end: termEnd,
-        counts_toward_cap: true,
-        elected_at_election_id: election.id,
-        notes: `Elected ${election.cycleYear}`,
-      });
+    // ⛔ This no longer writes the term. It used to insert one here, dated from
+    // the MEETING (`term_start: input.effectiveOn`, +2 years), while
+    // `recordElectedTerms` writes the same row at certification on the nominal
+    // January-1 convention every one of the register's existing rows uses. Two
+    // writers, disagreeing about the dates, on one row — and the meeting-dated
+    // version is the wrong one: a term starting 2027-01-21 after the outgoing
+    // one ends 2027-01-01 leaves twenty days in which the seat has no holder
+    // and the board reads below its by-law floor.
+    //
+    // So the term is the certification's to write, and the ACCESS WINDOW is
+    // this press's. That is the whole separation: the register says who is a
+    // director, this says who can get in.
+    const incomingContactIds = state.plan.incoming.map((p) => p.contactId);
+    if (incomingContactIds.length > 0) {
+      const { error: accessError } = await db
+        .from("governance_role_assignments")
+        .update({ access_from: input.effectiveOn, updated_at: new Date().toISOString() })
+        .eq("body_id", election.bodyId)
+        .eq("role_key", "director")
+        .eq("elected_at_election_id", election.id)
+        .in("person_contact_id", incomingContactIds);
+      if (accessError) return fail(`The access dates did not save: ${accessError.message}`);
+    }
 
+    // Nobody's term on record for this election means certification never
+    // recorded them, and stamping access onto rows that do not exist would
+    // report success over an empty update.
+    const { count: stamped } = await db
+      .from("governance_role_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("body_id", election.bodyId)
+      .eq("role_key", "director")
+      .eq("elected_at_election_id", election.id);
+    if ((stamped ?? 0) === 0 && incomingContactIds.length > 0)
+      return fail(
+        "No terms are on the register for this election yet, so there is nothing to give access to. Record them on the audit screen first — the result has to be certified before a term exists."
+      );
+
+    for (const p of state.plan.incoming) {
       if (p.profileId && !p.alreadyHasAccess) {
         await db.from("profiles").update({ global_role: "admin" }).eq("id", p.profileId);
         changed.push(p.name);
@@ -4361,6 +4384,27 @@ export async function applyBoardTransition(
       }
       await db.from("profiles").update({ global_role: "user" }).eq("id", p.profileId);
       changed.push(p.name);
+    }
+
+    // The other half of the window. CSC's outgoing directors keep the mailing
+    // list and the board space through the conference that follows the AGM, so
+    // the date entered for this press is when the door actually closes — not
+    // term_end, which passed at the meeting. Written across the whole cohort,
+    // which is what "per transition" means: one decision, one date, every name
+    // on this side of it.
+    const outgoingContactIds = state.plan.outgoing
+      .filter((p) => !p.protectedRole)
+      .map((p) => p.contactId);
+    if (outgoingContactIds.length > 0) {
+      const { error: accessError } = await db
+        .from("governance_role_assignments")
+        .update({ access_until: input.effectiveOn, updated_at: new Date().toISOString() })
+        .eq("body_id", election.bodyId)
+        .eq("role_key", "director")
+        .in("person_contact_id", outgoingContactIds)
+        .lte("term_start", input.effectiveOn)
+        .or(`term_end.is.null,term_end.lte.${input.effectiveOn}`);
+      if (accessError) return fail(`The access dates did not save: ${accessError.message}`);
     }
   }
 

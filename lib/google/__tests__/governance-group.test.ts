@@ -26,10 +26,29 @@ vi.mock("@/lib/google/directory", () => ({
 const RULE = { id: "r1", label: "Board mailing list", bodyKey: "board_of_directors", roleKey: "director" };
 const AS_OF = "2027-06-30";
 
+/**
+ * A row as the sync now reads it.
+ *
+ * ⚠️ The query no longer filters by date. It selects every assignment for the
+ * role and applies `hasBoardAccessOn` in JS, because the rule is
+ * `coalesce(access_from, term_start) <= asOf` and PostgREST cannot express that
+ * without a view — and a second hand-written filter is how the list and the
+ * board register screen would drift apart. So these stubs carry real dates, and
+ * the tests below prove the date behaviour through OUTCOMES rather than by
+ * inspecting the query, which is the better test anyway.
+ */
+interface StubRow {
+  email: string | null;
+  termStart?: string;
+  termEnd?: string | null;
+  accessFrom?: string | null;
+  accessUntil?: string | null;
+  countsTowardCap?: boolean;
+}
+
 /** The two reads the sync makes, plus the last_run write it ends with. */
-function stubDb(holderEmails: (string | null)[]) {
+function stubDb(holders: (string | null | StubRow)[]) {
   const writes: Record<string, unknown>[] = [];
-  const asked: { lte?: unknown[]; or?: unknown[] } = {};
   const db = {
     from(table: string) {
       if (table === "governance_bodies") {
@@ -38,25 +57,22 @@ function stubDb(holderEmails: (string | null)[]) {
         };
       }
       if (table === "governance_role_assignments") {
-        const rows = holderEmails.map((email) => ({ person_contact_id: "c", contacts: email ? { email } : null }));
+        const rows = holders.map((h) => {
+          const r: StubRow = typeof h === "string" || h === null ? { email: h } : h;
+          return {
+            person_contact_id: "c",
+            // Wide open by default, so a test that says nothing about dates is
+            // testing the thing it means to test.
+            term_start: r.termStart ?? "2000-01-01",
+            term_end: r.termEnd === undefined ? null : r.termEnd,
+            access_from: r.accessFrom ?? null,
+            access_until: r.accessUntil ?? null,
+            counts_toward_cap: r.countsTowardCap ?? true,
+            contacts: r.email ? { email: r.email } : null,
+          };
+        });
         const res = Promise.resolve({ data: rows });
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                lte: (...a: unknown[]) => {
-                  asked.lte = a;
-                  return {
-                    or: (...b: unknown[]) => {
-                      asked.or = b;
-                      return res;
-                    },
-                  };
-                },
-              }),
-            }),
-          }),
-        };
+        return { select: () => ({ eq: () => ({ eq: () => res }) }) };
       }
       return {
         update: (payload: Record<string, unknown>) => {
@@ -66,7 +82,7 @@ function stubDb(holderEmails: (string | null)[]) {
       };
     },
   };
-  return { db, writes, asked };
+  return { db, writes };
 }
 
 const member = (email: string, role = "MEMBER") => ({ email, role });
@@ -177,16 +193,52 @@ describe("syncing a governance group at the press", () => {
 });
 
 describe("the date the press was given", () => {
-  it("⛔ asks who holds the role as of the entered date, not today", async () => {
-    const { db, asked } = stubDb(["a@uni.ca"]);
-    listGroupMembers.mockResolvedValue([member("a@uni.ca")]);
+  it("⛔ reasons as of the entered date, not today", async () => {
+    // Serves a term that has not begun on the date entered, and one that is
+    // over by it. Neither should be wanted; a sync reasoning from `today`
+    // would get both wrong.
+    const { db } = stubDb([
+      { email: "future@uni.ca", termStart: "2029-01-01", termEnd: "2031-01-01" },
+      { email: "past@uni.ca", termStart: "2025-01-01", termEnd: "2028-07-14" },
+      { email: "serving@uni.ca", termStart: "2027-01-01", termEnd: "2029-01-01" },
+    ]);
+    listGroupMembers.mockResolvedValue([]);
 
     const out = await run(db, { asOf: "2028-07-14" });
-    expect(asked.lte).toEqual(["term_start", "2028-07-14"]);
-    // term_end is EXCLUSIVE, so a term ending on the date is over by then.
-    expect(asked.or).toEqual(["term_end.is.null,term_end.gt.2028-07-14"]);
     expect(out.asOf).toBe("2028-07-14");
-    expect(asked.or?.[0]).not.toContain(new Date().toISOString().slice(0, 10));
+    expect(out.wanted).toEqual(["serving@uni.ca"]);
+  });
+
+  it("⚠️ term_end is EXCLUSIVE — a term ending on the date is already over", async () => {
+    const { db } = stubDb([{ email: "ends@uni.ca", termStart: "2025-01-01", termEnd: "2028-07-14" }]);
+    listGroupMembers.mockResolvedValue([member("ends@uni.ca")]);
+    const out = await run(db, { asOf: "2028-07-14" });
+    expect(out.wanted).toEqual([]);
+    // On the list, holding nothing, and never touched for it.
+    expect(out.stale).toEqual(["ends@uni.ca"]);
+    expect(out.removed).toEqual([]);
+  });
+
+  it("⛔ an access window overrides the term at BOTH ends", async () => {
+    // Incoming: elected, term starts in January, invited in November.
+    // Outgoing: term ended at the meeting, kept on through the conference.
+    const { db } = stubDb([
+      { email: "incoming@uni.ca", termStart: "2029-01-01", termEnd: "2031-01-01", accessFrom: "2028-07-01" },
+      { email: "outgoing@uni.ca", termStart: "2026-01-01", termEnd: "2028-01-01", accessUntil: "2028-09-30" },
+    ]);
+    listGroupMembers.mockResolvedValue([]);
+    const out = await run(db, { asOf: "2028-07-14" });
+    expect([...out.wanted].sort()).toEqual(["incoming@uni.ca", "outgoing@uni.ca"]);
+  });
+
+  it("⛔ a no-prior-service marker never reaches the list", async () => {
+    // Zero-length and non-counting: a statement that somebody has NOT served.
+    const { db } = stubDb([
+      { email: "marker@uni.ca", termStart: "2026-09-28", termEnd: "2026-09-28", countsTowardCap: false },
+    ]);
+    listGroupMembers.mockResolvedValue([]);
+    const out = await run(db, { asOf: "2028-07-14" });
+    expect(out.wanted).toEqual([]);
   });
 
   it("does not call somebody drift when they are retained on purpose", async () => {

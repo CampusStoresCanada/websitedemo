@@ -26,8 +26,15 @@ export interface RegisterTermView {
   termStart: string;
   termEnd: string | null;
   countsTowardCap: boolean;
+  accessFrom: string | null;
+  accessUntil: string | null;
   appointingResolution: string | null;
   notes: string | null;
+}
+
+/** Access to the board without a seat on it: let in early, or kept on late. */
+export interface AccessOnlyView extends RegisterTermView {
+  standing: "incoming" | "outgoing";
 }
 
 interface ContactHit {
@@ -41,6 +48,7 @@ export default function BoardRegisterClient({
   asOf,
   holding,
   incoming,
+  withAccess,
   seatCount,
   minSeatCount,
   vacancies,
@@ -51,6 +59,7 @@ export default function BoardRegisterClient({
   asOf: string;
   holding: RegisterTermView[];
   incoming: RegisterTermView[];
+  withAccess: AccessOnlyView[];
   seatCount: number | null;
   minSeatCount: number | null;
   vacancies: number | null;
@@ -368,6 +377,40 @@ export default function BoardRegisterClient({
           >
             Record the appointment
           </button>
+        </section>
+      )}
+
+      {withAccess.length > 0 && (
+        <section className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">
+            Board access without a seat
+            <span className="ml-2 font-normal text-gray-700">{withAccess.length}</span>
+          </h2>
+          <p className="mt-1 text-xs text-gray-700">
+            On the board mailing list and in the board space as at {asOf}, but NOT counted
+            toward the seats or the quorum — a director let in before their term starts, or kept
+            on through the handover after it ends. The access window is set for a whole cohort
+            when the board transition is pressed, not person by person.
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-gray-800">
+            {withAccess.map((t) => (
+              <li key={t.assignmentId}>
+                <span
+                  className={`mr-2 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                    t.standing === "incoming"
+                      ? "bg-green-100 text-green-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {t.standing}
+                </span>
+                {t.name}
+                {t.organizationName ? ` · ${t.organizationName}` : ""} · term {t.termStart} to{" "}
+                {t.termEnd ?? "open"} · access{" "}
+                {t.accessFrom ?? t.termStart} to {t.accessUntil ?? t.termEnd ?? "open"}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

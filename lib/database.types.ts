@@ -8799,6 +8799,10 @@ export type Database = {
           person_profile_id: string | null
           role_key: string
           seat_key: string | null
+          access_from: string | null
+
+          access_until: string | null
+
           term_end: string | null
           term_start: string
           updated_at: string
@@ -8817,6 +8821,10 @@ export type Database = {
           person_profile_id?: string | null
           role_key: string
           seat_key?: string | null
+          access_from?: string | null
+
+          access_until?: string | null
+
           term_end?: string | null
           term_start: string
           updated_at?: string
@@ -8835,6 +8843,10 @@ export type Database = {
           person_profile_id?: string | null
           role_key?: string
           seat_key?: string | null
+          access_from?: string | null
+
+          access_until?: string | null
+
           term_end?: string | null
           term_start?: string
           updated_at?: string
