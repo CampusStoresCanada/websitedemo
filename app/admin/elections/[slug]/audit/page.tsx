@@ -16,6 +16,7 @@ import { redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { getAuditView, getResultsAnnouncement, listScrutineerCandidates } from "@/lib/elections/service";
 import ConfirmSubmitButton from "@/components/admin/elections/ConfirmSubmitButton";
+import ElectedTermsPanel from "@/components/admin/elections/ElectedTermsPanel";
 import BoardTransitionPanel from "@/components/admin/elections/BoardTransitionPanel";
 import {
   sealElectionAction,
@@ -101,6 +102,13 @@ export default async function ElectionAuditPage({
       `/admin/elections/${slug}/audit${r.ok ? "?announced=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
     );
   }
+
+  // What certification should have put on the board register. Read here rather
+  // than inside the panel so the screen and the write share one answer about
+  // who is already recorded.
+  const { getElectedTermsProposal } = await import("@/lib/elections/service");
+  const termsProposal =
+    election.status === "certified" ? await getElectedTermsProposal(slug) : null;
 
   async function certify(formData: FormData) {
     "use server";
@@ -369,6 +377,22 @@ export default async function ElectionAuditPage({
             </p>
           )}
         </section>
+      )}
+
+      {certification?.certifiedAt && termsProposal && (
+        <ElectedTermsPanel
+          slug={slug}
+          cycleYear={termsProposal.election.cycleYear}
+          terms={termsProposal.terms.map((t) => ({
+            nominationId: t.nominationId,
+            name: t.name,
+            organizationName: t.organizationName,
+            termStart: t.termStart,
+            termEnd: t.termEnd,
+            alreadyRecorded: t.alreadyRecorded,
+          }))}
+          revalidate={`/admin/elections/${slug}/audit`}
+        />
       )}
 
       {transition && (

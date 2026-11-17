@@ -10,6 +10,7 @@
  */
 
 import crypto from "node:crypto";
+import { proposeElectedTerms, type ProposedTerm } from "./terms";
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/database.types";
@@ -4737,4 +4738,66 @@ export async function getElectionTimeline(
     },
     onDate ?? today()
   );
+}
+
+/**
+ * The terms this election would write to the register, and what is already there.
+ *
+ * One reader for two callers: the audit screen shows this so an administrator
+ * can see exactly what will be recorded before pressing anything, and
+ * `recordElectedTerms` writes from the same call so the screen and the write
+ * can never disagree about who is already on the register.
+ *
+ * `alreadyRecorded` is keyed on `elected_at_election_id`, which is what makes
+ * the write idempotent. Before this existed that column was null in all 56
+ * rows of the table.
+ */
+export async function getElectedTermsProposal(slug: string): Promise<{
+  election: { id: string; bodyId: string; cycleYear: number; status: string };
+  terms: ProposedTerm[];
+} | null> {
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const outcomes = await getCandidateOutcomes(slug);
+  if (!outcomes) return null;
+
+  const db = createAdminClient();
+  const { data: existing } = await db
+    .from("governance_role_assignments")
+    .select("person_contact_id")
+    .eq("body_id", election.bodyId)
+    .eq("role_key", "director")
+    .eq("elected_at_election_id", election.id);
+  const alreadyByContact = new Set(
+    (existing ?? []).map((r) => r.person_contact_id as string).filter(Boolean)
+  );
+
+  const byId = new Map((await listNominations(slug)).map((n) => [n.id, n]));
+
+  return {
+    election: {
+      id: election.id,
+      bodyId: election.bodyId,
+      cycleYear: election.cycleYear,
+      status: election.status,
+    },
+    terms: proposeElectedTerms({
+      cycleYear: election.cycleYear,
+      elected: outcomes.elected.map((c) => {
+        const n = byId.get(c.nominationId);
+        return {
+          nominationId: c.nominationId,
+          name: c.name,
+          organizationName: c.organizationName,
+          personContactId: c.contactId,
+          personProfileId: n?.nomineeProfileId ?? null,
+          organizationId: n?.nomineeOrganizationId ?? null,
+        };
+      }),
+      alreadyRecordedNominationIds: outcomes.elected
+        .filter((c) => alreadyByContact.has(c.contactId))
+        .map((c) => c.nominationId),
+    }),
+  };
 }

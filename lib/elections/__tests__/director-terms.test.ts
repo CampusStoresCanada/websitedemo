@@ -65,9 +65,83 @@ describe("the editor sits where the flag is raised", () => {
   });
 });
 
-describe("nothing is inferred", () => {
-  it("derives no term from an election result", () => {
-    expect(actions).not.toContain("elected_at_election_id");
+/**
+ * ⚠️ This block used to assert `elected_at_election_id` appeared NOWHERE, on
+ * the grounds that a term must never be derived from an election result. The
+ * rule was right about history and wrong about the present: the column exists
+ * on the table for this purpose, sat null in all 56 rows, and its absence meant
+ * a certified director held the seat on no date at all.
+ *
+ * What actually needs protecting is not the link — it is that no term appears
+ * without a person putting it there. So the assertions moved from "never write
+ * this column" to "never write it as a side effect", which is the thing that
+ * would genuinely go wrong.
+ */
+describe("a term is written by a person, never as a side effect", () => {
+  it("still says so at the top of the file", () => {
     expect(actions.replace(/\s*\n\s*\*\s*/g, " ")).toContain("never a place to infer one");
+  });
+
+  it("refuses to record elected terms before the result is certified", () => {
+    const fn = actions.slice(actions.indexOf("export async function recordElectedTerms"));
+    expect(fn).toContain('election.status !== "certified"');
+  });
+
+  it("gates recording, departure and appointment behind an administrator", () => {
+    for (const name of ["recordElectedTerms", "resignDirector", "appointToVacancy"]) {
+      const body = actions.slice(actions.indexOf(`export async function ${name}`));
+      expect(body.slice(0, 700)).toContain("requireAdmin()");
+    }
+  });
+
+  it("is idempotent, so certifying twice cannot seat anyone twice", () => {
+    expect(service).toContain("alreadyRecordedNominationIds");
+    expect(service).toContain('.eq("elected_at_election_id", election.id)');
+    const fn = actions.slice(actions.indexOf("export async function recordElectedTerms"));
+    expect(fn).toContain("!p.alreadyRecorded");
+  });
+
+  it("certification itself writes no term — the register is a separate, pressed act", () => {
+    const certify = service.slice(service.indexOf("export async function certifyElection"));
+    const body = certify.slice(0, certify.indexOf("\nexport "));
+    expect(body).not.toContain("governance_role_assignments");
+  });
+
+  it("shows the whole proposal before it is written", () => {
+    const panel = readFileSync(
+      "components/admin/elections/ElectedTermsPanel.tsx",
+      "utf8"
+    );
+    expect(panel).toContain("Counts toward the four-term limit");
+    expect(panel).toContain("outstanding.map");
+  });
+});
+
+describe("leaving the board, and filling the seat", () => {
+  it("shortens a term rather than deleting it", () => {
+    const fn = actions.slice(actions.indexOf("export async function resignDirector"));
+    expect(fn).toContain("term_end: input.effectiveOn");
+    expect(fn.slice(0, fn.indexOf("export async function appointToVacancy"))).not.toContain(
+      ".delete()"
+    );
+  });
+
+  it("keeps the date the seat was due to run to, which the successor needs", () => {
+    const fn = actions.slice(actions.indexOf("export async function resignDirector"));
+    expect(fn).toContain("would otherwise have run to");
+  });
+
+  it("refuses a departure date outside the term", () => {
+    const fn = actions.slice(actions.indexOf("export async function resignDirector"));
+    expect(fn).toContain("input.effectiveOn <= (row.term_start as string)");
+    expect(fn).toContain("input.effectiveOn >= (row.term_end as string)");
+  });
+
+  it("requires the authority for both, because a seat changing hands needs a why", () => {
+    const resign = actions.slice(actions.indexOf("export async function resignDirector"));
+    expect(resign).toContain("!input.note.trim()");
+    const appoint = actions.slice(actions.indexOf("export async function appointToVacancy"));
+    expect(appoint).toContain("!input.appointingResolution.trim()");
+    expect(appoint).toContain("appointing_resolution:");
   });
 });

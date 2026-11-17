@@ -129,6 +129,14 @@ export const NAV_GROUPS: NavGroup[] = [
         matchPrefix: "/admin/board/meetings",
       },
       {
+        href: "/admin/board/register",
+        label: "Register",
+        title: "Board Register",
+        description:
+          "Who holds a seat, on any date. Record a departure, or appoint to an unexpired term.",
+        matchPrefix: "/admin/board/register",
+      },
+      {
         href: "/admin/board/financials",
         label: "Financials",
         title: "Board Financials",
