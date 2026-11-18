@@ -104,8 +104,9 @@ export type DirectPurchaseBuyer = {
  * Some offers are deliberately kept off the general storefront and sold only to
  * named buyers — today, the Big Ideas Day rates.
  *
- * ⛔ ONE implementation, used by both `addOfferToCart` (which refuses) and
- * `listConferenceOffers` (which decides whether to show it). Two copies of
+ * ⛔ ONE implementation, used by `addOfferToCart` (which refuses),
+ * `listConferenceOffers` (which decides whether to show it) and the pay-first
+ * checkout for a named prospect (which does both). Two copies of
  * "may this org buy this" is how an offer becomes visible to someone who is
  * then refused at the till, or invisible to someone entitled to it.
  *
@@ -133,9 +134,24 @@ export type DirectPurchaseBuyer = {
  */
 export function directPurchaseAllowed(
   attributes: Record<string, unknown> | null | undefined,
-  buyer: DirectPurchaseBuyer | null | undefined
+  buyer: DirectPurchaseBuyer | null | undefined,
+  opts?: { payingToJoin?: boolean }
 ): boolean {
   if (!buyer) return false;
+  /*
+    A prospect buying the partnership in the same checkout (the pay-first flow
+    in prospective-booth-checkout.ts) is let through as the partner it is
+    paying to become. Oxford University Press, 2026-11: named on the Publisher
+    rate while still a prospect, and refused by the line below.
+
+    Only ever by NAME. With no list set the offer is open to every partner, and
+    a prospect is not one yet, so an open offer stays closed to it. The cart
+    never passes this flag: a prospect has no login and no cart, and a signed-in
+    org that has not joined is still refused there.
+  */
+  if (opts?.payingToJoin === true && buyer.type === "Prospective Partner") {
+    return namesBuyer(attributes, buyer.id);
+  }
   // Every direct-purchase offer is a partner product. Nothing currently sells
   // this way to members, and a member reaching one would be a mistake.
   if (buyer.type !== "Vendor Partner") return false;

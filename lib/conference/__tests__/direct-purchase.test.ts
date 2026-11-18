@@ -51,6 +51,45 @@ describe("named-org gate", () => {
 });
 
 /**
+ * A company on file as a prospect, named on a rate before it has joined, buying
+ * the rate and the partnership in one checkout (Oxford University Press,
+ * 2026-11). Only the pay-first checkout passes `payingToJoin`.
+ */
+describe("a named prospect paying to join", () => {
+  const PROSPECT = "e9e944ed-6d9a-4da4-b89b-4fe71b8ea133";
+  const prospect = { id: PROSPECT, type: "Prospective Partner" };
+  const publisherOffer = { direct_purchase_only: true, direct_purchase_org_ids: [PUBLISHER_ORG, PROSPECT] };
+  const opsOffer = { direct_purchase_only: true, direct_purchase_org_ids: [OPS_ORG] };
+
+  it("is admitted to the rate that names it", () => {
+    expect(directPurchaseAllowed(publisherOffer, prospect, { payingToJoin: true })).toBe(true);
+  });
+
+  it("is still refused in the cart, where nothing is joining", () => {
+    expect(directPurchaseAllowed(publisherOffer, prospect)).toBe(false);
+  });
+
+  it("is refused the other rate", () => {
+    expect(directPurchaseAllowed(opsOffer, prospect, { payingToJoin: true })).toBe(false);
+  });
+
+  it("is refused an offer with no list: open means every partner, and it is not one yet", () => {
+    expect(directPurchaseAllowed({ direct_purchase_only: true }, prospect, { payingToJoin: true })).toBe(false);
+  });
+
+  it("does not let a member or non-member in by the same door", () => {
+    for (const type of ["Member", "Non-Member"]) {
+      expect(directPurchaseAllowed(publisherOffer, { id: PROSPECT, type }, { payingToJoin: true })).toBe(false);
+    }
+  });
+
+  it("leaves a joined partner on the ordinary rule", () => {
+    expect(directPurchaseAllowed(publisherOffer, partner(PUBLISHER_ORG), { payingToJoin: true })).toBe(true);
+    expect(directPurchaseAllowed(opsOffer, partner(PUBLISHER_ORG), { payingToJoin: true })).toBe(false);
+  });
+});
+
+/**
  * ⛔ There WAS a department gate here, matching organizations.nacs_department.
  * It existed for exactly one offer, the Book Partner Attendee Registration,
  * which was withdrawn on 2026-10-06. Both the branch and these tests came down

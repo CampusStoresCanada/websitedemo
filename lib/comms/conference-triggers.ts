@@ -233,7 +233,7 @@ export async function triggerProspectiveBoothPaymentConfirmation(params: {
 
   const { data: payment } = await db
     .from("prospective_booth_payments")
-    .select("id, email, company_name, amount_cents, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name)")
+    .select("id, email, company_name, amount_cents, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name, kind)")
     .eq("id", paymentId)
     .maybeSingle();
 
@@ -242,7 +242,12 @@ export async function triggerProspectiveBoothPaymentConfirmation(params: {
     return;
   }
 
-  const boothName = (Array.isArray(payment.booth) ? payment.booth[0] : payment.booth)?.name ?? "";
+  const bought = Array.isArray(payment.booth) ? payment.booth[0] : payment.booth;
+  const boothName = bought?.name ?? "";
+  // What they bought, named as it is. Both templates still read "Booth
+  // {{booth_name}}", which misnames Conference in a Box and the Big Ideas Day
+  // rates; this is the variable they should read instead.
+  const purchaseLabel = bought?.kind === "booth" ? `Booth ${boothName}` : boothName;
 
   await triggerAutomation({
     triggerSource: "conference",
@@ -254,6 +259,7 @@ export async function triggerProspectiveBoothPaymentConfirmation(params: {
     variableValues: {
       company_name: payment.company_name,
       booth_name: boothName,
+      purchase_label: purchaseLabel,
       amount_paid: formatCents(payment.amount_cents ?? 0),
       apply_url: prospectApplyUrl(payment),
     },
@@ -275,7 +281,7 @@ export async function triggerProspectiveBoothApplicationReminder(params: {
 
   const { data: payment } = await db
     .from("prospective_booth_payments")
-    .select("id, email, company_name, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name)")
+    .select("id, email, company_name, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name, kind)")
     .eq("id", paymentId)
     .maybeSingle();
 
@@ -284,7 +290,12 @@ export async function triggerProspectiveBoothApplicationReminder(params: {
     return;
   }
 
-  const boothName = (Array.isArray(payment.booth) ? payment.booth[0] : payment.booth)?.name ?? "";
+  const bought = Array.isArray(payment.booth) ? payment.booth[0] : payment.booth;
+  const boothName = bought?.name ?? "";
+  // What they bought, named as it is. Both templates still read "Booth
+  // {{booth_name}}", which misnames Conference in a Box and the Big Ideas Day
+  // rates; this is the variable they should read instead.
+  const purchaseLabel = bought?.kind === "booth" ? `Booth ${boothName}` : boothName;
 
   await triggerAutomation({
     triggerSource: "conference",
@@ -296,6 +307,7 @@ export async function triggerProspectiveBoothApplicationReminder(params: {
     variableValues: {
       company_name: payment.company_name,
       booth_name: boothName,
+      purchase_label: purchaseLabel,
       apply_url: prospectApplyUrl(payment),
     },
   });

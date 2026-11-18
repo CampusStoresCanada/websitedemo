@@ -920,10 +920,10 @@ export async function approveApplication(
     const paidConferenceId = app.paid_conference_id!;
     try {
       const [{ data: booth }, { data: conference }] = await Promise.all([
-        db.from("conference_entities").select("name, price_cents").eq("id", paidBoothEntityId).maybeSingle(),
+        db.from("conference_entities").select("name, kind, price_cents").eq("id", paidBoothEntityId).maybeSingle(),
         db.from("conference_instances").select("name, end_date").eq("id", paidConferenceId).maybeSingle(),
       ]);
-      paidBoothLabel = booth?.name ? `Booth ${booth.name}` : null;
+      paidBoothLabel = booth?.name ? (booth.kind === "booth" ? `Booth ${booth.name}` : booth.name) : null;
       paidConferenceLabel = conference?.name ?? null;
       await db.rpc("mint_prospective_booth_purchase", {
         p_conference_id: paidConferenceId,
@@ -1806,10 +1806,10 @@ export async function resendApplicationInvite(
   let paidConferenceLabel: string | null = null;
   if (isPaidFirstBoothApplication) {
     const [{ data: booth }, { data: conference }] = await Promise.all([
-      db.from("conference_entities").select("name").eq("id", app.paid_booth_entity_id!).maybeSingle(),
+      db.from("conference_entities").select("name, kind").eq("id", app.paid_booth_entity_id!).maybeSingle(),
       db.from("conference_instances").select("name").eq("id", app.paid_conference_id!).maybeSingle(),
     ]);
-    paidBoothLabel = booth?.name ? `Booth ${booth.name}` : null;
+    paidBoothLabel = booth?.name ? (booth.kind === "booth" ? `Booth ${booth.name}` : booth.name) : null;
     paidConferenceLabel = conference?.name ?? null;
   }
 
