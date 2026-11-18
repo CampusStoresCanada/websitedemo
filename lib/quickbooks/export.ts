@@ -517,8 +517,14 @@ async function processExportRow(
   }
 
   const meta = (invoice.metadata as Record<string, unknown> | null) ?? {};
+  // A balance billed from /admin/membership/balances names the QuickBooks
+  // invoice it pays down; the August tax corrections name the site invoice
+  // they correct. Neither is a sale, so neither posts an invoice of its own.
+  if (typeof meta.pays_qbo_invoice_id === "string" && meta.pays_qbo_invoice_id) {
+    return postTaxCorrection(db, row, invoice, { qboInvoiceId: meta.pays_qbo_invoice_id }, customer.Id, paymentDate);
+  }
   if (meta.correction_type === "tax_only" && typeof meta.corrects_invoice_id === "string") {
-    return postTaxCorrection(db, row, invoice, meta.corrects_invoice_id, customer.Id, paymentDate);
+    return postTaxCorrection(db, row, invoice, { invoiceId: meta.corrects_invoice_id }, customer.Id, paymentDate);
   }
 
   // Already posted? The stored id covers a retry after the write-back landed.
@@ -635,17 +641,23 @@ async function postTaxCorrection(
   db: ReturnType<typeof createAdminClient>,
   row: QBExportQueueRow,
   invoice: { id: string; total_cents: number; currency: string | null; stripe_invoice_id: string | null },
-  correctsInvoiceId: string,
+  corrects: { invoiceId: string } | { qboInvoiceId: string },
   customerId: string,
   paymentDate: string | null
 ): Promise<string | null> {
-  const { data: original } = await db
-    .from("qbo_export_queue")
-    .select("qbo_invoice_id")
-    .eq("invoice_id", correctsInvoiceId)
-    .maybeSingle();
-  if (!original?.qbo_invoice_id) {
-    throw new Error(`The invoice this tax correction is for (${correctsInvoiceId}) is not in QuickBooks yet.`);
+  let original: { qbo_invoice_id: string };
+  if ("qboInvoiceId" in corrects) {
+    original = { qbo_invoice_id: corrects.qboInvoiceId };
+  } else {
+    const { data } = await db
+      .from("qbo_export_queue")
+      .select("qbo_invoice_id")
+      .eq("invoice_id", corrects.invoiceId)
+      .maybeSingle();
+    if (!data?.qbo_invoice_id) {
+      throw new Error(`The invoice this tax correction is for (${corrects.invoiceId}) is not in QuickBooks yet.`);
+    }
+    original = { qbo_invoice_id: data.qbo_invoice_id };
   }
 
   if (!row.qbo_payment_id && paymentDate) {
@@ -1001,7 +1013,7 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       // A refund of a tax-only correction is all tax and no sale, and the
       // correction itself posted no invoice. Hers to record, not ours.
       const refundMeta = (invoice.metadata as Record<string, unknown> | null) ?? {};
-      if (refundMeta.correction_type === "tax_only") {
+      if (refundMeta.correction_type === "tax_only" || typeof refundMeta.pays_qbo_invoice_id === "string") {
         const reason =
           `Held for the bookkeeper: a $${(row.refund_amount_cents / 100).toFixed(2)} refund of a tax-only correction ` +
           `(invoice ${row.invoice_id}). Record it in QuickBooks against the original invoice's tax, then Skip this row.`;

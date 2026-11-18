@@ -434,6 +434,26 @@ export async function getQBInvoice(id: string): Promise<QBInvoice> {
   return res.Invoice;
 }
 
+/**
+ * Every invoice QuickBooks still shows a balance on. This is who owes what as
+ * the bookkeeper sees it, which is the standard the site and Stripe are
+ * brought into line with.
+ */
+export async function listQBOpenInvoices(): Promise<QBInvoice[]> {
+  const PAGE = 500;
+  const all: QBInvoice[] = [];
+  for (let start = 1; ; start += PAGE) {
+    const query = `SELECT * FROM Invoice WHERE Balance > '0' STARTPOSITION ${start} MAXRESULTS ${PAGE}`;
+    const res = await qbRequest<{ QueryResponse: { Invoice?: QBInvoice[] } }>(
+      "GET",
+      `/query?query=${encodeURIComponent(query)}`
+    );
+    const page = res.QueryResponse.Invoice ?? [];
+    all.push(...page);
+    if (page.length < PAGE) return all;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Payment operations
 // ─────────────────────────────────────────────────────────────────

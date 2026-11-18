@@ -363,6 +363,33 @@ describe("a tax-only correction", () => {
   });
 });
 
+describe("a balance billed against a QuickBooks invoice the site never made", () => {
+  beforeEach(() => {
+    invoice.amount_cents = 478000;
+    invoice.tax_amount_cents = 0;
+    invoice.total_cents = 478000;
+    invoice.metadata = { pays_qbo_invoice_id: "1253" };
+    // No site invoice was ever posted as it, so the queue has nothing to look up.
+    originalRow = null;
+  });
+
+  it("posts no invoice of its own when issued", async () => {
+    await quickbooksExportRun();
+    expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(queueUpdate()).toMatchObject({ status: "completed", qbo_invoice_id: "1253", qbo_payment_id: null });
+  });
+
+  it("pays down the named QuickBooks invoice when it is paid", async () => {
+    invoice.status = "paid";
+    invoice.paid_at = "2026-11-25T16:00:00+00:00";
+    originalBalance = 4780;
+    await quickbooksExportRun();
+    expect(createQBInvoice).not.toHaveBeenCalled();
+    expect(createQBPayment.mock.calls[0][0].Line[0].LinkedTxn[0].TxnId).toBe("1253");
+    expect(queueUpdate()).toMatchObject({ status: "completed", qbo_invoice_id: "1253", qbo_payment_id: "qb-pay-1" });
+  });
+});
+
 describe("the December 1 sweep", () => {
   it("does nothing before December 1", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -78,6 +78,11 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Organization directory, billing, renewals, and benchmarking.",
       },
       {
+        href: "/admin/membership/balances",
+        label: "QuickBooks Balances",
+        description: "What QuickBooks shows as owing, beside what the site has open. Bill a balance the site has no invoice for.",
+      },
+      {
         href: "/admin/applications",
         label: "Applications",
         description: "Review pending membership and partner applications.",
