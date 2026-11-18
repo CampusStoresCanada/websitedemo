@@ -4,6 +4,7 @@ import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } fro
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releasedFiscalYears } from "@/lib/benchmarking/release";
 import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_PROFILE_RESOLVABLE_STATUSES } from "@/lib/membership/status";
+import { PROSPECT_ORG_TYPES } from "@/lib/constants/org-types";
 
 /** Org data embedded in a board card contact join. */
 export type OrgForCard = Pick<Organization, "id" | "slug" | "logo_url" | "type" | "membership_status" | "archived_at"> & {
@@ -138,7 +139,12 @@ export async function getOrganizationBySlug(
       .from("organizations")
       .select("*")
       .eq("slug", slug)
-      .in("membership_status", ORG_PROFILE_RESOLVABLE_STATUSES)
+      // A prospect has no membership status, and its page is staff-only
+      // (getOrganizationForViewer withholds it from everyone else).
+      .or(
+        `membership_status.in.(${ORG_PROFILE_RESOLVABLE_STATUSES.join(",")}),` +
+          `type.in.(${PROSPECT_ORG_TYPES.map((t) => `"${t}"`).join(",")})`
+      )
       .is("archived_at", null)
       .single(),
     DB_TIMEOUT,

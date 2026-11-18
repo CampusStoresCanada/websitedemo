@@ -7,12 +7,14 @@ import {
   CONTACT_CHANNELS,
   RENEWAL_OUTCOMES,
   BOOTH_OUTCOMES,
+  PROSPECT_OUTCOMES,
   CHANNEL_LABEL,
   OUTCOME_LABEL,
   type ContactChannel,
   type ContactOutcome,
 } from "@/lib/renewal/outreach";
 import { logRenewalContactAction } from "@/lib/actions/renewal-outreach";
+import { isProspectOrgType } from "@/lib/constants/org-types";
 
 function money(cents: number): string {
   return (cents / 100).toLocaleString("en-CA", {
@@ -25,9 +27,11 @@ function money(cents: number): string {
 const OUTCOME_TONE: Record<ContactOutcome, string> = {
   renewing: "bg-green-50 text-green-800",
   booking_booth: "bg-green-50 text-green-800",
+  joining: "bg-green-50 text-green-800",
   undecided: "bg-amber-50 text-amber-800",
   not_renewing: "bg-red-50 text-red-800",
   not_exhibiting: "bg-red-50 text-red-800",
+  not_interested: "bg-red-50 text-red-800",
   no_response: "bg-gray-100 text-gray-600",
   other: "bg-gray-100 text-gray-600",
 };
@@ -37,11 +41,13 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
   // chase. A row that HAS renewed but holds no booth was assigned for the booth
   // conversation instead — it still needs a button and a place to say how it
   // went, or the assignment arrives with nowhere to land.
+  // A third ask: a prospect, someone we would like to have who never joined.
+  const prospect = isProspectOrgType(entry.orgType);
   const boothAsk = entry.renewed && entry.hasBooth === false;
-  const outcomes = boothAsk ? BOOTH_OUTCOMES : RENEWAL_OUTCOMES;
+  const outcomes = prospect ? PROSPECT_OUTCOMES : boothAsk ? BOOTH_OUTCOMES : RENEWAL_OUTCOMES;
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<ContactChannel>("call");
-  const [outcome, setOutcome] = useState<ContactOutcome>("undecided");
+  const [outcome, setOutcome] = useState<ContactOutcome>(outcomes.includes("undecided") ? "undecided" : outcomes[0]);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -70,7 +76,13 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-semibold text-gray-800">
-            {entry.organizationName}
+            {entry.slug ? (
+              <a href={`/org/${entry.slug}`} className="hover:underline">
+                {entry.organizationName}
+              </a>
+            ) : (
+              entry.organizationName
+            )}
             {entry.renewed && (
               <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-800">
                 renewed
@@ -136,12 +148,16 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
               {entry.contact.email}
             </a>
           )}
-          {!entry.contact.isPrimary && (
+          {!entry.contact.isPrimary && !prospect && (
             <span className="text-xs text-amber-700">no primary contact flagged</span>
           )}
         </div>
       ) : (
-        <p className="mt-3 text-sm text-amber-700">No contact on file — ask the office.</p>
+        <p className="mt-3 text-sm text-amber-700">
+          {prospect
+            ? "No one on file yet. Add them on the company's page with Edit, then Add a new contact."
+            : "No contact on file — ask the office."}
+        </p>
       )}
 
       {/* What happened last time. The part worth having next August. */}

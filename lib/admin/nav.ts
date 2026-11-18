@@ -121,6 +121,14 @@ export const NAV_GROUPS: NavGroup[] = [
         description: "Stores assigned to you this cycle, with contact details and call status.",
         showWhen: "renewalBoardWindow",
       },
+      {
+        // Year-round, unlike the renewal calls above: stores and vendors we
+        // would like to have, worked from the same call list and contact log.
+        href: "/admin/prospects",
+        label: "Prospects",
+        title: "Prospects",
+        description: "Stores and vendors we would like to have, with contacts and call history.",
+      },
     ],
   },
   {

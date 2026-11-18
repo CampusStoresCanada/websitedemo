@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import { isBot, recordDirectoryScan } from "@/lib/publication/scan-tracking";
 import { recordAct } from "@/lib/signals/inbox";
 import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
@@ -684,8 +685,9 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       .map((u) => ({ userId: u.userId, displayName: u.displayName, email: u.email }));
   }
 
-  // Render different layouts based on organization type
-  if (organization.type === "Member") {
+  // Render different layouts based on organization type. A prospective
+  // member is a store, so it gets the store's page.
+  if (organization.type === "Member" || organization.type === ORG_TYPE.prospectiveMember) {
     return (
       <>
         <OrgOnboardingCallout orgSlug={slug} />
