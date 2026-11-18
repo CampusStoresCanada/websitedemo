@@ -180,16 +180,23 @@ function InlineReasonAction({
   placeholder,
   title,
   submit,
+  optionLabel,
 }: {
   label: string;
   busyLabel: string;
   placeholder: string;
   title: string;
-  submit: (reason: string) => Promise<{ success: boolean; error?: string; invoiceUrl?: string }>;
+  submit: (
+    reason: string,
+    optionChecked: boolean
+  ) => Promise<{ success: boolean; error?: string; invoiceUrl?: string }>;
+  /** One yes/no that changes what Confirm does. Unticked by default. */
+  optionLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [optionChecked, setOptionChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
@@ -203,7 +210,7 @@ function InlineReasonAction({
 
     setError(null);
     setLoading(true);
-    const result = await submit(reason.trim());
+    const result = await submit(reason.trim(), optionChecked);
     setLoading(false);
 
     if (!result.success) {
@@ -289,6 +296,16 @@ function InlineReasonAction({
           Cancel
         </button>
       </div>
+      {optionLabel && (
+        <label className="flex items-center gap-1.5 text-[11.5px]" style={{ color: INK }}>
+          <input
+            type="checkbox"
+            checked={optionChecked}
+            onChange={(e) => setOptionChecked(e.target.checked)}
+          />
+          {optionLabel}
+        </label>
+      )}
       {error && (
         <p className="text-[11px]" style={{ color: RED }}>
           {error}
@@ -376,7 +393,10 @@ function ArchiveButton({ row }: { row: RenewalDirectoryRow }) {
       busyLabel="Archiving..."
       placeholder="Reason for archiving (required)"
       title="Remove this organization from the directories and billing, and end its membership"
-      submit={(reason) => archiveOrganization(row.id, reason)}
+      submit={(reason, keepAsProspect) => archiveOrganization(row.id, reason, { keepAsProspect })}
+      // Someone who left is someone to win back: ticked, they move to the
+      // Prospects call list with their people instead of being hidden.
+      optionLabel="Keep as a prospect"
     />
   );
 }

@@ -13,7 +13,9 @@ const {
   createAdminClientMock,
   transitionMembershipStateMock,
   logAuditEventSafeMock,
+  logRenewalContactMock,
 } = vi.hoisted(() => ({
+  logRenewalContactMock: vi.fn(),
   requireAuthenticatedMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
   createAdminClientMock: vi.fn(),
@@ -31,6 +33,10 @@ vi.mock("@/lib/membership/state-machine", () => ({
   transitionMembershipState: transitionMembershipStateMock,
 }));
 vi.mock("@/lib/ops/audit", () => ({ logAuditEventSafe: logAuditEventSafeMock }));
+vi.mock("@/lib/renewal/outreach", () => ({ logRenewalContact: logRenewalContactMock }));
+vi.mock("@/lib/renewal/board-report", () => ({
+  resolveBoardRenewalWindow: vi.fn(async () => ({ renewalYear: 2027, cycleStart: new Date() })),
+}));
 vi.mock("@/lib/stripe/billing", () => ({
   createProgramInvoice: vi.fn(),
   finalizeAndSendInvoice: vi.fn(),
@@ -98,6 +104,7 @@ function dbReturning(
 const base = {
   id: ORG,
   name: "Momentec",
+  type: "Vendor Partner",
   membership_status: "active",
   membership_expires_at: null,
   archived_at: null,
@@ -111,6 +118,71 @@ beforeEach(() => {
   });
   isGlobalAdminMock.mockReturnValue(true);
   transitionMembershipStateMock.mockResolvedValue({ success: true });
+  logRenewalContactMock.mockResolvedValue({ success: true, id: "log-1" });
+});
+
+describe("archiveOrganization, kept as a prospect", () => {
+  it("turns a partner into a prospective partner instead of hiding it", async () => {
+    const db = dbReturning(base);
+    createAdminClientMock.mockReturnValue(db);
+
+    const result = await archiveOrganization(ORG, "Budget cut", { keepAsProspect: true });
+
+    expect(result).toEqual({ success: true });
+    // Still ends the membership.
+    expect(transitionMembershipStateMock).toHaveBeenCalledWith(
+      ORG, "canceled", "admin", "steve", "Archived: Budget cut", { archived: true }
+    );
+    // The Prospects list skips archived companies, so it must NOT be archived.
+    expect(db.updates).toHaveLength(1);
+    expect(db.updates[0].type).toBe("Prospective Partner");
+    expect(db.updates[0]).not.toHaveProperty("archived_at");
+    // Why they left lands in the call history the caller reads.
+    expect(logRenewalContactMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORG,
+        renewalYear: 2027,
+        note: "Former partner, moved to prospects: Budget cut",
+      })
+    );
+    expect(logAuditEventSafeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "organization_made_prospect",
+        details: expect.objectContaining({ type_before: "Vendor Partner" }),
+      })
+    );
+  });
+
+  it("turns a member into a prospective member", async () => {
+    const db = dbReturning({ ...base, type: "Member", membership_status: "canceled" });
+    createAdminClientMock.mockReturnValue(db);
+
+    await archiveOrganization(ORG, "Store closed, reopening next year", { keepAsProspect: true });
+
+    expect(db.updates[0].type).toBe("Prospective Member");
+    expect(transitionMembershipStateMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same refusals: money owing stops it", async () => {
+    const db = dbReturning(base, { openInvoices: [{ id: "inv-1", total_cents: 67800 }] });
+    createAdminClientMock.mockReturnValue(db);
+
+    const result = await archiveOrganization(ORG, "Gone", { keepAsProspect: true });
+
+    expect(result.success).toBe(false);
+    expect(db.updates).toHaveLength(0);
+    expect(logRenewalContactMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a type that has no prospect form", async () => {
+    const db = dbReturning({ ...base, type: "Staff" });
+    createAdminClientMock.mockReturnValue(db);
+
+    const result = await archiveOrganization(ORG, "Gone", { keepAsProspect: true });
+
+    expect(result.success).toBe(false);
+    expect(db.updates).toHaveLength(0);
+  });
 });
 
 describe("archiveOrganization", () => {

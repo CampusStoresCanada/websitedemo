@@ -11,6 +11,9 @@ import { sendTransactional } from "@/lib/comms/send";
 import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
 import { resolveOptOutScope } from "@/lib/renewal/opt-out-scope";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { ORG_TYPE } from "@/lib/constants/org-types";
+import { logRenewalContact } from "@/lib/renewal/outreach";
+import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -751,10 +754,19 @@ export async function openInvoicePayment(
  *     would cancel a membership their money is holding open.
  *
  * Global admins only, reason required: the audit row is the point.
+ *
+ * `keepAsProspect`: someone who left is someone to win back. Instead of being
+ * hidden, a member or partner becomes a prospective one, which is the whole of
+ * what the Prospects call list reads (lib/renewal/call-list.ts), so it arrives
+ * there with its admin, its other people and its past call notes. Everything
+ * else is the same: the same refusals, the membership still ends, and the type
+ * alone keeps it out of billing, renewals and the directories. The reason is
+ * written to its call history so whoever rings them knows why they left.
  */
 export async function archiveOrganization(
   orgId: string,
-  reason: string
+  reason: string,
+  opts: { keepAsProspect?: boolean } = {}
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
@@ -775,7 +787,7 @@ export async function archiveOrganization(
 
   const { data: org, error: orgErr } = await db
     .from("organizations")
-    .select("id, name, membership_status, membership_expires_at, archived_at")
+    .select("id, name, type, membership_status, membership_expires_at, archived_at")
     .eq("id", orgId)
     .single();
 
@@ -785,6 +797,17 @@ export async function archiveOrganization(
 
   if (org.archived_at) {
     return { success: false, error: `${org.name} is already archived.` };
+  }
+
+  const prospectType = !opts.keepAsProspect
+    ? null
+    : org.type === ORG_TYPE.member
+      ? ORG_TYPE.prospectiveMember
+      : org.type === ORG_TYPE.vendorPartner
+        ? ORG_TYPE.prospectivePartner
+        : null;
+  if (opts.keepAsProspect && !prospectType) {
+    return { success: false, error: "Only a member or a vendor partner can become a prospect." };
   }
 
   // An invoice in any of these is still asking the organization for money.
@@ -838,21 +861,36 @@ export async function archiveOrganization(
   const now = new Date().toISOString();
   const { error: archiveErr } = await db
     .from("organizations")
-    .update({ archived_at: now, updated_at: now })
+    .update(prospectType ? { type: prospectType, updated_at: now } : { archived_at: now, updated_at: now })
     .eq("id", orgId);
 
   if (archiveErr) {
     return { success: false, error: `Could not archive: ${archiveErr.message}` };
   }
 
+  if (prospectType) {
+    // Why they left, where the person making the call will read it.
+    const window = await resolveBoardRenewalWindow(todayISO);
+    const logged = await logRenewalContact({
+      organizationId: orgId,
+      renewalYear: window?.renewalYear ?? new Date().getUTCFullYear() + 1,
+      contactedBy: ctx.userId,
+      channel: "other",
+      outcome: "other",
+      note: `Former ${org.type === ORG_TYPE.member ? "member" : "partner"}, moved to prospects: ${trimmedReason}`,
+    });
+    if (!logged.success) console.warn("[archive] could not write the prospect note:", logged.error);
+  }
+
   await logAuditEventSafe({
-    action: "organization_archived",
+    action: prospectType ? "organization_made_prospect" : "organization_archived",
     entityType: "organization",
     entityId: orgId,
     actorId: ctx.userId,
     details: {
       name: org.name,
       reason: trimmedReason,
+      type_before: org.type,
       status_before: fromStatus,
       membership_canceled: willCancel,
     },
