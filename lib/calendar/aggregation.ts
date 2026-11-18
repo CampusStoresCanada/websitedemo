@@ -500,7 +500,10 @@ export async function syncAndFetchCalendar(
     .select("id, slug, cycle_year, status, seats_available");
 
   if ((electionsData ?? []).length > 0) {
-    const { getElectionTimeline } = await import("@/lib/elections/service");
+    // ⛔ The spine moved to governance with the meeting it belongs to.
+    const { getElectionTimeline } = await import(
+      "@/lib/governance/members-meeting-view"
+    );
 
     /** Stages the calendar has no use for: they mark state, not a date to keep. */
     const NOT_ON_CALENDAR = new Set(["cycle_open"]);

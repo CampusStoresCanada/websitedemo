@@ -172,6 +172,13 @@ export interface MembersMeetingElection {
   cycleYear: number;
   status: string;
   seatsAvailable: number | null;
+  /**
+   * `elections.agm_date` — the date the nomination, ballot and notice windows
+   * were DERIVED from, frozen at kickoff. ⚠️ NOT the day the meeting sits: read
+   * that off the meeting. When the two differ the meeting has moved and the
+   * windows have not — see `meetingDivergence`.
+   */
+  windowsDerivedFrom: string;
 }
 
 export interface MembersMeeting {
@@ -316,4 +323,43 @@ export function instantAtMeetingZone(date: string, wallTime: string): string | n
     }
   }
   return null;
+}
+
+// ─── When the meeting and its election disagree ─────────────────────────────
+
+/**
+ * Whether an election's windows were derived from a different day than the one
+ * its meeting now sits on, in words.
+ *
+ * ⛔ This is what the `elections.meeting_id` foreign key is FOR. The two dates
+ * are not the same fact:
+ *
+ *   `board_meetings.meeting_date` — when the meeting IS. The board may move it.
+ *   `elections.agm_date`          — the date the nomination, ballot and notice
+ *                                   windows were DERIVED from, frozen at
+ *                                   kickoff so that moving the AGM can never
+ *                                   retroactively reopen a closed window.
+ *
+ * While equality of those values was the only link, a meeting that moved made
+ * the join find nothing — and "no election is bound to this meeting" read
+ * exactly like "the election is out of step with its meeting". The system went
+ * quiet at the moment it should have been loudest. The relation makes the
+ * disagreement visible; this says it.
+ *
+ * Returns null when they agree, which is the normal case.
+ */
+export function meetingDivergence(input: {
+  meetingDate: string;
+  election: { cycleYear: number; windowsDerivedFrom: string } | null;
+}): string | null {
+  if (!input.election) return null;
+  if (input.election.windowsDerivedFrom === input.meetingDate) return null;
+
+  return (
+    `This meeting now sits on ${input.meetingDate}, but the ${input.election.cycleYear} ` +
+    `election's windows were set from ${input.election.windowsDerivedFrom}. Notice, ` +
+    `nominations and the ballot are all still measured from the old date, so every date in ` +
+    `the list below is wrong until the election's schedule is re-derived — and notice may ` +
+    `already have been given stating the old day.`
+  );
 }

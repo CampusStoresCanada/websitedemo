@@ -54,7 +54,6 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
 
   const meetingIds = rows.map((r) => r.id);
   const eventIds = rows.map((r) => r.event_id).filter((id): id is string => !!id);
-  const dates = rows.map((r) => r.meeting_date);
 
   const [events, docs, proxies, elections] = await Promise.all([
     eventIds.length
@@ -66,10 +65,15 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
       .select("meeting_id")
       .in("meeting_id", meetingIds)
       .is("revoked_at", null),
+    // ⛔ By `meeting_id`, the relation — not by matching dates. A meeting that
+    // moved used to make this find nothing, so an election out of step with its
+    // meeting looked exactly like no election at all. `agm_date` is still
+    // selected, but as the frozen date the windows came FROM, which is what
+    // `meetingDivergence` compares against.
     db
       .from("elections")
-      .select("slug, cycle_year, status, seats_available, agm_date")
-      .in("agm_date", dates),
+      .select("slug, cycle_year, status, seats_available, agm_date, meeting_id")
+      .in("meeting_id", meetingIds),
   ]);
 
   const eventById = new Map<string, MembersMeetingEvent>();
@@ -101,14 +105,17 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
     if (id) proxyCount.set(id, (proxyCount.get(id) ?? 0) + 1);
   }
 
-  const electionByDate = new Map<string, MembersMeetingElection>();
+  const electionByMeeting = new Map<string, MembersMeetingElection>();
   for (const e of elections.data ?? []) {
     const row = e as Record<string, unknown>;
-    electionByDate.set(row.agm_date as string, {
+    const meetingId = row.meeting_id as string | null;
+    if (!meetingId) continue;
+    electionByMeeting.set(meetingId, {
       slug: row.slug as string,
       cycleYear: row.cycle_year as number,
       status: row.status as string,
       seatsAvailable: (row.seats_available as number | null) ?? null,
+      windowsDerivedFrom: row.agm_date as string,
     });
   }
 
@@ -128,7 +135,7 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
     documentCount: docCount.get(r.id) ?? 0,
     proxyCount: proxyCount.get(r.id) ?? 0,
     event: r.event_id ? eventById.get(r.event_id) ?? null : null,
-    election: electionByDate.get(r.meeting_date) ?? null,
+    election: electionByMeeting.get(r.id) ?? null,
   }));
 }
 

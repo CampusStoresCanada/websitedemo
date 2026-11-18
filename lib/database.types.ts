@@ -7684,6 +7684,7 @@ export type Database = {
           created_at: string
           cycle_year: number
           id: string
+          meeting_id: string | null
           nominations_close_at: string
           nominations_open_at: string
           outcome: string | null
@@ -7703,6 +7704,7 @@ export type Database = {
           created_at?: string
           cycle_year: number
           id?: string
+          meeting_id?: string | null
           nominations_close_at: string
           nominations_open_at: string
           outcome?: string | null
@@ -7722,6 +7724,7 @@ export type Database = {
           created_at?: string
           cycle_year?: number
           id?: string
+          meeting_id?: string | null
           nominations_close_at?: string
           nominations_open_at?: string
           outcome?: string | null
@@ -7738,6 +7741,13 @@ export type Database = {
             columns: ["body_id"]
             isOneToOne: false
             referencedRelation: "governance_bodies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "elections_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
             referencedColumns: ["id"]
           },
         ]

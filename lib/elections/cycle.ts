@@ -147,6 +147,23 @@ export async function startElectionCycle(input: {
     createdByProfileId: input.startedByProfileId,
   });
 
+  // ⛔ Bind the election to the meeting. Before 2026-11-18 the only link was
+  // `agm_date = meeting_date`, so a meeting that later moved made the join find
+  // nothing and the election silently looked unbound. Set here rather than in
+  // the insert above because the meeting does not exist until the line above
+  // runs, and BEFORE the getElection below so the minted action items parent to
+  // a linked election.
+  if (agm.meetingId) {
+    const { error: linkError } = await db
+      .from("elections")
+      .update({ meeting_id: agm.meetingId })
+      .eq("id", election.id);
+    // Not fatal: the date match still resolves it, and `meetingDivergence`
+    // reports an unlinked election rather than hiding it.
+    if (linkError)
+      console.error("[elections] could not link the cycle to its meeting:", linkError.message);
+  }
+
   // Seats. Incumbents are left blank — filling them means asserting whose term
   // ends this cycle, which is exactly what the human confirming seatsAvailable
   // has just checked against the register.

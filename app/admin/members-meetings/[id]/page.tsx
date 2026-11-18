@@ -32,6 +32,7 @@ import {
   MEMBERS_MEETING_LABELS,
   VENUE_LABELS,
   isMembersMeetingType,
+  meetingDivergence,
   membersMeetingGaps,
   venueOf,
 } from "@/lib/governance/members-meetings";
@@ -42,7 +43,7 @@ import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import RecordSendByHand from "@/components/admin/members-meetings/RecordSendByHand";
 import LocalDate from "@/components/ui/LocalDate";
-import { getMembersMeetingView } from "@/lib/elections/service";
+import { getMembersMeetingView } from "@/lib/governance/members-meeting-view";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { publishMembersMeetingEventAction } from "@/lib/actions/members-meetings";
 import {
@@ -152,6 +153,10 @@ export default async function MembersMeetingPage({
   const gaps = membersMeetingGaps(meeting);
   const venue = meeting.event ? venueOf(meeting.event) : null;
   const electionSlug = meeting.election?.slug ?? null;
+  const divergence = meetingDivergence({
+    meetingDate: meeting.meetingDate,
+    election: meeting.election,
+  });
 
   // What each step sends, and how many people it would reach. ⚠️ The counts are
   // what arms the confirmation on a membership-wide send; see `sendCounts`.
@@ -312,6 +317,18 @@ export default async function MembersMeetingPage({
         <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
           The proxy form has been sent.
         </p>
+      )}
+
+      {/* ⛔ The meeting has moved and its election has not. Silence here was
+          the real defect the `elections.meeting_id` key fixed: while matching
+          dates was the only link, a moved meeting simply looked unbound. */}
+      {divergence && (
+        <section className="rounded-lg border-2 border-red-300 bg-red-50 px-5 py-4">
+          <h2 className="text-sm font-semibold text-red-900">
+            This meeting and its election disagree
+          </h2>
+          <p className="mt-2 text-sm text-red-800">{divergence}</p>
+        </section>
       )}
 
       {/* ── One spine, in the order things happen ─────────────────────────

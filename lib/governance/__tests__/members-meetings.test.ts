@@ -9,6 +9,7 @@ import {
   instantAtMeetingZone,
   isMembersMeetingType,
   meetingDateOf,
+  meetingDivergence,
   membersMeetingGaps,
   type MembersMeeting,
   venueFields,
@@ -310,5 +311,34 @@ describe("special meetings of the members", () => {
       expect(MEMBERS_MEETING_LABELS[t]?.length).toBeGreaterThan(0);
       expect(MEMBERS_MEETING_DESCRIPTIONS[t]?.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ─── Divergence between a meeting and its election ──────────────────────────
+
+describe("meetingDivergence", () => {
+  it("says nothing when the dates agree, which is the normal case", () => {
+    expect(
+      meetingDivergence({
+        meetingDate: "2027-01-21",
+        election: { cycleYear: 2027, windowsDerivedFrom: "2027-01-21" },
+      })
+    ).toBeNull();
+  });
+
+  it("says nothing when there is no election", () => {
+    expect(meetingDivergence({ meetingDate: "2027-01-21", election: null })).toBeNull();
+  });
+
+  it("reports BOTH dates when the meeting has moved", () => {
+    // The whole point: while the date match was the only link this was silence,
+    // indistinguishable from "no election for this meeting".
+    const msg = meetingDivergence({
+      meetingDate: "2027-02-04",
+      election: { cycleYear: 2027, windowsDerivedFrom: "2027-01-21" },
+    });
+    expect(msg).toContain("2027-02-04");
+    expect(msg).toContain("2027-01-21");
+    expect(msg).toMatch(/notice may\s+already have been given/);
   });
 });

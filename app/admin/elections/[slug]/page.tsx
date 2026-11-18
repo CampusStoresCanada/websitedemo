@@ -23,7 +23,8 @@ import {
   getCommitteeReview,
   countOutstandingBallots,
 } from "@/lib/elections/service";
-import { getMembersMeetingByDate } from "@/lib/governance/members-meetings-service";
+import { getMembersMeeting } from "@/lib/governance/members-meetings-service";
+import { meetingDivergence } from "@/lib/governance/members-meetings";
 import {
   requestWithdrawalAction,
   chaseIncompleteAction,
@@ -137,8 +138,20 @@ export default async function ElectionReviewPage({
 
   // The meeting these directors are elected at. Notice, the package and the
   // proxy register live there now — see the note further down.
-  const membersMeeting = await getMembersMeetingByDate(election.schedule.agmDate);
+  // ⛔ By the relation. `agm_date` is the frozen date the windows came from.
+  const membersMeeting = election.meetingId
+    ? await getMembersMeeting(election.meetingId)
+    : null;
   const meetingLink = membersMeeting ? `/admin/members-meetings/${membersMeeting.id}` : null;
+  const divergence = membersMeeting
+    ? meetingDivergence({
+        meetingDate: membersMeeting.meetingDate,
+        election: {
+          cycleYear: election.cycleYear,
+          windowsDerivedFrom: election.schedule.agmDate,
+        },
+      })
+    : null;
   const ballotConfig = election.config as unknown as {
     ballotsCirculatedAt?: string;
     ballotCirculationCount?: number;
@@ -332,6 +345,17 @@ export default async function ElectionReviewPage({
           same builder; one list in two places is still two places to look.
           This page is the committee's detail view: who has stood, who is
           validated, what the field looks like. Do not re-add a timeline. */}
+      {/* ⛔ Visible from BOTH sides. The windows below are derived from
+          `agm_date`; if the meeting has moved, every one of them is wrong. */}
+      {divergence && (
+        <section className="rounded-lg border-2 border-red-300 bg-red-50 px-5 py-4">
+          <h2 className="text-sm font-semibold text-red-900">
+            This election and its meeting disagree
+          </h2>
+          <p className="mt-2 text-sm text-red-800">{divergence}</p>
+        </section>
+      )}
+
       {meetingLink && (
         <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
           <h2 className="text-sm font-semibold text-gray-900">

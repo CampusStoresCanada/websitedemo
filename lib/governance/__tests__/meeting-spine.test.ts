@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
+import { currentStage } from "@/lib/elections/timeline";
 import {
   buildMeetingSpine,
-  currentStage,
   type ElectionFacts,
   type TimelineFacts,
-} from "../timeline";
+} from "../meeting-spine";
 
 /**
  * The timeline exists so somebody who runs this once a year can see where they
