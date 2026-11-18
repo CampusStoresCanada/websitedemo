@@ -228,6 +228,13 @@ function prospectApplyUrl(payment: { id: string; company_name: string; email: st
 export async function triggerProspectiveBoothPaymentConfirmation(params: {
   db: AdminClient;
   paymentId: string;
+  /**
+   * What Stripe actually charged, tax included (the session's amount_total).
+   * The payment row holds the pre-tax sum, because its two halves are taxed
+   * under different rules and Stripe works the tax out per line. Quoting that
+   * told a buyer charged $1,243 that we had received $1,100.
+   */
+  chargedCents?: number | null;
 }): Promise<void> {
   const { db, paymentId } = params;
 
@@ -260,7 +267,7 @@ export async function triggerProspectiveBoothPaymentConfirmation(params: {
       company_name: payment.company_name,
       booth_name: boothName,
       purchase_label: purchaseLabel,
-      amount_paid: formatCents(payment.amount_cents ?? 0),
+      amount_paid: formatCents(params.chargedCents ?? payment.amount_cents ?? 0),
       apply_url: prospectApplyUrl(payment),
     },
   });
