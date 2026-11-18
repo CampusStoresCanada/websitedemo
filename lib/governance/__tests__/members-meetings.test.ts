@@ -12,7 +12,6 @@ import {
   meetingDivergence,
   membersMeetingGaps,
   type MembersMeeting,
-  venueFields,
   venueOf,
   wallTimeAtMeetingZone,
 } from "@/lib/governance/members-meetings";
@@ -93,31 +92,6 @@ describe("venueOf", () => {
 
   it("treats a blank address as no address", () => {
     expect(venueOf({ isVirtual: true, location: "   " })).toBe("virtual");
-  });
-});
-
-describe("venueFields", () => {
-  it("clears the address when the meeting moves online", () => {
-    // Otherwise last year's hotel sits on the record of an online meeting.
-    expect(venueFields("virtual", { location: "Hotel, Calgary", virtualLink: "https://m/x" }))
-      .toEqual({ is_virtual: true, location: null, virtual_link: "https://m/x" });
-  });
-
-  it("clears the joining link for an in-person meeting", () => {
-    expect(venueFields("in_person", { location: "Hotel, Calgary", virtualLink: "https://m/x" }))
-      .toEqual({ is_virtual: false, location: "Hotel, Calgary", virtual_link: null });
-  });
-
-  it("keeps both for a hybrid meeting", () => {
-    expect(venueFields("hybrid", { location: "Hotel, Calgary", virtualLink: "https://m/x" }))
-      .toEqual({ is_virtual: true, location: "Hotel, Calgary", virtual_link: "https://m/x" });
-  });
-
-  it("round-trips through venueOf", () => {
-    for (const venue of ["virtual", "in_person", "hybrid"] as const) {
-      const f = venueFields(venue, { location: "Somewhere", virtualLink: "https://m/x" });
-      expect(venueOf({ isVirtual: f.is_virtual, location: f.location })).toBe(venue);
-    }
   });
 });
 

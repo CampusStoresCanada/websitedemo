@@ -30,11 +30,9 @@ import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { requireAdmin } from "@/lib/auth/guards";
 import {
   MEMBERS_MEETING_LABELS,
-  VENUE_LABELS,
   isMembersMeetingType,
   meetingDivergence,
   membersMeetingGaps,
-  venueOf,
 } from "@/lib/governance/members-meetings";
 import MeetingDateForm from "@/components/admin/members-meetings/MeetingDateControls";
 import EventFormClient from "@/components/admin/events/EventFormClient";
@@ -42,7 +40,7 @@ import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import RecordSendByHand from "@/components/admin/members-meetings/RecordSendByHand";
-import LocalDate from "@/components/ui/LocalDate";
+import { DateTimeRange } from "@/components/ui/LocalDate";
 import { getMembersMeetingView } from "@/lib/governance/members-meeting-view";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { publishMembersMeetingEventAction } from "@/lib/actions/members-meetings";
@@ -151,7 +149,6 @@ export default async function MembersMeetingPage({
     ? MEMBERS_MEETING_LABELS[meeting.meetingType]
     : meeting.meetingType;
   const gaps = membersMeetingGaps(meeting);
-  const venue = meeting.event ? venueOf(meeting.event) : null;
   const electionSlug = meeting.election?.slug ?? null;
   const divergence = meetingDivergence({
     meetingDate: meeting.meetingDate,
@@ -543,69 +540,61 @@ export default async function MembersMeetingPage({
 
         {meeting.event ? (
           <>
-            <dl className="mt-3">
-              {/* ⚠️ LocalDate, not a hand-rolled format. This is a server
-                  component, and `toLocaleTimeString` with no `timeZone` renders
-                  in whatever zone the PROCESS is in — UTC on Vercel. A
-                  noon-Eastern meeting printed as "5:00 p.m." Only a client
-                  render knows the reader's zone. */}
-              <Row label="Time">
-                {meeting.event.startsAt ? (
-                  <>
-                    <LocalDate
-                      iso={meeting.event.startsAt}
-                      format="time-only"
-                    />
-                    {meeting.event.endsAt && (
-                      <>
-                        {" – "}
-                        <LocalDate
-                          iso={meeting.event.endsAt}
-                          format="time-only"
-                        />
-                      </>
-                    )}
-                  </>
-                ) : (
-                  "not set"
-                )}
-              </Row>
-              <Row label="Attended">{venue ? VENUE_LABELS[venue] : "—"}</Row>
-              <Row label="Audience">
-                {meeting.event.audienceMode === "members"
-                  ? "Member institutions"
-                  : (meeting.event.audienceMode ?? "—")}
-              </Row>
-            </dl>
+            {/* ⛔ ONE view of these values, and it is the FORM. There was a
+                read-only list of Time / Attended / Audience sitting directly
+                above the identical inputs — a third telling of the event's
+                state, after the spine (which says what REMAINS) and the form
+                (which holds the values). An echo of a field above its own input
+                is not a summary.
 
+                What survives is the rendered OUTPUT, which is this section's
+                actual job: "the event page members see". `DateTimeRange` is the
+                same component the public page uses, so this line and the page
+                cannot disagree.
 
-            <details className="mt-4 border-t border-gray-100 pt-3">
-              <summary className="cursor-pointer text-sm font-medium text-[#163D6D]">
-                Edit the time, the place and the page copy
-              </summary>
-              <p className="mt-2 text-xs text-gray-500">
-                The same form as the Events section. The day cannot be changed
-                here — it is set above, because the election schedule is
-                measured from it.
-              </p>
-              <div className="mt-3">
-                {fullEvent ? (
-                  <EventFormClient
-                    event={fullEvent}
-                    isEdit
-                    googleMapsApiKey={
-                      process.env.GOOGLE_MAPS_API_KEY ??
-                      process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ??
-                      null
-                    }
-                  />
-                ) : (
-                  <p className="text-sm text-gray-500">
-                    The event page could not be loaded.
-                  </p>
-                )}
-              </div>
-            </details>
+                ⚠️ It must be a client render. This is a server component, and
+                formatting a time with no explicit `timeZone` uses the PROCESS's
+                zone — UTC on Vercel, which printed a noon-Eastern meeting as
+                "5:00 p.m." `DateTimeRange` defers until mounted and names the
+                zone, so it is never guessed at. The spine above shows DATES
+                only, as plain strings, so nothing else on this page would say
+                the hour at all. */}
+            <p className="mt-2 text-sm text-gray-700">
+              {meeting.event.startsAt ? (
+                <DateTimeRange
+                  start={meeting.event.startsAt}
+                  end={meeting.event.endsAt}
+                />
+              ) : (
+                <span className="text-gray-500">
+                  No time set yet — members cannot be told when.
+                </span>
+              )}
+            </p>
+
+            <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
+              The same form as the Events section — its own address lookup, its
+              own slug pinning. The DAY cannot be changed here: it is set above,
+              because the notice window and the election schedule are measured
+              from it.
+            </p>
+            <div className="mt-3">
+              {fullEvent ? (
+                <EventFormClient
+                  event={fullEvent}
+                  isEdit
+                  googleMapsApiKey={
+                    process.env.GOOGLE_MAPS_API_KEY ??
+                    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ??
+                    null
+                  }
+                />
+              ) : (
+                <p className="text-sm text-gray-500">
+                  The event page could not be loaded.
+                </p>
+              )}
+            </div>
           </>
         ) : (
           <p className="mt-3 text-sm text-gray-500">

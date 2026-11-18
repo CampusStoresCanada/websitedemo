@@ -130,27 +130,6 @@ export function venueOf(input: {
   return "in_person";
 }
 
-/**
- * The event columns a venue choice implies. Returns `null` for a field the
- * choice clears, so a meeting moved online does not keep last year's hotel
- * address sitting on the record.
- */
-export function venueFields(
-  venue: MeetingVenue,
-  input: { location?: string | null; virtualLink?: string | null }
-): { is_virtual: boolean; location: string | null; virtual_link: string | null } {
-  const location = input.location?.trim() || null;
-  const virtualLink = input.virtualLink?.trim() || null;
-
-  switch (venue) {
-    case "virtual":
-      return { is_virtual: true, location: null, virtual_link: virtualLink };
-    case "in_person":
-      return { is_virtual: false, location, virtual_link: null };
-    case "hybrid":
-      return { is_virtual: true, location, virtual_link: virtualLink };
-  }
-}
 
 // ─── What a members' meeting looks like once read ────────────────────────────
 
