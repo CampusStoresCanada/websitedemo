@@ -28,7 +28,6 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getMembersMeeting } from "@/lib/governance/members-meetings-service";
 import {
   MEMBERS_MEETING_LABELS,
   VENUE_LABELS,
@@ -42,14 +41,7 @@ import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import LocalDate from "@/components/ui/LocalDate";
-import { getEvent } from "@/lib/actions/events";
-import {
-  getNoticeState,
-  getAgmPackageState,
-  getElection,
-  getMeetingSpine,
-  getCandidateOutcomes,
-} from "@/lib/elections/service";
+import { getMembersMeetingView } from "@/lib/elections/service";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { publishMembersMeetingEventAction } from "@/lib/actions/members-meetings";
 import {
@@ -99,10 +91,13 @@ export default async function MembersMeetingPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     error?: string;
-    noticeSent?: string;
-    published?: string;
     asOf?: string;
+    published?: string;
+    noticeSent?: string;
     proxySent?: string;
+    callSent?: string;
+    circulated?: string;
+    candidatesTold?: string;
     packageError?: string;
     uploaded?: string;
     packageSent?: string;
@@ -121,18 +116,34 @@ export default async function MembersMeetingPage({
   const { id } = await params;
   const {
     error: pageError,
-    noticeSent,
-    published,
     asOf: asOfParam,
+    published,
+    noticeSent,
     proxySent,
+    callSent,
+    circulated,
+    candidatesTold,
     packageError,
     uploaded,
     packageSent,
     agendaGenerated,
   } = await searchParams;
 
-  const meeting = await getMembersMeeting(id);
-  if (!meeting) notFound();
+  // ⛔ ONE loader. This page used to call the meeting reader, the election, the
+  // notice state, the package state and then a spine reader that loaded the
+  // meeting and the election AGAIN — three reads of the election and two of the
+  // meeting per render, measured at 17-23s against the election screen's 7s.
+  // `getCommitteeReview` is the same shape for the election screen.
+  //
+  // Looking ahead without acting ahead: `disableActions` strips every action
+  // before the spine renders.
+  const asOf = asOfDate({ asOf: asOfParam });
+  const view = await getMembersMeetingView(id, asOf ?? undefined);
+  if (!view) notFound();
+
+  const { meeting, election, noticeState, agmPackage, candidateCount } = view;
+  const fullEvent = view.event;
+  const spine = asOf ? disableActions(view.spine) : view.spine;
 
   const label = isMembersMeetingType(meeting.meetingType)
     ? MEMBERS_MEETING_LABELS[meeting.meetingType]
@@ -140,30 +151,6 @@ export default async function MembersMeetingPage({
   const gaps = membersMeetingGaps(meeting);
   const venue = meeting.event ? venueOf(meeting.event) : null;
   const electionSlug = meeting.election?.slug ?? null;
-
-  // The full event row, for the form. The projection the meeting reader returns
-  // is for display; EventForm edits the real thing.
-  const eventResult = meeting.event ? await getEvent(meeting.event.id) : null;
-  const fullEvent = eventResult?.success ? eventResult.data : null;
-
-  // Notice and the package are keyed by election slug — see the file note.
-  // Looking ahead without being able to act ahead — actions are stripped by
-  // `disableActions` before the spine is rendered.
-  const asOf = asOfDate({ asOf: asOfParam });
-
-  // ⛔ The spine is keyed by the MEETING, not the election: a members' meeting
-  // with no election still has an event page, a notice window, a proxy
-  // deadline, an agenda and a package.
-  const rawSpine = await getMeetingSpine(id, asOf ?? undefined);
-  const spine = asOf ? disableActions(rawSpine ?? []) : rawSpine;
-
-  const [noticeState, agmPackage, election] = electionSlug
-    ? await Promise.all([
-        getNoticeState(electionSlug),
-        getAgmPackageState(electionSlug),
-        getElection(electionSlug),
-      ])
-    : [null, null, null];
 
   // What each step sends, and how many people it would reach. ⚠️ The counts are
   // what arms the confirmation on a membership-wide send; see `sendCounts`.
@@ -192,14 +179,6 @@ export default async function MembersMeetingPage({
   }
   const recipients = (key: string) =>
     messages?.find((m) => m.key === key)?.recipientCount ?? null;
-
-  const candidateOutcomes =
-    electionSlug && election?.status === "certified"
-      ? await getCandidateOutcomes(electionSlug)
-      : null;
-  const candidateCount = candidateOutcomes
-    ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
-    : null;
 
   const packageConfig = (election?.config ?? {}) as {
     agmPackageSentAt?: string;
@@ -311,6 +290,23 @@ export default async function MembersMeetingPage({
       {published && (
         <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
           The event page is published. Members can see the meeting, and notice can be given.
+        </p>
+      )}
+      {callSent && (
+        <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          The call for nominations has gone out to every eligible institution. It cannot be
+          sent again.
+        </p>
+      )}
+      {circulated && (
+        <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          Ballot links are on their way. Delivery tracking records nothing, so treat this as
+          attempted — ballots arriving is the reliable signal.
+        </p>
+      )}
+      {candidatesTold && (
+        <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          Each candidate has been told their own result. The membership has not been told yet.
         </p>
       )}
       {proxySent && (

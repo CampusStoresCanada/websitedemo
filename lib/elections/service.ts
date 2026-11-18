@@ -61,6 +61,12 @@ import {
 } from "./documents/results-announcement";
 import { buildAgmAgenda } from "./documents/agm-agenda";
 import {
+  MEMBERS_MEETING_LABELS,
+  isMembersMeetingType,
+  membersMeetingGaps,
+} from "@/lib/governance/members-meetings";
+import type { Event } from "@/lib/events/types";
+import {
   buildMeetingSpine,
   type ElectionFacts,
   type TimelineFacts,
@@ -995,10 +1001,14 @@ export async function listNominations(electionSlug: string): Promise<NominationV
     .not("status", "in", "(declined,withdrawn,ineligible)");
 
   const views: NominationView[] = [];
-  for (const row of data ?? []) {
-    const v = await hydrateNomination(row.id as string, election);
-    if (v) views.push(v);
-  }
+  // ⛔ In parallel, not one after another. `hydrateNomination` makes several
+  // round trips of its own, so a sequential loop cost ~1.3s PER nomination —
+  // 5.2 seconds for four, on a page that calls this every render. Promise.all
+  // over the map keeps the order the query returned.
+  const hydrated = await Promise.all(
+    (data ?? []).map((row) => hydrateNomination(row.id as string, election))
+  );
+  for (const v of hydrated) if (v) views.push(v);
   return views;
 }
 
@@ -2817,22 +2827,43 @@ export async function getNoticeState(slug: string, onDate = today()): Promise<No
 
   // A member nobody can be reached at is a compliance gap, and it has to be
   // visible while there is still time to fix it — not discovered afterwards.
-  const unreachable: string[] = [];
-  for (const v of eligible) {
-    const { data: admins } = await db
+  //
+  // ⛔ BATCHED. This was one `user_organizations` query per eligible
+  // institution, run sequentially, plus one more per institution that came back
+  // empty — 55 round trips to a remote database, measured at 8.5 SECONDS for a
+  // page that calls this on every render. Two queries now.
+  //
+  // ⚠️ Chunked because `.in()` past roughly 200 ids returns Bad Request rather
+  // than rows — a silent truncation would under-report unreachable members,
+  // which is the one thing this is here to catch.
+  const eligibleIds = eligible.map((v) => v.organizationId);
+  const withAdmins = new Set<string>();
+  for (let i = 0; i < eligibleIds.length; i += 150) {
+    const chunk = eligibleIds.slice(i, i + 150);
+    const { data: admins, error } = await db
       .from("user_organizations")
-      .select("user_id")
-      .eq("organization_id", v.organizationId)
+      .select("organization_id")
+      .in("organization_id", chunk)
       .eq("role", "org_admin")
       .eq("status", "active");
-    if (!admins?.length) {
-      const { data: org } = await db
+    // Fail loud rather than reporting every member unreachable.
+    if (error) throw new Error(`[elections] notice recipients failed: ${error.message}`);
+    for (const row of admins ?? []) withAdmins.add(row.organization_id as string);
+  }
+
+  const unreachableIds = eligibleIds.filter((id) => !withAdmins.has(id));
+  const unreachable: string[] = [];
+  if (unreachableIds.length > 0) {
+    const names = new Map<string, string>();
+    for (let i = 0; i < unreachableIds.length; i += 150) {
+      const { data: orgs } = await db
         .from("organizations")
-        .select("name")
-        .eq("id", v.organizationId)
-        .maybeSingle();
-      unreachable.push((org?.name as string) ?? v.organizationId);
+        .select("id, name")
+        .in("id", unreachableIds.slice(i, i + 150));
+      for (const o of orgs ?? []) names.set(o.id as string, o.name as string);
     }
+    // Preserve the eligible order so the list is stable between renders.
+    for (const id of unreachableIds) unreachable.push(names.get(id) ?? id);
   }
 
   const eventSlug = agmEventSlug(election.cycleYear);
@@ -4814,11 +4845,14 @@ export async function getElectionTimeline(
   const { getMembersMeetingByDate } = await import(
     "@/lib/governance/members-meetings-service"
   );
-  const meeting = await getMembersMeetingByDate(election.schedule.agmDate);
+  const [meeting, notice] = await Promise.all([
+    getMembersMeetingByDate(election.schedule.agmDate),
+    getNoticeState(slug, onDate),
+  ]);
 
   return buildMeetingSpine(
     {
-      ...(await meetingHalf(meeting, election.schedule.agmDate, election.cycleYear, slug, onDate)),
+      ...meetingHalfOf(meeting, election.schedule.agmDate, election, notice),
       election: await electionHalf(election),
     },
     onDate ?? today()
@@ -4826,79 +4860,126 @@ export async function getElectionTimeline(
 }
 
 /**
- * The spine for a MEETING, whether or not an election is held at it.
+ * Everything the members' meeting screen needs, in ONE pass.
  *
- * ⛔ This is the entry point the meeting page uses, and the reason the builder's
- * election half is nullable. A special members' meeting still has an event page
- * to publish, a notice window, a proxy deadline, an agenda and a package — all
- * measured back from the day it sits.
+ * ⛔ One loader, like `getCommitteeReview` is for the election screen. The page
+ * used to call `getMembersMeeting`, `getElection`, `getNoticeState`,
+ * `getAgmPackageState` and then a spine reader that loaded the meeting and the
+ * election AGAIN — `getElection` three times and the meeting twice per render,
+ * measured at 17 to 23 seconds against the election screen's 7. Nothing here is
+ * request-cached and `getElection` cannot safely be: `applyBoardTransition`
+ * re-reads it after writing, so a per-request cache would hand it stale rows.
+ * The fix is to load each thing once and pass it down, which is why every
+ * helper below takes what it is given rather than fetching.
  */
-export async function getMeetingSpine(
+export interface MembersMeetingView {
+  meeting: NonNullable<
+    Awaited<
+      ReturnType<
+        typeof import("@/lib/governance/members-meetings-service").getMembersMeeting
+      >
+    >
+  >;
+  election: Election | null;
+  noticeState: NoticeState | null;
+  agmPackage: Awaited<ReturnType<typeof getAgmPackageState>>;
+  /** The full event row, for `EventForm`. Null when there is no event yet. */
+  event: Event | null;
+  /** Only resolved once the result is certified. */
+  candidateCount: number | null;
+  spine: TimelineStage[];
+}
+
+export async function getMembersMeetingView(
   meetingId: string,
   onDate?: string
-): Promise<TimelineStage[] | null> {
+): Promise<MembersMeetingView | null> {
   const { getMembersMeeting } = await import("@/lib/governance/members-meetings-service");
+  const { getEvent } = await import("@/lib/actions/events");
   const meeting = await getMembersMeeting(meetingId);
   if (!meeting) return null;
 
-  const election = meeting.election ? await getElection(meeting.election.slug) : null;
+  const slug = meeting.election?.slug ?? null;
 
-  return buildMeetingSpine(
+  // ⛔ ONE wave. `electionHalf` needs the Election object, so the election is
+  // resolved first (~150ms) and then everything else fires together. Awaiting
+  // the notice state and `electionHalf` in series cost 8.5s + 5.2s instead of
+  // the longer of the two.
+  const election = slug ? await getElection(slug) : null;
+
+  const [noticeState, agmPackage, eventResult, electionFacts, candidateOutcomes] =
+    await Promise.all([
+      slug ? getNoticeState(slug, onDate) : Promise.resolve(null),
+      slug ? getAgmPackageState(slug) : Promise.resolve(null),
+      meeting.event ? getEvent(meeting.event.id) : Promise.resolve(null),
+      election ? electionHalf(election) : Promise.resolve(null),
+      slug && election?.status === "certified"
+        ? getCandidateOutcomes(slug)
+        : Promise.resolve(null),
+    ]);
+
+  const spine = buildMeetingSpine(
     {
-      ...(await meetingHalf(
-        meeting,
-        meeting.meetingDate,
-        election?.cycleYear ?? null,
-        meeting.election?.slug ?? null,
-        onDate
-      )),
-      election: election ? await electionHalf(election) : null,
+      ...meetingHalfOf(meeting, meeting.meetingDate, election, noticeState),
+      election: electionFacts,
     },
     onDate ?? today()
   );
+
+  return {
+    meeting,
+    election,
+    noticeState,
+    agmPackage,
+    event: eventResult?.success ? eventResult.data : null,
+    candidateCount: candidateOutcomes
+      ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
+      : null,
+    spine,
+  };
 }
 
 /**
- * The meeting half of the spine's facts.
+ * The meeting half of the spine's facts. Pure: it fetches nothing.
  *
  * The notice window comes from `resolveNoticeWindow(meetingDate)`, which is
- * pure — so it is available with no election. `getNoticeState` is consulted
- * only for what has been SENT, which today is recorded on the election's
- * config and so is null for a meeting without one.
+ * pure — so it is available with no election. The notice/proxy/package SENT
+ * timestamps are recorded on the election's config, so they are null for a
+ * meeting without one. ⚠️ That is a real gap, not a default: notice given by
+ * hand for a special members' meeting has nowhere to be recorded, so the spine
+ * will keep saying it has not been given.
  */
-async function meetingHalf(
-  meeting: Awaited<ReturnType<typeof import("@/lib/governance/members-meetings-service").getMembersMeeting>>,
+function meetingHalfOf(
+  meeting: Awaited<
+    ReturnType<typeof import("@/lib/governance/members-meetings-service").getMembersMeeting>
+  >,
   meetingDate: string,
-  cycleYear: number | null,
-  electionSlug: string | null,
-  onDate?: string
-): Promise<Omit<TimelineFacts, "election">> {
-  const { membersMeetingGaps, isMembersMeetingType, MEMBERS_MEETING_LABELS } = await import(
-    "@/lib/governance/members-meetings"
-  );
+  election: Election | null,
+  notice: NoticeState | null
+): Omit<TimelineFacts, "election"> {
+  const cfg = (election?.config ?? null) as {
+    agmNoticeSentAt?: string;
+    proxyFormSentAt?: string;
+    agmPackageSentAt?: string;
+  } | null;
 
-  const notice = electionSlug ? await getNoticeState(electionSlug, onDate) : null;
   const window = notice
     ? {
         opensOn: notice.window.opensOn,
         closesOn: notice.window.closesOn,
         proxyDueOn: notice.window.proxyDueOn,
       }
-    : resolveNoticeWindowFor(meetingDate);
-
-  const cfg = (electionSlug ? ((await getElection(electionSlug))?.config as unknown) : null) as {
-    agmNoticeSentAt?: string;
-    proxyFormSentAt?: string;
-    agmPackageSentAt?: string;
-  } | null;
+    : (() => {
+        const w = resolveNoticeWindow(meetingDate);
+        return { opensOn: w.opensOn, closesOn: w.closesOn, proxyDueOn: w.proxyDueOn };
+      })();
 
   return {
     // ⛔ Not `meeting.title`. The stored title carries the date in it
     // ("CSC Annual General Meeting — 2028-01-20"), which reads as a duplicate
-    // beside the stage's own date column. The type's label is the name of the
-    // kind of meeting; the year comes from the election when there is one.
-    meetingLabel: cycleYear
-      ? `${cycleYear} Annual General Meeting`
+    // beside the stage's own date column.
+    meetingLabel: election
+      ? `${election.cycleYear} Annual General Meeting`
       : meeting && isMembersMeetingType(meeting.meetingType)
         ? MEMBERS_MEETING_LABELS[meeting.meetingType]
         : "Meeting of the members",
@@ -4912,12 +4993,6 @@ async function meetingHalf(
     proxySentAt: cfg?.proxyFormSentAt ?? null,
     packageSentAt: cfg?.agmPackageSentAt ?? null,
   };
-}
-
-/** The notice window for a meeting with no election to carry it. */
-function resolveNoticeWindowFor(meetingDate: string) {
-  const w = resolveNoticeWindow(meetingDate);
-  return { opensOn: w.opensOn, closesOn: w.closesOn, proxyDueOn: w.proxyDueOn };
 }
 
 /** The election half of the spine's facts. */
