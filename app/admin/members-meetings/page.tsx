@@ -14,6 +14,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { listMembersMeetings } from "@/lib/governance/members-meetings-service";
 import {
   MEMBERS_MEETING_LABELS,
+  compareMembersMeetings,
   VENUE_LABELS,
   isMembersMeetingType,
   membersMeetingGaps,
@@ -22,7 +23,7 @@ import {
 } from "@/lib/governance/members-meetings";
 
 export const metadata = {
-  title: "Members' Meetings | Admin | Campus Stores Canada",
+  title: "AGM & Members' Meetings | Admin | Campus Stores Canada",
 };
 
 export const dynamic = "force-dynamic";
@@ -84,13 +85,18 @@ export default async function MembersMeetingsPage() {
 
   const meetings = await listMembersMeetings();
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = meetings.filter((m) => m.meetingDate >= today && m.status !== "cancelled");
+  // ⛔ The AGM leads — see `compareMembersMeetings`. A special meeting is
+  // ordered after it and styled more quietly below, so it reads as the
+  // exception it is.
+  const upcoming = meetings
+    .filter((m) => m.meetingDate >= today && m.status !== "cancelled")
+    .sort(compareMembersMeetings);
   const past = meetings.filter((m) => !upcoming.includes(m));
 
   return (
     <div className="space-y-6">
       <AdminPageHeader
-        title="Members' Meetings"
+        title="AGM &amp; Members' Meetings"
         description="Meetings of the member institutions, under By-Law Part VII. The annual general meeting is the standing one: directors are elected at it, the financial statements are presented, and proxies are exercised."
         actions={
           <div className="flex items-center gap-2">
@@ -129,7 +135,12 @@ export default async function MembersMeetingsPage() {
               <Link
                 key={m.id}
                 href={`/admin/members-meetings/${m.id}`}
-                className="block rounded-lg border border-gray-200 bg-white px-5 py-4 hover:border-[#163D6D]/40 hover:shadow-sm transition"
+                className={`block rounded-lg px-5 py-4 transition hover:border-[#163D6D]/40 hover:shadow-sm ${
+                  m.meetingType === "agm"
+                    ? "border border-gray-200 bg-white"
+                    : // Quieter, and dashed: a special meeting is the exception.
+                      "border border-dashed border-gray-300 bg-gray-50"
+                }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>

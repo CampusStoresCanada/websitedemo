@@ -4,6 +4,7 @@ import {
   MEMBERS_MEETING_LABELS,
   MEMBERS_MEETING_TYPES,
   agmEventSlug,
+  compareMembersMeetings,
   membersMeetingEventSlug,
   membersMeetingTitle,
   instantAtMeetingZone,
@@ -347,5 +348,45 @@ describe("a special meeting needs its business stated", () => {
     expect(membersMeetingGaps(meeting({ purpose: null })).join(" ")).not.toMatch(
       /No business is stated/
     );
+  });
+});
+
+describe("compareMembersMeetings", () => {
+  const at = (date: string, type: string) =>
+    meeting({ meetingDate: date, meetingType: type });
+
+  it("puts the AGM before a special meeting, whatever the dates say", () => {
+    // ⛔ Not chronological first: the AGM is what somebody opening the section
+    // came to find, and in most years the only meeting there is.
+    const list = [at("2027-03-01", "special_members"), at("2027-06-01", "agm")];
+    expect(list.sort(compareMembersMeetings).map((m) => m.meetingType)).toEqual([
+      "agm",
+      "special_members",
+    ]);
+  });
+
+  it("orders by date within a kind", () => {
+    const list = [at("2028-01-20", "agm"), at("2027-01-21", "agm")];
+    expect(list.sort(compareMembersMeetings).map((m) => m.meetingDate)).toEqual([
+      "2027-01-21",
+      "2028-01-20",
+    ]);
+  });
+
+  it("is a stable total order over a mixed list", () => {
+    const list = [
+      at("2027-09-09", "special_members"),
+      at("2028-01-20", "agm"),
+      at("2027-03-01", "special_members"),
+      at("2027-01-21", "agm"),
+    ];
+    expect(
+      list.sort(compareMembersMeetings).map((m) => `${m.meetingType}:${m.meetingDate}`)
+    ).toEqual([
+      "agm:2027-01-21",
+      "agm:2028-01-20",
+      "special_members:2027-03-01",
+      "special_members:2027-09-09",
+    ]);
   });
 });

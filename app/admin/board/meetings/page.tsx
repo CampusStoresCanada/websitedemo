@@ -71,7 +71,7 @@ export default async function BoardMeetingsPage() {
     <main>
       <AdminPageHeader
         title="Board Meetings"
-        description="Meetings of the board and their documents. Members' meetings, the AGM included, are under Members' Meetings."
+        description="Meetings of the board and their documents. Members' meetings, the AGM included, are under AGM &amp; Members' Meetings."
         actions={
           <div className="flex items-center gap-2">
             {isSA && <CreateMeetingButton />}

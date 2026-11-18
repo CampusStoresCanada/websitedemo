@@ -363,3 +363,17 @@ export function meetingDivergence(input: {
     `already have been given stating the old day.`
   );
 }
+
+/**
+ * List order: the AGM leads, then a special meeting of the members.
+ *
+ * ⛔ Not chronological first. The annual general meeting is the standing one and
+ * in most years the only one, so it is what somebody opening this section came
+ * to find; a special meeting reads as the exception it is. Within a kind, by
+ * date ascending. Steve's call 2026-11-18, which is also why the nav says
+ * "AGM & Members' Meetings" rather than leading with the umbrella.
+ */
+export function compareMembersMeetings(a: MembersMeeting, b: MembersMeeting): number {
+  if (a.meetingType !== b.meetingType) return a.meetingType === "agm" ? -1 : 1;
+  return a.meetingDate.localeCompare(b.meetingDate);
+}

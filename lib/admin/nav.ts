@@ -143,10 +143,14 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       {
         href: "/admin/members-meetings",
-        label: "Members' Meetings",
-        title: "Members' Meetings",
+        // ⛔ Leads with the AGM because that is what people come looking for —
+        // it is the standing meeting and the only one most years. The umbrella
+        // stays in the label so it is not a lie the day a special meeting of
+        // the members is called, which By-Law Part VII provides for.
+        label: "AGM & Members' Meetings",
+        title: "AGM & Members' Meetings",
         description:
-          "Meetings of the member institutions, under By-Law Part VII. Set when and where the annual general meeting sits, and publish the page members see.",
+          "Meetings of the member institutions, under By-Law Part VII. The annual general meeting is the standing one — set when and where it sits, publish the page members see, give notice. A special meeting of the members is called here too.",
         matchPrefix: "/admin/members-meetings",
       },
       {
