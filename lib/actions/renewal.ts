@@ -725,3 +725,138 @@ export async function openInvoicePayment(
 
   return { success: true, url };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Archive an organization
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Take an organization out of the working set: it leaves the directories, the
+ * renewal reminders and the charge run, all of which already skip archived
+ * organizations.
+ *
+ * Until this existed the only way to archive was to edit `organizations`
+ * directly. 39 were done that way, with no record of who or why, and the edit
+ * left the membership exactly as it was. Momentec (archived 2026-08-04) stayed
+ * `active` with a $600 invoice open for three months.
+ *
+ * So archiving here also ends the membership, through the state machine, which
+ * writes its own log row and removes Circle access. Two things it refuses
+ * rather than decide for you:
+ *
+ *   - Anything still owing. Voiding an invoice is a decision about money, and
+ *     archiving around one is how an archived organization kept being asked to
+ *     pay. Void or settle it first.
+ *   - Paid coverage still running. They have paid for the time; archiving
+ *     would cancel a membership their money is holding open.
+ *
+ * Global admins only, reason required: the audit row is the point.
+ */
+export async function archiveOrganization(
+  orgId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const { ctx } = auth;
+  if (!isGlobalAdmin(ctx.globalRole)) {
+    return { success: false, error: "Only a global admin can archive an organization" };
+  }
+
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) {
+    return { success: false, error: "A reason is required" };
+  }
+
+  const db = createAdminClient();
+
+  const { data: org, error: orgErr } = await db
+    .from("organizations")
+    .select("id, name, membership_status, membership_expires_at, archived_at")
+    .eq("id", orgId)
+    .single();
+
+  if (orgErr || !org) {
+    return { success: false, error: "Organization not found" };
+  }
+
+  if (org.archived_at) {
+    return { success: false, error: `${org.name} is already archived.` };
+  }
+
+  // An invoice in any of these is still asking the organization for money.
+  const { data: openInvoices, error: invoiceErr } = await db
+    .from("invoices")
+    .select("id, total_cents")
+    .eq("organization_id", orgId)
+    .in("status", ["draft", "invoiced", "pending_settlement", "overdue", "failed"]);
+
+  if (invoiceErr) {
+    // "Could not read" is not "nothing owing". Refuse rather than archive blind.
+    return { success: false, error: `Could not check their invoices: ${invoiceErr.message}` };
+  }
+
+  if (openInvoices && openInvoices.length > 0) {
+    const cents = openInvoices.reduce((sum, i) => sum + (i.total_cents ?? 0), 0);
+    const count = openInvoices.length === 1 ? "an open invoice" : `${openInvoices.length} open invoices`;
+    return {
+      success: false,
+      error: `${org.name} has ${count} ($${(cents / 100).toFixed(2)}). Void or settle before archiving.`,
+    };
+  }
+
+  const todayISO = new Date().toISOString().split("T")[0];
+  const expiresAt = org.membership_expires_at?.split("T")[0] ?? null;
+  const fromStatus = org.membership_status as string | null;
+  // The statuses the state machine lets move straight to `canceled`.
+  const willCancel = !!fromStatus && ["active", "grace", "reactivated"].includes(fromStatus);
+
+  if (willCancel && expiresAt && expiresAt >= todayISO) {
+    return {
+      success: false,
+      error: `${org.name} has paid coverage through ${expiresAt}. Archiving would cancel a membership they have paid for.`,
+    };
+  }
+
+  if (willCancel) {
+    const transitionResult = await transitionMembershipState(
+      orgId,
+      "canceled",
+      "admin",
+      ctx.userId,
+      `Archived: ${trimmedReason}`,
+      { archived: true }
+    );
+    if (!transitionResult.success) {
+      return { success: false, error: transitionResult.error };
+    }
+  }
+
+  const now = new Date().toISOString();
+  const { error: archiveErr } = await db
+    .from("organizations")
+    .update({ archived_at: now, updated_at: now })
+    .eq("id", orgId);
+
+  if (archiveErr) {
+    return { success: false, error: `Could not archive: ${archiveErr.message}` };
+  }
+
+  await logAuditEventSafe({
+    action: "organization_archived",
+    entityType: "organization",
+    entityId: orgId,
+    actorId: ctx.userId,
+    details: {
+      name: org.name,
+      reason: trimmedReason,
+      status_before: fromStatus,
+      membership_canceled: willCancel,
+    },
+  });
+
+  return { success: true };
+}

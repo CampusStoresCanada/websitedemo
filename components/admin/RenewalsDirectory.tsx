@@ -8,7 +8,7 @@ import type { MembershipProgramDef } from "@/lib/policy/types";
 import { formatCents } from "@/lib/utils";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
-import { reviveMembership, reviveMembershipToGrace } from "@/lib/actions/renewal";
+import { archiveOrganization, reviveMembership, reviveMembershipToGrace } from "@/lib/actions/renewal";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
 import { RenewalPauseControl, formatPauseDate } from "@/components/admin/RenewalPauseControl";
 
@@ -361,6 +361,25 @@ function ReviveToGraceButton({ row }: { row: RenewalDirectoryRow }) {
   );
 }
 
+/**
+ * Take an organization off the books. Offered where it can succeed without
+ * cancelling something paid for: never on a row whose coverage is still
+ * running. archiveOrganization enforces that, and also refuses while anything
+ * is owing, so the button reports the open invoice instead of hiding it.
+ */
+function ArchiveButton({ row }: { row: RenewalDirectoryRow }) {
+  if (hasCoverageInForce(row)) return null;
+
+  return (
+    <InlineReasonAction
+      label="Archive"
+      busyLabel="Archiving..."
+      placeholder="Reason for archiving (required)"
+      title="Remove this organization from the directories and billing, and end its membership"
+      submit={(reason) => archiveOrganization(row.id, reason)}
+    />
+  );
+}
 
 function DirectoryRow({
   row,
@@ -433,6 +452,7 @@ function DirectoryRow({
 
       <RestoreButton row={row} />
       <ReviveToGraceButton row={row} />
+      <ArchiveButton row={row} />
 
       <Link
         href={`/org/${row.slug}`}
