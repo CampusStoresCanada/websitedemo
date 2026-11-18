@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildElectionTimeline, currentStage, type TimelineFacts } from "../timeline";
+import {
+  buildMeetingSpine,
+  currentStage,
+  type ElectionFacts,
+  type TimelineFacts,
+} from "../timeline";
 
 /**
  * The timeline exists so somebody who runs this once a year can see where they
@@ -8,7 +13,7 @@ import { buildElectionTimeline, currentStage, type TimelineFacts } from "../time
  * cannot run says what is stopping it.
  */
 
-function facts(over: Partial<TimelineFacts> = {}): TimelineFacts {
+function election(over: Partial<ElectionFacts> = {}): ElectionFacts {
   return {
     cycleYear: 2027,
     status: "nominating",
@@ -22,29 +27,38 @@ function facts(over: Partial<TimelineFacts> = {}): TimelineFacts {
     },
     callSentAt: "2026-09-23T10:00:00Z",
     ballotsCirculatedAt: null,
-    noticeSentAt: null,
-    proxySentAt: null,
-    packageSentAt: null,
     resultsAnnouncedAt: null,
     candidateResultsSentAt: null,
     certifiedAt: null,
     sealed: false,
-    noticeWindow: { opensOn: "2026-12-17", closesOn: "2026-12-31", proxyDueOn: "2026-12-22" },
-    eventPublished: true,
-    eventStartSet: true,
-    eventGaps: [],
-    agendaDrafted: false,
-    nominationsReceived: 5,
-    validatedNominees: 3,
+    nominationsReceived: 4,
+    validatedNominees: 4,
     ballotsReturned: 0,
-    electorate: 52,
+    electorate: 55,
     ...over,
   };
 }
 
-describe("buildElectionTimeline — the spine", () => {
+function facts(over: Partial<TimelineFacts> = {}): TimelineFacts {
+  return {
+    meetingLabel: "2027 Annual General Meeting",
+    meetingDate: "2027-01-21",
+    eventPublished: true,
+    eventStartSet: true,
+    eventGaps: [],
+    agendaDrafted: false,
+    noticeWindow: { opensOn: "2026-12-17", closesOn: "2026-12-31", proxyDueOn: "2026-12-22" },
+    noticeSentAt: null,
+    proxySentAt: null,
+    packageSentAt: null,
+    election: election(),
+    ...over,
+  };
+}
+
+describe("buildMeetingSpine — the spine", () => {
   it("runs in the order things happen, not the order they were built", () => {
-    const t = buildElectionTimeline(facts(), "2026-10-01");
+    const t = buildMeetingSpine(facts(), "2026-10-01");
     expect(t.map((s) => s.key)).toEqual([
       "cycle_open",
       "call_for_nominations",
@@ -67,8 +81,8 @@ describe("buildElectionTimeline — the spine", () => {
   });
 
   it("drops the whole ballot when the slate is acclaimed", () => {
-    const t = buildElectionTimeline(
-      facts({ outcome: "acclaimed", status: "nominations_closed" }),
+    const t = buildMeetingSpine(
+      facts({ election: election({ outcome: "acclaimed", status: "nominations_closed" }) }),
       "2026-11-01"
     );
     const ballot = t.find((s) => s.key === "ballot");
@@ -78,33 +92,39 @@ describe("buildElectionTimeline — the spine", () => {
   });
 });
 
-describe("buildElectionTimeline — what is stopping each stage", () => {
+describe("buildMeetingSpine — what is stopping each stage", () => {
   it("will not close nominations before the published date", () => {
-    const t = buildElectionTimeline(facts(), "2026-10-01");
+    const t = buildMeetingSpine(facts(), "2026-10-01");
     const close = t.find((s) => s.key === "close_nominations")!;
     expect(close.action?.blockedBy).toMatch(/Not until 2026-10-23/);
   });
 
   it("blocks notice on an unpublished event page", () => {
-    const t = buildElectionTimeline(facts({ eventPublished: false }), "2026-12-18");
+    const t = buildMeetingSpine(facts({ eventPublished: false }), "2026-12-18");
     const notice = t.find((s) => s.key === "agm_notice")!;
     expect(notice.action?.blockedBy).toMatch(/Publish the meeting's event page/);
   });
 
   it("blocks notice before the window opens, and names the date", () => {
-    const t = buildElectionTimeline(facts(), "2026-12-01");
+    const t = buildMeetingSpine(facts(), "2026-12-01");
     const notice = t.find((s) => s.key === "agm_notice")!;
     expect(notice.action?.blockedBy).toMatch(/window opens 2026-12-17/);
   });
 
   it("marks notice overdue once the window has closed", () => {
-    const t = buildElectionTimeline(facts(), "2027-01-05");
+    const t = buildMeetingSpine(facts(), "2027-01-05");
     expect(t.find((s) => s.key === "agm_notice")!.state).toBe("overdue");
   });
 
   it("will not announce before the meeting, because the meeting elects", () => {
-    const t = buildElectionTimeline(
-      facts({ status: "certified", certifiedAt: "2026-12-10T00:00:00Z", sealed: true }),
+    const t = buildMeetingSpine(
+      facts({
+        election: election({
+          status: "certified",
+          certifiedAt: "2026-12-10T00:00:00Z",
+          sealed: true,
+        }),
+      }),
       "2026-12-20"
     );
     const announce = t.find((s) => s.key === "announce_result")!;
@@ -113,18 +133,18 @@ describe("buildElectionTimeline — what is stopping each stage", () => {
   });
 
   it("will not certify before sealing", () => {
-    const t = buildElectionTimeline(facts({ status: "balloting" }), "2026-12-08");
+    const t = buildMeetingSpine(facts({ election: election({ status: "balloting" }) }), "2026-12-08");
     const certify = t.find((s) => s.key === "certify")!;
     expect(certify.state).toBe("blocked");
     expect(certify.action?.blockedBy).toMatch(/not sealed/);
   });
 });
 
-describe("buildElectionTimeline — the overdue call", () => {
+describe("buildMeetingSpine — the overdue call", () => {
   it("flags a call that should have gone out and has not", () => {
     // The failure that would have silently broken the 2027 cycle: nominations
     // "open" by the calendar while the form still turns members away.
-    const t = buildElectionTimeline(facts({ callSentAt: null, status: "draft" }), "2026-10-01");
+    const t = buildMeetingSpine(facts({ election: election({ callSentAt: null, status: "draft" }) }), "2026-10-01");
     const call = t.find((s) => s.key === "call_for_nominations")!;
     expect(call.state).toBe("overdue");
     expect(call.detail).toMatch(/turns members away/);
@@ -133,12 +153,12 @@ describe("buildElectionTimeline — the overdue call", () => {
 
 describe("currentStage", () => {
   it("puts anything overdue first", () => {
-    const t = buildElectionTimeline(facts({ callSentAt: null, status: "draft" }), "2026-10-01");
+    const t = buildMeetingSpine(facts({ election: election({ callSentAt: null, status: "draft" }) }), "2026-10-01");
     expect(currentStage(t)?.key).toBe("call_for_nominations");
   });
 
   it("otherwise picks the stage that can actually be acted on", () => {
-    const t = buildElectionTimeline(facts(), "2026-10-25");
+    const t = buildMeetingSpine(facts(), "2026-10-25");
     const stage = currentStage(t)!;
     expect(stage.action?.blockedBy ?? null).toBeNull();
   });
@@ -148,7 +168,7 @@ describe("currentStage — the headline must be the real next act", () => {
   it("does not make the AGM package the headline in September", () => {
     // Found by reading real output: the package was "current" year-round, so it
     // outranked the call for nominations as the thing to do next.
-    const t = buildElectionTimeline(facts({ callSentAt: null, status: "draft" }), "2026-09-01");
+    const t = buildMeetingSpine(facts({ election: election({ callSentAt: null, status: "draft" }) }), "2026-09-01");
     expect(t.find((s) => s.key === "agm_package")!.state).toBe("upcoming");
     // Nothing is due on 1 September, so the headline is the next thing up —
     // not the package, which used to claim "current" all year.
@@ -156,7 +176,7 @@ describe("currentStage — the headline must be the real next act", () => {
   });
 
   it("becomes current once the notice window opens", () => {
-    const t = buildElectionTimeline(facts(), "2026-12-18");
+    const t = buildMeetingSpine(facts(), "2026-12-18");
     expect(t.find((s) => s.key === "agm_package")!.state).toBe("current");
   });
 });
@@ -169,13 +189,13 @@ describe("currentStage — the headline must be the real next act", () => {
 
 describe("the meeting's stages", () => {
   it("puts the event page before notice, because notice links to it", () => {
-    const t = buildElectionTimeline(facts(), "2026-12-20");
+    const t = buildMeetingSpine(facts(), "2026-12-20");
     const keys = t.map((s) => s.key);
     expect(keys.indexOf("event_published")).toBeLessThan(keys.indexOf("agm_notice"));
   });
 
   it("carries what is missing from the event page as its detail", () => {
-    const t = buildElectionTimeline(
+    const t = buildMeetingSpine(
       facts({ eventPublished: false, eventGaps: ["The start time is not set."] }),
       "2026-12-20"
     );
@@ -184,7 +204,7 @@ describe("the meeting's stages", () => {
   });
 
   it("blocks publishing until the meeting has a start time, and says why", () => {
-    const t = buildElectionTimeline(
+    const t = buildMeetingSpine(
       facts({ eventPublished: false, eventStartSet: false }),
       "2026-12-20"
     );
@@ -194,7 +214,7 @@ describe("the meeting's stages", () => {
   });
 
   it("offers publishing once a start time is set", () => {
-    const t = buildElectionTimeline(
+    const t = buildMeetingSpine(
       facts({ eventPublished: false, eventStartSet: true }),
       "2026-12-20"
     );
@@ -202,7 +222,7 @@ describe("the meeting's stages", () => {
   });
 
   it("is done, with no action, once the page is published", () => {
-    const t = buildElectionTimeline(facts({ eventPublished: true }), "2026-12-20");
+    const t = buildMeetingSpine(facts({ eventPublished: true }), "2026-12-20");
     const stage = t.find((s) => s.key === "event_published");
     expect(stage?.state).toBe("done");
     expect(stage?.action).toBeNull();
@@ -210,25 +230,25 @@ describe("the meeting's stages", () => {
 
   it("goes overdue once the notice window has opened with no page", () => {
     // The notice window in `facts` opens 2026-12-17.
-    const t = buildElectionTimeline(facts({ eventPublished: false }), "2026-12-20");
+    const t = buildMeetingSpine(facts({ eventPublished: false }), "2026-12-20");
     expect(t.find((s) => s.key === "event_published")?.state).toBe("overdue");
   });
 
   it("puts the agenda before the package, because the agenda goes inside it", () => {
-    const t = buildElectionTimeline(facts(), "2026-12-20");
+    const t = buildMeetingSpine(facts(), "2026-12-20");
     const keys = t.map((s) => s.key);
     expect(keys.indexOf("agenda")).toBeLessThan(keys.indexOf("agm_package"));
   });
 
   it("offers to generate the agenda while the meeting is being prepared", () => {
-    const t = buildElectionTimeline(facts({ agendaDrafted: false }), "2026-12-20");
+    const t = buildMeetingSpine(facts({ agendaDrafted: false }), "2026-12-20");
     const stage = t.find((s) => s.key === "agenda");
     expect(stage?.state).toBe("current");
     expect(stage?.action?.key).toBe("generateAgenda");
   });
 
   it("stops offering it once one is drafted", () => {
-    const t = buildElectionTimeline(facts({ agendaDrafted: true }), "2026-12-20");
+    const t = buildMeetingSpine(facts({ agendaDrafted: true }), "2026-12-20");
     const stage = t.find((s) => s.key === "agenda");
     expect(stage?.state).toBe("done");
     expect(stage?.action).toBeNull();
@@ -237,7 +257,7 @@ describe("the meeting's stages", () => {
   it("does not make the agenda the headline in August", () => {
     // Year-round "current" would push it ahead of the call for nominations,
     // which is the real next act in the summer.
-    const t = buildElectionTimeline(facts({ agendaDrafted: false }), "2026-08-15");
+    const t = buildMeetingSpine(facts({ agendaDrafted: false }), "2026-08-15");
     expect(t.find((s) => s.key === "agenda")?.state).toBe("upcoming");
   });
 });

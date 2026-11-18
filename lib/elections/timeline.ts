@@ -59,7 +59,16 @@ export interface TimelineStage {
   } | null;
 }
 
-export interface TimelineFacts {
+/**
+ * The election held AT a meeting. Null for a members' meeting that has none.
+ *
+ * ⛔ Nested rather than flattened into TimelineFacts on purpose. A special
+ * members' meeting is called with no election at all, and when these were flat
+ * every one of them was non-optional — so the spine could not be built for such
+ * a meeting, and the fix would have been a pile of `!` assertions waiting to
+ * crash on the first one somebody called. Nesting makes the compiler ask.
+ */
+export interface ElectionFacts {
   cycleYear: number;
   status: string;
   outcome: "acclaimed" | "balloted" | null;
@@ -72,9 +81,6 @@ export interface TimelineFacts {
   };
   callSentAt: string | null;
   ballotsCirculatedAt: string | null;
-  noticeSentAt: string | null;
-  proxySentAt: string | null;
-  packageSentAt: string | null;
   resultsAnnouncedAt: string | null;
   /** When the candidates were told their own result, ahead of the membership. */
   candidateResultsSentAt: string | null;
@@ -85,8 +91,26 @@ export interface TimelineFacts {
    * timestamp could be correlated with voting order and re-identify a ballot.
    */
   sealed: boolean;
-  /** Notice window, from resolveNoticeWindow. */
-  noticeWindow: { opensOn: string; closesOn: string; proxyDueOn: string } | null;
+  nominationsReceived: number;
+  validatedNominees: number;
+  ballotsReturned: number;
+  electorate: number;
+}
+
+/**
+ * The facts a meeting's spine is built from.
+ *
+ * The MEETING half is always present — this is a meeting's spine, and every
+ * members' meeting has an event page, a notice window, a proxy deadline, an
+ * agenda and a package whether or not directors are elected at it. Those dates
+ * all derive from the day the meeting sits, not from any election:
+ * `resolveNoticeWindow(meetingDate)` is pure.
+ */
+export interface TimelineFacts {
+  /** What the meeting is called, e.g. "2027 Annual General Meeting". */
+  meetingLabel: string;
+  /** The day it sits. Every window below is measured back from this. */
+  meetingDate: string;
   /** The AGM's event page must be published before notice can be given. */
   eventPublished: boolean;
   /** Whether the event has a start time yet — publishing is blocked without one. */
@@ -101,188 +125,205 @@ export interface TimelineFacts {
   eventGaps: string[];
   /** Whether an agenda has been drafted onto the meeting record. */
   agendaDrafted: boolean;
-  nominationsReceived: number;
-  validatedNominees: number;
-  ballotsReturned: number;
-  electorate: number;
+  /** Notice window, from resolveNoticeWindow — derived from the meeting date. */
+  noticeWindow: { opensOn: string; closesOn: string; proxyDueOn: string } | null;
+  noticeSentAt: string | null;
+  proxySentAt: string | null;
+  packageSentAt: string | null;
+  /** The election held at this meeting, or null when none is open. */
+  election: ElectionFacts | null;
 }
 
 function day(iso: string | null): string | null {
   return iso ? iso.slice(0, 10) : null;
 }
 
-export function buildElectionTimeline(
+export function buildMeetingSpine(
   facts: TimelineFacts,
   today: string
 ): TimelineStage[] {
-  const s = facts.schedule;
   const stages: TimelineStage[] = [];
+  const e = facts.election;
 
-  const acclaimed = facts.outcome === "acclaimed";
+  // ⛔ Notice, the proxy form and the package are obligations of the MEETING —
+  // their windows derive from its date, which is why they are in the meeting
+  // half. But the senders are implemented against an election (they draw the
+  // candidates and the committee's report from it), so for a members' meeting
+  // with none there is nothing to press yet. Said plainly on the stage rather
+  // than offered as a button that cannot succeed.
+  const noElectionSend = e
+    ? null
+    : "Sending this is built from the election. For a members' meeting without one it has to go out by hand for now.";
 
-  // 1 — Cycle opened.
-  stages.push({
-    key: "cycle_open",
-    label: "Cycle opened",
-    on: null,
-    until: null,
-    windowLabel: null,
-    state: "done",
-    detail: `The ${facts.cycleYear} cycle exists, with the AGM set for ${s.agmDate}.`,
-    action: null,
-  });
+  // ─── The election held at this meeting, when there is one ───────────
+  if (e) {
 
-  // 2 — Call for nominations. This is also what OPENS them; the two are one act.
-  const callSent = day(facts.callSentAt);
-  stages.push({
-    key: "call_for_nominations",
-    label: "Call for nominations",
-    on: s.nominationsOpenAt,
-    until: null,
-    windowLabel: null,
-    state: callSent
-      ? "done"
-      : today >= s.nominationsOpenAt
-        ? "overdue"
-        : "upcoming",
-    detail: callSent
-      ? `Sent ${callSent}. Nominations are open.`
-      : today >= s.nominationsOpenAt
-        ? `Nominations were due to open ${s.nominationsOpenAt} and the call has not gone out — until it does, the nomination form turns members away.`
-        : `Goes to every eligible institution and opens nominations.`,
-    action: callSent
-      ? null
-      : { key: "sendCall", label: "Send the call for nominations", blockedBy: null },
-  });
+      const acclaimed = e.outcome === "acclaimed";
 
-  // 3 — Nominations close.
-  const nominationsClosed = !["draft", "nominating"].includes(facts.status);
-  stages.push({
-    key: "close_nominations",
-    label: "Nominations close",
-    on: s.nominationsCloseAt,
-    until: null,
-    windowLabel: null,
-    state: nominationsClosed
-      ? "done"
-      : today >= s.nominationsCloseAt
-        ? "current"
-        : "upcoming",
-    detail: nominationsClosed
-      ? `Closed. ${facts.validatedNominees} validated nominee${facts.validatedNominees === 1 ? "" : "s"} — ${acclaimed ? "acclaimed, no ballot" : "a ballot is required"}.`
-      : `${facts.nominationsReceived} nomination${facts.nominationsReceived === 1 ? "" : "s"} received, ${facts.validatedNominees} complete. Closing freezes the field.`,
-    action: nominationsClosed
-      ? null
-      : {
-          key: "closeNominations",
-          label: "Close nominations",
-          blockedBy:
-            today < s.nominationsCloseAt
-              ? `Not until ${s.nominationsCloseAt} — the window was published to members.`
-              : null,
-        },
-  });
-
-  // 4 — Balloting. Absent entirely when the slate is acclaimed.
-  if (acclaimed) {
+    // 1 — Cycle opened.
     stages.push({
-      key: "ballot",
-      label: "Ballot",
+      key: "cycle_open",
+      label: "Cycle opened",
       on: null,
       until: null,
       windowLabel: null,
-      state: "not_applicable",
-      detail: "The slate is acclaimed, so there is no ballot.",
+      state: "done",
+      detail: `The ${e.cycleYear} cycle exists, with the AGM set for ${e.schedule.agmDate}.`,
       action: null,
     });
-  } else {
-    const circulated = day(facts.ballotsCirculatedAt);
-    const allIn = facts.electorate > 0 && facts.ballotsReturned >= facts.electorate;
-    // The by-law's real constraint: the LAST day circulation may happen.
-    const circulationDeadline = new Date(
-      new Date(`${s.agmDate}T00:00:00Z`).getTime() -
-        BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM * 86_400_000
-    )
-      .toISOString()
-      .slice(0, 10);
-    stages.push({
-      key: "circulate_ballots",
-      label: "Voting opens",
-      on: s.ballotsOpenAt,
-      until: null,
-      windowLabel: `${s.ballotsOpenAt} to ${s.ballotsCloseAt}`,
-      state: circulated
-        ? "done"
-        : facts.status === "balloting"
-          ? "current"
-          : "upcoming",
-      detail: circulated
-        ? allIn
-          ? // Information, not a trigger. It unlocks nothing, and the wording has
-            // to stop anyone reading it as "voting is finished": eligibility is
-            // resolved live, so a store clearing its renewal tomorrow joins the
-            // electorate, and a returned ballot stays revisable until the close.
-            `Circulated ${circulated}. All ${facts.electorate} eligible institutions have returned a ballot. ` +
-            `Voting still runs to ${s.ballotsCloseAt} — institutions may revise their ballot until then, and a store that ` +
-            `becomes eligible before the close is entitled to vote.`
-          : `Circulated ${circulated}. ${facts.ballotsReturned} of ${facts.electorate} institutions have voted.`
-        : facts.status === "balloting"
-          ? `Ready now — the field was fixed when nominations closed. ${s.ballotsOpenAt} is the plan, not a gate: ` +
-            `sending sooner only gives members longer to vote, and voting still closes ${s.ballotsCloseAt}. ` +
-            `By-Law Part V S3(a) requires this by ${circulationDeadline}.`
-          : `Tells every eligible institution that voting is open.`,
-      action:
-        facts.status === "balloting" && !circulated
-          ? { key: "circulateBallots", label: "Tell members voting is open", blockedBy: null }
-          : facts.status === "balloting"
-            ? { key: "circulateBallots", label: "Remind those who have not voted", blockedBy: null }
-            : null,
-    });
 
+    // 2 — Call for nominations. This is also what OPENS them; the two are one act.
+    const callSent = day(e.callSentAt);
     stages.push({
-      key: "ballots_close",
-      label: "Voting closes",
-      on: s.ballotsCloseAt,
+      key: "call_for_nominations",
+      label: "Call for nominations",
+      on: e.schedule.nominationsOpenAt,
       until: null,
       windowLabel: null,
-      state: facts.sealed
+      state: callSent
         ? "done"
-        : today >= s.ballotsCloseAt
+        : today >= e.schedule.nominationsOpenAt
+          ? "overdue"
+          : "upcoming",
+      detail: callSent
+        ? `Sent ${callSent}. Nominations are open.`
+        : today >= e.schedule.nominationsOpenAt
+          ? `Nominations were due to open ${e.schedule.nominationsOpenAt} and the call has not gone out — until it does, the nomination form turns members away.`
+          : `Goes to every eligible institution and opens nominations.`,
+      action: callSent
+        ? null
+        : { key: "sendCall", label: "Send the call for nominations", blockedBy: null },
+    });
+
+    // 3 — Nominations close.
+    const nominationsClosed = !["draft", "nominating"].includes(e.status);
+    stages.push({
+      key: "close_nominations",
+      label: "Nominations close",
+      on: e.schedule.nominationsCloseAt,
+      until: null,
+      windowLabel: null,
+      state: nominationsClosed
+        ? "done"
+        : today >= e.schedule.nominationsCloseAt
           ? "current"
           : "upcoming",
-      detail: facts.sealed
-        ? "Sealed. The link between institution and selection is gone."
-        : "Sealing strips the link between institution and selection. It cannot be undone.",
-      action: facts.sealed
+      detail: nominationsClosed
+        ? `Closed. ${e.validatedNominees} validated nominee${e.validatedNominees === 1 ? "" : "s"} — ${acclaimed ? "acclaimed, no ballot" : "a ballot is required"}.`
+        : `${e.nominationsReceived} nomination${e.nominationsReceived === 1 ? "" : "s"} received, ${e.validatedNominees} complete. Closing freezes the field.`,
+      action: nominationsClosed
         ? null
         : {
-            key: "sealElection",
-            label: "Seal the ballots",
+            key: "closeNominations",
+            label: "Close nominations",
             blockedBy:
-              today < s.ballotsCloseAt ? `Voting is open until ${s.ballotsCloseAt}.` : null,
+              today < e.schedule.nominationsCloseAt
+                ? `Not until ${e.schedule.nominationsCloseAt} — the window was published to members.`
+                : null,
           },
     });
 
-    stages.push({
-      key: "certify",
-      label: "Count and certify",
-      on: null,
-      until: null,
-      windowLabel: null,
-      state: facts.certifiedAt ? "done" : facts.sealed ? "current" : "blocked",
-      detail: facts.certifiedAt
-        ? `Certified ${day(facts.certifiedAt)}.`
-        : facts.sealed
-          ? "The scrutineer's count, reconciled against the roll."
-          : "Waiting for the ballots to be sealed.",
-      action: facts.certifiedAt
-        ? null
-        : {
-            key: "certifyElection",
-            label: "Certify the result",
-            blockedBy: facts.sealed ? null : "The ballots are not sealed yet.",
-          },
-    });
+    // 4 — Balloting. Absent entirely when the slate is acclaimed.
+    if (acclaimed) {
+      stages.push({
+        key: "ballot",
+        label: "Ballot",
+        on: null,
+        until: null,
+        windowLabel: null,
+        state: "not_applicable",
+        detail: "The slate is acclaimed, so there is no ballot.",
+        action: null,
+      });
+    } else {
+      const circulated = day(e.ballotsCirculatedAt);
+      const allIn = e.electorate > 0 && e.ballotsReturned >= e.electorate;
+      // The by-law's real constraint: the LAST day circulation may happen.
+      const circulationDeadline = new Date(
+        new Date(`${e.schedule.agmDate}T00:00:00Z`).getTime() -
+          BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM * 86_400_000
+      )
+        .toISOString()
+        .slice(0, 10);
+      stages.push({
+        key: "circulate_ballots",
+        label: "Voting opens",
+        on: e.schedule.ballotsOpenAt,
+        until: null,
+        windowLabel: `${e.schedule.ballotsOpenAt} to ${e.schedule.ballotsCloseAt}`,
+        state: circulated
+          ? "done"
+          : e.status === "balloting"
+            ? "current"
+            : "upcoming",
+        detail: circulated
+          ? allIn
+            ? // Information, not a trigger. It unlocks nothing, and the wording has
+              // to stop anyone reading it as "voting is finished": eligibility is
+              // resolved live, so a store clearing its renewal tomorrow joins the
+              // electorate, and a returned ballot stays revisable until the close.
+              `Circulated ${circulated}. All ${e.electorate} eligible institutions have returned a ballot. ` +
+              `Voting still runs to ${e.schedule.ballotsCloseAt} — institutions may revise their ballot until then, and a store that ` +
+              `becomes eligible before the close is entitled to vote.`
+            : `Circulated ${circulated}. ${e.ballotsReturned} of ${e.electorate} institutions have voted.`
+          : e.status === "balloting"
+            ? `Ready now — the field was fixed when nominations closed. ${e.schedule.ballotsOpenAt} is the plan, not a gate: ` +
+              `sending sooner only gives members longer to vote, and voting still closes ${e.schedule.ballotsCloseAt}. ` +
+              `By-Law Part V S3(a) requires this by ${circulationDeadline}.`
+            : `Tells every eligible institution that voting is open.`,
+        action:
+          e.status === "balloting" && !circulated
+            ? { key: "circulateBallots", label: "Tell members voting is open", blockedBy: null }
+            : e.status === "balloting"
+              ? { key: "circulateBallots", label: "Remind those who have not voted", blockedBy: null }
+              : null,
+      });
+
+      stages.push({
+        key: "ballots_close",
+        label: "Voting closes",
+        on: e.schedule.ballotsCloseAt,
+        until: null,
+        windowLabel: null,
+        state: e.sealed
+          ? "done"
+          : today >= e.schedule.ballotsCloseAt
+            ? "current"
+            : "upcoming",
+        detail: e.sealed
+          ? "Sealed. The link between institution and selection is gone."
+          : "Sealing strips the link between institution and selection. It cannot be undone.",
+        action: e.sealed
+          ? null
+          : {
+              key: "sealElection",
+              label: "Seal the ballots",
+              blockedBy:
+                today < e.schedule.ballotsCloseAt ? `Voting is open until ${e.schedule.ballotsCloseAt}.` : null,
+            },
+      });
+
+      stages.push({
+        key: "certify",
+        label: "Count and certify",
+        on: null,
+        until: null,
+        windowLabel: null,
+        state: e.certifiedAt ? "done" : e.sealed ? "current" : "blocked",
+        detail: e.certifiedAt
+          ? `Certified ${day(e.certifiedAt)}.`
+          : e.sealed
+            ? "The scrutineer's count, reconciled against the roll."
+            : "Waiting for the ballots to be sealed.",
+        action: e.certifiedAt
+          ? null
+          : {
+              key: "certifyElection",
+              label: "Certify the result",
+              blockedBy: e.sealed ? null : "The ballots are not sealed yet.",
+            },
+      });
+    }
   }
 
   // 4b — The event page members are sent to.
@@ -351,7 +392,7 @@ export function buildElectionTimeline(
             ? "Publish the meeting's event page first."
             : w && today < w.opensOn
               ? `The window opens ${w.opensOn}.`
-              : null,
+              : noElectionSend,
         },
   });
 
@@ -371,7 +412,9 @@ export function buildElectionTimeline(
     detail: proxySent
       ? `Sent ${proxySent}.`
       : `By-Law Part VII S7(b) — members must have it 30 days before the meeting.`,
-    action: proxySent ? null : { key: "sendProxyForm", label: "Send the proxy form", blockedBy: null },
+    action: proxySent
+      ? null
+      : { key: "sendProxyForm", label: "Send the proxy form", blockedBy: noElectionSend },
   });
 
   // 6b — The agenda.
@@ -380,7 +423,13 @@ export function buildElectionTimeline(
   // package without one is sending members a meeting they cannot follow. The
   // press is in the package panel; this stage is what makes the ordering
   // visible rather than something you discover from a missing item.
-  const packageSeason = w ? today >= w.opensOn : today >= s.ballotsCloseAt;
+  // Without a notice window there is nothing to key the season off, so a
+  // meeting with no election leaves the package upcoming until one opens.
+  const packageSeason = w
+    ? today >= w.opensOn
+    : e
+      ? today >= e.schedule.ballotsCloseAt
+      : false;
   stages.push({
     key: "agenda",
     label: "Agenda for the meeting",
@@ -393,7 +442,13 @@ export function buildElectionTimeline(
       : "Generated from the chair's script so the two cannot drift, then edited by hand if the board wants it different.",
     action: facts.agendaDrafted
       ? null
-      : { key: "generateAgenda", label: "Generate the agenda", blockedBy: null },
+      : {
+          key: "generateAgenda",
+          label: "Generate the agenda",
+          blockedBy: e
+            ? null
+            : "The agenda is generated from the chair's script for an election. Draft it by hand on the meeting record for now.",
+        },
   });
 
   // 7 — The members' package.
@@ -413,77 +468,82 @@ export function buildElectionTimeline(
       ? `Sent ${packageSent}.`
       : "Agenda, minutes, financial statements, the committee's report and the candidates.",
     action: packageSent
-      ? { key: "sendAgmPackage", label: "Send it again", blockedBy: null }
-      : { key: "sendAgmPackage", label: "Send the package", blockedBy: null },
+      ? { key: "sendAgmPackage", label: "Send it again", blockedBy: noElectionSend }
+      : { key: "sendAgmPackage", label: "Send the package", blockedBy: noElectionSend },
   });
 
   // 8 — The meeting.
   stages.push({
     key: "agm",
-    label: `${facts.cycleYear} Annual General Meeting`,
-    on: s.agmDate,
+    label: facts.meetingLabel,
+    on: facts.meetingDate,
     until: null,
     windowLabel: null,
-    state: today > s.agmDate ? "done" : today === s.agmDate ? "current" : "upcoming",
+    state: today > facts.meetingDate ? "done" : today === facts.meetingDate ? "current" : "upcoming",
     detail:
-      today > s.agmDate
+      today > facts.meetingDate
         ? "The meeting has taken place."
-        : "The members elect the board at this meeting.",
+        : e
+          ? "The members elect the board at this meeting."
+          : "A meeting of the members, under By-Law Part VII.",
     action: null,
   });
 
-  // 9 — The candidates, before the membership. A broadcast to every eligible
-  // institution is the worst way to learn you were not elected.
-  const candidatesTold = day(facts.candidateResultsSentAt);
-  stages.push({
-    key: "tell_candidates",
-    label: "Tell the candidates",
-    on: null,
-    until: null,
-    windowLabel: null,
-    state: candidatesTold ? "done" : facts.certifiedAt && today >= s.agmDate ? "current" : "blocked",
-    detail: candidatesTold
-      ? `Told ${candidatesTold}.`
-      : "Each candidate hears their own result before the membership does — a separate message to those elected and those not. Neither carries vote counts.",
-    action: candidatesTold
-      ? null
-      : {
-          key: "notifyCandidates",
-          label: "Tell the candidates",
-          blockedBy: !facts.certifiedAt
-            ? "The result is not certified."
-            : today < s.agmDate
-              ? `Not until the meeting on ${s.agmDate}.`
-              : null,
-        },
-  });
+  // ─── Back to the election: the result, after the meeting ────────────
+  if (e) {
+    // 9 — The candidates, before the membership. A broadcast to every eligible
+    // institution is the worst way to learn you were not elected.
+    const candidatesTold = day(e.candidateResultsSentAt);
+    stages.push({
+      key: "tell_candidates",
+      label: "Tell the candidates",
+      on: null,
+      until: null,
+      windowLabel: null,
+      state: candidatesTold ? "done" : e.certifiedAt && today >= facts.meetingDate ? "current" : "blocked",
+      detail: candidatesTold
+        ? `Told ${candidatesTold}.`
+        : "Each candidate hears their own result before the membership does — a separate message to those elected and those not. Neither carries vote counts.",
+      action: candidatesTold
+        ? null
+        : {
+            key: "notifyCandidates",
+            label: "Tell the candidates",
+            blockedBy: !e.certifiedAt
+              ? "The result is not certified."
+              : today < facts.meetingDate
+                ? `Not until the meeting on ${facts.meetingDate}.`
+                : null,
+          },
+    });
 
-  // 9 — Announcing. Only after the meeting, because the meeting is what elects.
-  const announced = day(facts.resultsAnnouncedAt);
-  stages.push({
-    key: "announce_result",
-    label: "Announce the result",
-    on: null,
-    until: null,
-    windowLabel: null,
-    state: announced ? "done" : today >= s.agmDate ? "current" : "blocked",
-    detail: announced
-      ? `Announced ${announced}.`
-      : today >= s.agmDate
-        ? "Tell the membership who the members elected."
-        : "The members elect at the meeting, so there is nothing to announce until it has happened.",
-    action: announced
-      ? null
-      : {
-          key: "announceResults",
-          label: "Announce the result",
-          blockedBy: !facts.certifiedAt
-            ? "The result is not certified."
-            : today < s.agmDate
-              ? `Not until the meeting on ${s.agmDate}.`
-              : null,
-        },
-  });
+    // 9 — Announcing. Only after the meeting, because the meeting is what elects.
+    const announced = day(e.resultsAnnouncedAt);
+    stages.push({
+      key: "announce_result",
+      label: "Announce the result",
+      on: null,
+      until: null,
+      windowLabel: null,
+      state: announced ? "done" : today >= facts.meetingDate ? "current" : "blocked",
+      detail: announced
+        ? `Announced ${announced}.`
+        : today >= facts.meetingDate
+          ? "Tell the membership who the members elected."
+          : "The members elect at the meeting, so there is nothing to announce until it has happened.",
+      action: announced
+        ? null
+        : {
+            key: "announceResults",
+            label: "Announce the result",
+            blockedBy: !e.certifiedAt
+              ? "The result is not certified."
+              : today < facts.meetingDate
+                ? `Not until the meeting on ${facts.meetingDate}.`
+                : null,
+          },
+    });
+  }
 
   return stages;
 }

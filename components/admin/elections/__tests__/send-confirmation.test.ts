@@ -14,7 +14,26 @@ import { readFileSync } from "node:fs";
  * a missing key, not wrong behaviour: there is nothing to observe until someone
  * presses the button, by which point the email has gone.
  */
-const PAGE = "app/admin/elections/[slug]/page.tsx";
+/**
+ * ⛔ The MEETING page, not the election page.
+ *
+ * The spine moved there 2026-11-18: the meeting is the activity and the
+ * election is business at it, so every membership-wide send is offered in one
+ * ordered list on the meeting. This path follows the spine — if the spine moves
+ * again, move this with it rather than relaxing the assertions.
+ */
+const PAGE = "app/admin/members-meetings/[id]/page.tsx";
+
+/**
+ * Pages that must NOT grow a second copy of the spine.
+ *
+ * Two lists of the same stages is two places to look, and worse: the guard is
+ * opt-in per action, so a second copy is where an unarmed send appears. The
+ * election screen had one and its Email panel also had its own unguarded
+ * "send the call" beside it — one armed, one not, which is how somebody
+ * presses the wrong one.
+ */
+const NO_SECOND_SPINE = ["app/admin/elections/[slug]/page.tsx"];
 
 /** Action keys that email the membership. Adding a send? Add it here too. */
 const MEMBERSHIP_WIDE_SENDS = [
@@ -81,4 +100,21 @@ describe("the candidates hear before the membership does", () => {
     const service = readFileSync("lib/elections/service.ts", "utf8");
     expect(service).toContain("!cfg.candidateResultsSentAt && !opts.confirmedCandidatesTold");
   });
+});
+
+describe("there is only one spine", () => {
+  for (const page of NO_SECOND_SPINE) {
+    const source = readFileSync(page, "utf8");
+
+    it(`${page} does not render its own timeline`, () => {
+      expect(source).not.toContain("<ElectionTimeline");
+    });
+
+    it(`${page} carries no membership-wide send of its own`, () => {
+      // `sendCounts` only exists to arm a send. Its presence here means a send
+      // came back to this page, which is the defect this file guards.
+      expect(source).not.toContain("sendCounts={{");
+      expect(source).not.toContain("<ConfirmSendButton");
+    });
+  }
 });

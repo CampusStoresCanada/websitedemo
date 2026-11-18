@@ -60,7 +60,12 @@ import {
   type ResultsAnnouncement,
 } from "./documents/results-announcement";
 import { buildAgmAgenda } from "./documents/agm-agenda";
-import { buildElectionTimeline, type TimelineStage } from "./timeline";
+import {
+  buildMeetingSpine,
+  type ElectionFacts,
+  type TimelineFacts,
+  type TimelineStage,
+} from "./timeline";
 import {
   buildNominatingCommitteeReport,
   type ReportDirector,
@@ -4803,22 +4808,131 @@ export async function getElectionTimeline(
   slug: string,
   onDate?: string
 ): Promise<TimelineStage[] | null> {
-  const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return null;
 
-  const cfg = election.config as unknown as {
-    callSentAt?: string;
-    ballotsCirculatedAt?: string;
+  const { getMembersMeetingByDate } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const meeting = await getMembersMeetingByDate(election.schedule.agmDate);
+
+  return buildMeetingSpine(
+    {
+      ...(await meetingHalf(meeting, election.schedule.agmDate, election.cycleYear, slug, onDate)),
+      election: await electionHalf(election),
+    },
+    onDate ?? today()
+  );
+}
+
+/**
+ * The spine for a MEETING, whether or not an election is held at it.
+ *
+ * ⛔ This is the entry point the meeting page uses, and the reason the builder's
+ * election half is nullable. A special members' meeting still has an event page
+ * to publish, a notice window, a proxy deadline, an agenda and a package — all
+ * measured back from the day it sits.
+ */
+export async function getMeetingSpine(
+  meetingId: string,
+  onDate?: string
+): Promise<TimelineStage[] | null> {
+  const { getMembersMeeting } = await import("@/lib/governance/members-meetings-service");
+  const meeting = await getMembersMeeting(meetingId);
+  if (!meeting) return null;
+
+  const election = meeting.election ? await getElection(meeting.election.slug) : null;
+
+  return buildMeetingSpine(
+    {
+      ...(await meetingHalf(
+        meeting,
+        meeting.meetingDate,
+        election?.cycleYear ?? null,
+        meeting.election?.slug ?? null,
+        onDate
+      )),
+      election: election ? await electionHalf(election) : null,
+    },
+    onDate ?? today()
+  );
+}
+
+/**
+ * The meeting half of the spine's facts.
+ *
+ * The notice window comes from `resolveNoticeWindow(meetingDate)`, which is
+ * pure — so it is available with no election. `getNoticeState` is consulted
+ * only for what has been SENT, which today is recorded on the election's
+ * config and so is null for a meeting without one.
+ */
+async function meetingHalf(
+  meeting: Awaited<ReturnType<typeof import("@/lib/governance/members-meetings-service").getMembersMeeting>>,
+  meetingDate: string,
+  cycleYear: number | null,
+  electionSlug: string | null,
+  onDate?: string
+): Promise<Omit<TimelineFacts, "election">> {
+  const { membersMeetingGaps, isMembersMeetingType, MEMBERS_MEETING_LABELS } = await import(
+    "@/lib/governance/members-meetings"
+  );
+
+  const notice = electionSlug ? await getNoticeState(electionSlug, onDate) : null;
+  const window = notice
+    ? {
+        opensOn: notice.window.opensOn,
+        closesOn: notice.window.closesOn,
+        proxyDueOn: notice.window.proxyDueOn,
+      }
+    : resolveNoticeWindowFor(meetingDate);
+
+  const cfg = (electionSlug ? ((await getElection(electionSlug))?.config as unknown) : null) as {
     agmNoticeSentAt?: string;
     proxyFormSentAt?: string;
     agmPackageSentAt?: string;
+  } | null;
+
+  return {
+    // ⛔ Not `meeting.title`. The stored title carries the date in it
+    // ("CSC Annual General Meeting — 2028-01-20"), which reads as a duplicate
+    // beside the stage's own date column. The type's label is the name of the
+    // kind of meeting; the year comes from the election when there is one.
+    meetingLabel: cycleYear
+      ? `${cycleYear} Annual General Meeting`
+      : meeting && isMembersMeetingType(meeting.meetingType)
+        ? MEMBERS_MEETING_LABELS[meeting.meetingType]
+        : "Meeting of the members",
+    meetingDate,
+    eventPublished: notice?.eventPage.readyForNotice ?? meeting?.event?.status === "published",
+    eventStartSet: Boolean(meeting?.event?.startsAt),
+    eventGaps: meeting ? membersMeetingGaps(meeting) : [],
+    agendaDrafted: meeting?.hasAgenda ?? false,
+    noticeWindow: window,
+    noticeSentAt: cfg?.agmNoticeSentAt ?? null,
+    proxySentAt: cfg?.proxyFormSentAt ?? null,
+    packageSentAt: cfg?.agmPackageSentAt ?? null,
+  };
+}
+
+/** The notice window for a meeting with no election to carry it. */
+function resolveNoticeWindowFor(meetingDate: string) {
+  const w = resolveNoticeWindow(meetingDate);
+  return { opensOn: w.opensOn, closesOn: w.closesOn, proxyDueOn: w.proxyDueOn };
+}
+
+/** The election half of the spine's facts. */
+async function electionHalf(
+  election: NonNullable<Awaited<ReturnType<typeof getElection>>>
+): Promise<ElectionFacts> {
+  const db = createAdminClient();
+  const cfg = election.config as unknown as {
+    callSentAt?: string;
+    ballotsCirculatedAt?: string;
     resultsAnnouncedAt?: string;
     candidateResultsSentAt?: string;
   };
 
-  const notice = await getNoticeState(slug, onDate);
-  const nominations = await listNominations(slug);
+  const nominations = await listNominations(election.slug);
   const validated = nominations.filter((n) => n.completeness.complete).length;
   const { summary } = await evaluateElectionEligibility(election.id);
 
@@ -4833,48 +4947,22 @@ export async function getElectionTimeline(
     .eq("election_id", election.id)
     .maybeSingle();
 
-  // The meeting's own facts, through the one reader that knows how an election
-  // is matched to its meeting. ⚠️ Do not re-write the `agm_date == meeting_date`
-  // match here — see `getMembersMeetingByDate`.
-  const { getMembersMeetingByDate } = await import(
-    "@/lib/governance/members-meetings-service"
-  );
-  const { membersMeetingGaps } = await import("@/lib/governance/members-meetings");
-  const membersMeeting = await getMembersMeetingByDate(election.schedule.agmDate);
-
-  return buildElectionTimeline(
-    {
-      cycleYear: election.cycleYear,
-      status: election.status,
-      outcome: (election.outcome as "acclaimed" | "balloted" | null) ?? null,
-      schedule: election.schedule,
-      callSentAt: cfg.callSentAt ?? null,
-      ballotsCirculatedAt: cfg.ballotsCirculatedAt ?? null,
-      noticeSentAt: cfg.agmNoticeSentAt ?? null,
-      proxySentAt: cfg.proxyFormSentAt ?? null,
-      packageSentAt: cfg.agmPackageSentAt ?? null,
-      resultsAnnouncedAt: cfg.resultsAnnouncedAt ?? null,
-      candidateResultsSentAt: cfg.candidateResultsSentAt ?? null,
-      certifiedAt: (cert?.certified_at as string) ?? null,
-      sealed: ["sealed", "certified"].includes(election.status),
-      noticeWindow: notice
-        ? {
-            opensOn: notice.window.opensOn,
-            closesOn: notice.window.closesOn,
-            proxyDueOn: notice.window.proxyDueOn,
-          }
-        : null,
-      eventPublished: notice?.eventPage.readyForNotice ?? false,
-      eventStartSet: Boolean(membersMeeting?.event?.startsAt),
-      eventGaps: membersMeeting ? membersMeetingGaps(membersMeeting) : [],
-      agendaDrafted: membersMeeting?.hasAgenda ?? false,
-      nominationsReceived: nominations.length,
-      validatedNominees: validated,
-      ballotsReturned: ballotsReturned ?? 0,
-      electorate: summary.eligible,
-    },
-    onDate ?? today()
-  );
+  return {
+    cycleYear: election.cycleYear,
+    status: election.status,
+    outcome: (election.outcome as "acclaimed" | "balloted" | null) ?? null,
+    schedule: election.schedule,
+    callSentAt: cfg.callSentAt ?? null,
+    ballotsCirculatedAt: cfg.ballotsCirculatedAt ?? null,
+    resultsAnnouncedAt: cfg.resultsAnnouncedAt ?? null,
+    candidateResultsSentAt: cfg.candidateResultsSentAt ?? null,
+    certifiedAt: (cert?.certified_at as string) ?? null,
+    sealed: ["sealed", "certified"].includes(election.status),
+    nominationsReceived: nominations.length,
+    validatedNominees: validated,
+    ballotsReturned: ballotsReturned ?? 0,
+    electorate: summary.eligible,
+  };
 }
 
 /**

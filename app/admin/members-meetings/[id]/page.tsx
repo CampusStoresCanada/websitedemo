@@ -47,10 +47,15 @@ import {
   getNoticeState,
   getAgmPackageState,
   getElection,
-  getElectionTimeline,
+  getMeetingSpine,
+  getCandidateOutcomes,
 } from "@/lib/elections/service";
+import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { publishMembersMeetingEventAction } from "@/lib/actions/members-meetings";
 import {
+  sendCallForNominationsAction,
+  circulateBallotsAction,
+  notifyCandidatesAction,
   sendAgmNoticeAction,
   sendProxyFormAction,
   uploadFinancialStatementsAction,
@@ -96,6 +101,7 @@ export default async function MembersMeetingPage({
     error?: string;
     noticeSent?: string;
     published?: string;
+    asOf?: string;
     proxySent?: string;
     packageError?: string;
     uploaded?: string;
@@ -117,6 +123,7 @@ export default async function MembersMeetingPage({
     error: pageError,
     noticeSent,
     published,
+    asOf: asOfParam,
     proxySent,
     packageError,
     uploaded,
@@ -140,14 +147,59 @@ export default async function MembersMeetingPage({
   const fullEvent = eventResult?.success ? eventResult.data : null;
 
   // Notice and the package are keyed by election slug — see the file note.
-  const [noticeState, agmPackage, election, spine] = electionSlug
+  // Looking ahead without being able to act ahead — actions are stripped by
+  // `disableActions` before the spine is rendered.
+  const asOf = asOfDate({ asOf: asOfParam });
+
+  // ⛔ The spine is keyed by the MEETING, not the election: a members' meeting
+  // with no election still has an event page, a notice window, a proxy
+  // deadline, an agenda and a package.
+  const rawSpine = await getMeetingSpine(id, asOf ?? undefined);
+  const spine = asOf ? disableActions(rawSpine ?? []) : rawSpine;
+
+  const [noticeState, agmPackage, election] = electionSlug
     ? await Promise.all([
         getNoticeState(electionSlug),
         getAgmPackageState(electionSlug),
         getElection(electionSlug),
-        getElectionTimeline(electionSlug),
       ])
-    : [null, null, null, null];
+    : [null, null, null];
+
+  // What each step sends, and how many people it would reach. ⚠️ The counts are
+  // what arms the confirmation on a membership-wide send; see `sendCounts`.
+  const MESSAGE_STAGES: Record<string, string> = {
+    call: "call_for_nominations",
+    ballots_open: "circulate_ballots",
+    ballot_reminder: "ballots_close",
+    nomination_reminder: "nominations_close",
+    agm_notice: "agm_notice",
+    proxy_form: "proxy_form",
+    agm_package: "agm_package",
+    results: "announce_result",
+    candidate_elected: "tell_candidates",
+    candidate_not_elected: "tell_candidates",
+  };
+  const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
+  const { getServerAuthState } = await import("@/lib/auth/server");
+  const [messages, authState] = await Promise.all([
+    electionSlug ? getElectionMessagesForSlug(electionSlug) : Promise.resolve(null),
+    getServerAuthState(),
+  ]);
+  const stageMessages: Record<string, NonNullable<typeof messages>[number][]> = {};
+  for (const m of messages ?? []) {
+    const stageKey = MESSAGE_STAGES[m.key];
+    if (stageKey) (stageMessages[stageKey] ??= []).push(m);
+  }
+  const recipients = (key: string) =>
+    messages?.find((m) => m.key === key)?.recipientCount ?? null;
+
+  const candidateOutcomes =
+    electionSlug && election?.status === "certified"
+      ? await getCandidateOutcomes(electionSlug)
+      : null;
+  const candidateCount = candidateOutcomes
+    ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
+    : null;
 
   const packageConfig = (election?.config ?? {}) as {
     agmPackageSentAt?: string;
@@ -158,6 +210,27 @@ export default async function MembersMeetingPage({
 
   const back = `/admin/members-meetings/${id}`;
   const electionHref = electionSlug ? `/admin/elections/${electionSlug}` : undefined;
+
+  async function sendCall() {
+    "use server";
+    if (!electionSlug) return;
+    const r = await sendCallForNominationsAction(electionSlug);
+    redirect(`${back}${r.ok ? "?callSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`);
+  }
+
+  async function circulate() {
+    "use server";
+    if (!electionSlug) return;
+    const r = await circulateBallotsAction(electionSlug);
+    redirect(`${back}${r.ok ? "?circulated=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`);
+  }
+
+  async function tellCandidates() {
+    "use server";
+    if (!electionSlug) return;
+    const r = await notifyCandidatesAction(electionSlug);
+    redirect(`${back}${r.ok ? "?candidatesTold=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`);
+  }
 
   async function publishEvent() {
     "use server";
@@ -247,56 +320,178 @@ export default async function MembersMeetingPage({
       )}
 
       {/* ── One spine, in the order things happen ─────────────────────────
-          ⛔ This is the whole point of the section. The meeting and its
-          election are ONE activity, so publishing the page, giving notice,
-          drafting the agenda, sending the package, nominations and ballots are
-          stages of one ordered list — not a progress box here and a timeline
-          on another screen. Same `buildElectionTimeline` the election page
-          renders, so the two cannot drift; each page runs the actions it owns
-          and links out for the rest.
+          ⛔ THE spine, and the only one. The meeting and its election are one
+          activity: publishing the page, giving notice, the proxy form, the
+          agenda, the package, nominations, ballots and the result are stages of
+          a single ordered list, and it lives HERE because the meeting is the
+          thing — the election is business at it. The election screen linked
+          from each of its steps is a detail view, not a second spine. It had
+          one briefly, rendered from the same builder; two copies of one list is
+          still two places to look.
 
-          The event-page gaps that used to be their own amber box are now the
-          DETAIL of the publish stage. Do not put them back beside this. */}
-      {spine ? (
-        <ElectionTimeline
-          stages={spine}
-          title="What remains before this meeting"
-          subtitle="In the order it happens. Every date moves with the day the meeting sits."
-          actions={{
-            // Ours, run from here.
-            publishEvent,
-            sendProxyForm: sendProxy,
-            // Panels on this page — a string that is not a path is the id of
-            // the panel below that owns the real form.
-            sendAgmNotice: "agm-notice",
-            generateAgenda: "agm-package",
-            sendAgmPackage: "agm-package",
-            // The election's own steps: its controls live on its screen.
-            sendCall: electionHref,
-            closeNominations: electionHref,
-            circulateBallots: electionHref,
-            sealElection: electionHref,
-            certifyElection: electionHref,
-            notifyCandidates: electionHref,
-            announceResults: electionHref,
-          }}
-        />
-      ) : (
-        gaps.length > 0 && (
-          <section className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
-            <h2 className="text-sm font-semibold text-amber-900">Still outstanding</h2>
-            <p className="mt-1 text-xs text-amber-800">
-              No election is open for this meeting, so there is no cycle to lay out yet.
-            </p>
-            <ul className="mt-2 space-y-1">
-              {gaps.map((g) => (
-                <li key={g} className="text-sm text-amber-800">
-                  • {g}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )
+          Keyed by the MEETING (`getMeetingSpine`), so a members' meeting with
+          no election still gets its own stages.
+
+          The event-page gaps that were once their own amber box are the DETAIL
+          of the publish stage. Do not put them back beside this. */}
+      {spine && spine.length > 0 && (
+        <>
+          {/* Look ahead without being able to act ahead: `disableActions`
+              strips every action before this renders, so a date past a deadline
+              shows what unlocks without offering it. */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-slate-700">See this meeting as of</span>
+                <input
+                  type="date"
+                  name="asOf"
+                  defaultValue={asOf ?? ""}
+                  className="rounded border border-slate-300 px-2 py-1"
+                />
+              </label>
+              <button
+                type="submit"
+                className="rounded bg-slate-800 px-3 py-1.5 text-white hover:bg-slate-700"
+              >
+                View that day
+              </button>
+              {asOf && (
+                <Link href={back} className="text-slate-600 underline">
+                  Back to today
+                </Link>
+              )}
+              <span className="ml-auto flex flex-wrap gap-3 text-xs text-slate-500">
+                {noticeState && (
+                  <Link href={`?asOf=${noticeState.window.opensOn}`} className="underline">
+                    notice opens
+                  </Link>
+                )}
+                <Link href={`?asOf=${meeting.meetingDate}`} className="underline">
+                  the meeting
+                </Link>
+              </span>
+            </form>
+          </div>
+
+          {asOf && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <strong>Showing {asOf}, not today.</strong> The calendar has moved and nothing
+              else — every stage still reflects what has actually happened, and no action can
+              be taken from this view. Dates the by-law fixes cannot be brought forward:
+              notice sent early is as defective as notice sent late.
+            </div>
+          )}
+
+          <ElectionTimeline
+            stages={spine}
+            title="What remains before this meeting"
+            subtitle="In the order it happens. Every date is measured back from the day the meeting sits."
+            testEmail={authState.user?.email ?? null}
+            stageMessages={stageMessages}
+            // The member-facing page each step points at, opened with
+            // ?preview=1 — display-only; every write path re-checks the actor.
+            stagePages={
+              electionSlug
+                ? {
+                    call_for_nominations: [
+                      { href: `/elections/${electionSlug}/nominate`, label: "nomination form" },
+                      {
+                        href: `/elections/accept/preview?slug=${electionSlug}`,
+                        label: "nominee's page",
+                      },
+                      {
+                        href: `/elections/cosign/preview?slug=${electionSlug}`,
+                        label: "co-signer's page",
+                      },
+                    ],
+                    circulate_ballots: [
+                      { href: `/elections/${electionSlug}/ballot`, label: "ballot" },
+                    ],
+                    ballots_close: [{ href: `/elections/${electionSlug}/ballot`, label: "ballot" }],
+                    proxy_form: [{ href: `/elections/${electionSlug}/proxy`, label: "proxy form" }],
+                    agm_package: [
+                      { href: `/elections/${electionSlug}/package`, label: "AGM package" },
+                    ],
+                  }
+                : {}
+            }
+            // ⚠️ LOAD-BEARING. This map is what arms the confirmation on every
+            // membership-wide send. It was once deleted by accident while
+            // wiring the per-step messages, which silently disarmed the guard
+            // added after the call for nominations went out to 39 stores on one
+            // press. An action missing from here gets a plain button, so losing
+            // an entry loses the protection without breaking anything visible.
+            sendCounts={{
+              sendCall: {
+                recipients: recipients("call"),
+                audience: "member administrators and staff",
+              },
+              circulateBallots: {
+                recipients: recipients("ballots_open"),
+                audience: "member administrators",
+              },
+              sendAgmNotice: {
+                recipients: recipients("agm_notice"),
+                audience: "member administrators",
+              },
+              sendProxyForm: {
+                recipients: recipients("proxy_form"),
+                audience: "member administrators",
+              },
+              sendAgmPackage: {
+                recipients: recipients("agm_package"),
+                audience: "member administrators",
+              },
+              // Counted from the result itself, not the electorate: these go to
+              // the people who stood, and a wrong number would be obvious to
+              // whoever presses it.
+              notifyCandidates: {
+                recipients: candidateCount,
+                audience: "candidates, elected and not",
+              },
+            }}
+            actions={{
+              // The meeting's own, run from here.
+              publishEvent,
+              sendCall,
+              circulateBallots: circulate,
+              notifyCandidates: tellCandidates,
+              // Panels on this page — a string that is not a path is the id of
+              // the panel below that owns the real form. ⛔ Notice needs the
+              // meeting's time typed in, and the proxy form shares that panel
+              // (it can go WITH the notice or on its own), so both point at it
+              // rather than offering a second press for the same act.
+              sendAgmNotice: "agm-notice",
+              sendProxyForm: "agm-notice",
+              generateAgenda: "agm-package",
+              sendAgmPackage: "agm-package",
+              // Forms that live on the election screen: closing nominations
+              // needs its confirmation ticked, and certifying is its own audit.
+              closeNominations: electionHref
+                ? `${electionHref}#close-nominations`
+                : undefined,
+              sealElection: electionHref,
+              certifyElection: electionSlug
+                ? `/admin/elections/${electionSlug}/audit`
+                : undefined,
+              announceResults: electionHref,
+            }}
+          />
+        </>
+      )}
+
+      {spine && spine.length === 0 && gaps.length > 0 && (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
+          <h2 className="text-sm font-semibold text-amber-900">Still outstanding</h2>
+          <ul className="mt-2 space-y-1">
+            {gaps.map((g) => (
+              <li key={g} className="text-sm text-amber-800">
+                • {g}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <MeetingDateForm

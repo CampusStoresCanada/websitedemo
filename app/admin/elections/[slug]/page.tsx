@@ -18,30 +18,21 @@ import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
 import PhaseSection from "@/components/admin/elections/PhaseSection";
-import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
-import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
 import DirectorTermsEditor from "@/components/admin/elections/DirectorTermsEditor";
 import {
   getCommitteeReview,
-  getNoticeState,
   countOutstandingBallots,
-  getElectionTimeline,
-  getCandidateOutcomes,
 } from "@/lib/elections/service";
 import { getMembersMeetingByDate } from "@/lib/governance/members-meetings-service";
 import {
   requestWithdrawalAction,
-  sendCallForNominationsAction,
   chaseIncompleteAction,
   chaseCosignaturesAction,
-  notifyCandidatesAction,
   mintElectionActionItemsAction,
   closeNominationsAction,
-  circulateBallotsAction,
   saveReminderScheduleAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
-import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { canCloseNominations } from "@/lib/elections/schedule";
 import { planReminders } from "@/lib/elections/reminders";
 
@@ -96,7 +87,6 @@ export default async function ElectionReviewPage({
     reminderError?: string;
     remindersSaved?: string;
     cosignersChased?: string;
-    asOf?: string;
   }>;
 }) {
   const { slug } = await params;
@@ -107,16 +97,10 @@ export default async function ElectionReviewPage({
     reminderError,
     remindersSaved,
     cosignersChased,
-    asOf: asOfParam,
   } = await searchParams;
 
-  // Seeing a later stage without waiting for it. Read-only by construction —
-  // see disableActions, which is what keeps this from becoming a way to do
-  // early the things the by-law dates forbid.
-  const asOf = asOfDate({ asOf: asOfParam });
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
-  const noticeState = await getNoticeState(slug);
 
   // Loaded after the review, which is what persists the eligibility rows this
   // reads — see getElectionMessagesForSlug.
@@ -134,11 +118,7 @@ export default async function ElectionReviewPage({
   };
 
   const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
-  const { getServerAuthState } = await import("@/lib/auth/server");
-  const [messages, auth] = await Promise.all([
-    getElectionMessagesForSlug(slug),
-    getServerAuthState(),
-  ]);
+  const messages = await getElectionMessagesForSlug(slug);
 
   // A stage can carry more than one message — "tell the candidates" is two,
   // and dropping either would hide the half somebody most needs to read.
@@ -179,21 +159,7 @@ export default async function ElectionReviewPage({
   // refusal indistinguishable from success: the POST returned 200, the page
   // re-rendered unchanged, and the only way to find out nothing had happened
   // was to read the database. Surface it the way `close` and `circulate` do.
-  async function sendCall() {
-    "use server";
-    const r = await sendCallForNominationsAction(slug);
-    redirect(
-      `/admin/elections/${slug}${r.ok ? "?callSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
-  }
 
-  async function tellCandidates() {
-    "use server";
-    const r = await notifyCandidatesAction(slug);
-    redirect(
-      `/admin/elections/${slug}${r.ok ? "?candidatesTold=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
-  }
 
   async function chaseCosigners() {
     "use server";
@@ -221,13 +187,6 @@ export default async function ElectionReviewPage({
 
 
 
-  async function circulate() {
-    "use server";
-    const r = await circulateBallotsAction(slug);
-    redirect(
-      `/admin/elections/${slug}${r.ok ? "?circulated=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
-  }
 
 
 
@@ -290,11 +249,6 @@ export default async function ElectionReviewPage({
       ? n.cosignatures.required - n.cosignatures.valid
       : 0), 0);
 
-  const candidateOutcomes =
-    election.status === "certified" ? await getCandidateOutcomes(slug) : null;
-  const candidateCount = candidateOutcomes
-    ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
-    : null;
 
   // Where the cycle is, so each section below can decide how much of the screen
   // it deserves. Status-driven: reading it from dates would move the screen on
@@ -303,9 +257,6 @@ export default async function ElectionReviewPage({
   const phase = cyclePhase(election, todayHere);
   const sect = (s: Parameters<typeof sectionState>[0]) => sectionState(s, phase);
 
-  const timeline = asOf
-    ? disableActions((await getElectionTimeline(slug, asOf)) ?? [])
-    : await getElectionTimeline(slug);
 
   // How many institutions a "not yet voted" reminder would reach today. Only
   // computed while balloting: before then every eligible store is outstanding,
@@ -374,137 +325,32 @@ export default async function ElectionReviewPage({
         </div>
       )}
 
-      {/* Look ahead without being able to act ahead. Actions are stripped in
-          disableActions before the timeline is rendered, so a date past a
-          deadline shows what unlocks without offering it. */}
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-        <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
-          <label className="flex flex-col gap-1">
-            <span className="font-medium text-slate-700">See the cycle as of</span>
-            <input
-              type="date"
-              name="asOf"
-              defaultValue={asOf ?? ""}
-              className="rounded border border-slate-300 px-2 py-1"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded bg-slate-800 px-3 py-1.5 text-white hover:bg-slate-700"
-          >
-            View that day
-          </button>
-          {asOf && (
-            <Link href={`/admin/elections/${slug}`} className="text-slate-600 underline">
-              Back to today
+      {/* ⛔ NO SPINE HERE. The ordered list of what remains — notice, the
+          package, the agenda, nominations, ballots, the result — lives on the
+          MEETING, because the meeting is the activity and this election is
+          business at it. This screen briefly rendered its own copy from the
+          same builder; one list in two places is still two places to look.
+          This page is the committee's detail view: who has stood, who is
+          validated, what the field looks like. Do not re-add a timeline. */}
+      {meetingLink && (
+        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">
+            Where this sits in the meeting
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Directors are elected at the {election.cycleYear} annual general meeting. What
+            remains before it — notice, the proxy form, the agenda, the members&rsquo; package
+            and these nomination and ballot steps — is one ordered list, on the meeting.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-4 text-xs">
+            <Link href={meetingLink} className="text-[#163D6D] hover:underline">
+              What remains before the meeting →
             </Link>
-          )}
-          <span className="ml-auto flex flex-wrap gap-3 text-xs text-slate-500">
-            <Link href={`?asOf=${election.schedule.nominationsCloseAt}`} className="underline">
-              nominations close
+            <Link href={`${meetingLink}/proxies`} className="text-[#163D6D] hover:underline">
+              Proxy register →
             </Link>
-            <Link href={`?asOf=${election.schedule.ballotsCloseAt}`} className="underline">
-              voting closes
-            </Link>
-            <Link href={`?asOf=${election.schedule.agmDate}`} className="underline">
-              the AGM
-            </Link>
-          </span>
-        </form>
-      </div>
-
-      {asOf && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>Showing {asOf}, not today.</strong> The calendar has moved and nothing
-          else — every stage still reflects what has actually happened, and no action can be
-          taken from this view. Dates the by-law fixes cannot be brought forward: closing
-          nominations early would cut short Part V S2(c)&rsquo;s window for additional
-          nominations, and sealing early would discard ballots from members who had until the
-          published date to vote.
-        </div>
-      )}
-
-      {timeline && (
-        <ElectionTimeline
-          stages={timeline}
-          title="The cycle"
-          subtitle="Everything in the order it happens. Dates move with the AGM."
-          testEmail={auth.user?.email ?? null}
-          // Keyed by STAGE, so each step carries the message it sends. The
-          // reminder hangs off "ballots close" because that is the step it
-          // belongs to in the cycle, even though it reuses the ballot template.
-          stageMessages={stageMessages}
-          // The member-facing page each step points at. Opened with ?preview=1,
-          // which an admin sees as an eligible member would — and which is
-          // display-only: every write path re-checks the actor independently.
-          stagePages={{
-            call_for_nominations: [
-              { href: `/elections/${slug}/nominate`, label: "nomination form" },
-              // Token-scoped, so there is no URL until a nomination exists.
-              // These render against a clearly-labelled stand-in.
-              { href: `/elections/accept/preview?slug=${slug}`, label: "nominee's page" },
-              { href: `/elections/cosign/preview?slug=${slug}`, label: "co-signer's page" },
-            ],
-            circulate_ballots: [{ href: `/elections/${slug}/ballot`, label: "ballot" }],
-            ballots_close: [{ href: `/elections/${slug}/ballot`, label: "ballot" }],
-            proxy_form: [{ href: `/elections/${slug}/proxy`, label: "proxy form" }],
-            agm_package: [{ href: `/elections/${slug}/package`, label: "AGM package" }],
-          }}
-          // ⚠️ RESTORED. This prop was deleted by accident while wiring the
-          // per-step messages, which silently disarmed the confirmation on
-          // every membership-wide send — the guard added after the call went
-          // out to 39 stores by one press. An action missing from this map
-          // gets a plain button, so losing an entry loses the protection
-          // without breaking anything visible.
-          sendCounts={{
-            sendCall: {
-              recipients: messages?.find((m) => m.key === "call")?.recipientCount ?? null,
-              audience: "member administrators and staff",
-            },
-            circulateBallots: {
-              recipients: messages?.find((m) => m.key === "ballots_open")?.recipientCount ?? null,
-              audience: "member administrators",
-            },
-            sendAgmNotice: {
-              recipients: messages?.find((m) => m.key === "agm_notice")?.recipientCount ?? null,
-              audience: "member administrators",
-            },
-            sendProxyForm: {
-              recipients: messages?.find((m) => m.key === "proxy_form")?.recipientCount ?? null,
-              audience: "member administrators",
-            },
-            sendAgmPackage: {
-              recipients: messages?.find((m) => m.key === "agm_package")?.recipientCount ?? null,
-              audience: "member administrators",
-            },
-            // Counted from the result itself, not from the electorate: these go
-            // to the people who stood, and the number is small enough that
-            // getting it wrong would be obvious to whoever presses the button.
-            notifyCandidates: {
-              recipients: candidateCount,
-              audience: "candidates, elected and not",
-            },
-          }}
-          actions={{
-            sendCall,
-            // Not `close` — that form needs its confirmation ticked, so the
-            // timeline sends you to it rather than posting an empty one.
-            closeNominations: "close-nominations",
-            circulateBallots: circulate,
-            // ⛔ These three are MEETING business and their panels live on the
-            // meeting, so the step is a link there, not a press here. A string
-            // starting with "/" is followed as a path (see ElectionTimeline);
-            // the bare anchors these used to be would now scroll to nothing.
-            // Do not re-add a send here — the panel is the one control.
-            // The meeting's own stages, same spine, controls on the meeting.
-            publishEvent: meetingLink ?? undefined,
-            generateAgenda: meetingLink ? `${meetingLink}#agm-package` : undefined,
-            sendAgmNotice: meetingLink ? `${meetingLink}#agm-notice` : undefined,
-            sendProxyForm: meetingLink ? `${meetingLink}#agm-notice` : undefined,
-            sendAgmPackage: meetingLink ? `${meetingLink}#agm-package` : undefined,
-            notifyCandidates: tellCandidates,
-          }}
-        />
+          </div>
+        </section>
       )}
 
       {/* The electorate, which during a renewal cycle is a moving number. */}
@@ -543,30 +389,6 @@ export default async function ElectionReviewPage({
         </div>
       )}
 
-      {/* ⛔ Notice, the members' package and the proxy register are NOT here.
-          They are meeting business and live on the meeting itself, under
-          Members' Meetings. The election is one item of business ON that
-          meeting's agenda; it does not own the meeting. Moved 2026-11-18 —
-          do not add a second copy here. */}
-      {meetingLink && (
-        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
-          <h2 className="text-sm font-semibold text-gray-900">The meeting itself</h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Notice of the meeting, the members&apos; package, the agenda and the proxy register
-            belong to the meeting these directors are elected at.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-4 text-xs">
-            <Link href={meetingLink} className="text-[#163D6D] hover:underline">
-              {noticeState?.noticeSentAt
-                ? `Notice given ${formatDate(noticeState.noticeSentAt)} →`
-                : "Notice of the meeting →"}
-            </Link>
-            <Link href={`${meetingLink}/proxies`} className="text-[#163D6D] hover:underline">
-              Proxy register →
-            </Link>
-          </div>
-        </section>
-      )}
 
       {/* The election's obligations belong on the board's own list, assigned to
           whoever holds each office — not in anyone's private notes. */}
@@ -601,29 +423,29 @@ export default async function ElectionReviewPage({
       >
         <h2 className="text-sm font-semibold text-gray-900">Email</h2>
         <div className="mt-3 flex flex-wrap items-center gap-4">
+          {/* ⛔ The SEND is not here. It is a stage of the meeting's spine, which
+              is the one place an irreversible membership-wide send is offered
+              and the only one with the confirmation armed. This panel had its
+              own copy and it was the UNGUARDED one — it fired on a single
+              press while the confirmation covered only the spine, which is how
+              somebody presses the wrong one. What is left here are the chases,
+              which are repeatable nudges rather than stages. */}
           {callSentAt ? (
             <p className="text-sm text-gray-600">
               Call for nominations sent {formatDate(callSentAt)}. It cannot be sent again — the
               membership receiving it twice reads as disorganisation.
             </p>
           ) : (
-            // The same send as the timeline's, and it was the UNGUARDED one —
-            // the confirmation only ever covered the timeline, so this panel
-            // still fired on a single press. Two buttons for one irreversible
-            // act is bad enough; one armed and the other not is how somebody
-            // presses the wrong one.
-            <div className="flex items-center gap-3">
-              <ConfirmSendButton
-                action={sendCall}
-                label="Send the call for nominations"
-                recipients={messages?.find((m) => m.key === "call")?.recipientCount ?? null}
-                audience="member administrators and staff"
-              />
-              <span className="text-xs text-gray-500">
-                Emails every administrator at the {eligibility.eligible} currently eligible
-                institutions. Sends once.
-              </span>
-            </div>
+            <p className="text-sm text-gray-600">
+              The call for nominations has not gone out.{" "}
+              {meetingLink ? (
+                <Link href={meetingLink} className="text-[#163D6D] hover:underline">
+                  Send it from the meeting&rsquo;s list of what remains →
+                </Link>
+              ) : (
+                "It is sent from the meeting's list of what remains."
+              )}
+            </p>
           )}
 
           {/* The gap this closes: the chase below emails the NOMINEE about what
@@ -660,29 +482,22 @@ export default async function ElectionReviewPage({
           )}
 
           {election.status === "balloting" && (
-            <div className="flex flex-wrap items-center gap-3">
-              <ConfirmSendButton
-                action={circulate}
-                label={ballotsCirculatedAt ? "Remind those who have not voted" : "Tell members voting is open"}
-                recipients={messages?.find((m) => m.key === "ballots_open")?.recipientCount ?? null}
-                audience="member administrators"
-              />
-              <span className="text-xs text-gray-500">
-                {ballotsCirculatedAt ? (
-                  <>
-                    Last circulated {formatDate(ballotsCirculatedAt)}
-                    {ballotCirculationCount > 1 && ` (${ballotCirculationCount} times)`}. A
-                    reminder goes only to institutions with no ballot on file — nobody who has
-                    already voted is contacted again.
-                  </>
-                ) : (
-                  <>
-                    Emails every administrator at each eligible institution with a link to the
-                    ballot. The ballot itself is never in the email.
-                  </>
-                )}
-              </span>
-            </div>
+            <p className="text-sm text-gray-600">
+              {ballotsCirculatedAt ? (
+                <>
+                  Ballot links last circulated {formatDate(ballotsCirculatedAt)}
+                  {ballotCirculationCount > 1 && ` (${ballotCirculationCount} times)`}. A
+                  reminder goes only to institutions with no ballot on file.{" "}
+                </>
+              ) : (
+                <>Members have not been told that voting is open. </>
+              )}
+              {meetingLink && (
+                <Link href={meetingLink} className="text-[#163D6D] hover:underline">
+                  Send it from the meeting&rsquo;s list of what remains →
+                </Link>
+              )}
+            </p>
           )}
         </div>
         <p className="mt-3 text-xs text-gray-500">
