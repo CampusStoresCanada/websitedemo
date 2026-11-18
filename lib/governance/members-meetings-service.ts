@@ -27,7 +27,7 @@ import {
 // GenericStringError instead of the row type — the select string has to be a
 // single literal for the types to resolve.
 const MEETING_COLUMNS =
-  "id, meeting_date, meeting_type, title, status, notes, agenda_html, minutes_html, event_id, notice_sent_at, proxy_form_sent_at, package_sent_at, package_send_count";
+  "id, meeting_date, meeting_type, title, status, notes, purpose, agenda_html, minutes_html, event_id, notice_sent_at, proxy_form_sent_at, package_sent_at, package_send_count";
 
 const EVENT_COLUMNS =
   "id, slug, status, starts_at, ends_at, is_virtual, location, virtual_link, audience_mode, google_event_id";
@@ -39,6 +39,7 @@ type MeetingRow = {
   title: string;
   status: string;
   notes: string | null;
+  purpose: string | null;
   agenda_html: string | null;
   minutes_html: string | null;
   event_id: string | null;
@@ -126,6 +127,7 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
     title: r.title,
     status: r.status,
     notes: r.notes,
+    purpose: r.purpose?.trim() || null,
     hasAgenda: !!r.agenda_html?.trim(),
     noticeSentAt: r.notice_sent_at ?? null,
     proxyFormSentAt: r.proxy_form_sent_at ?? null,

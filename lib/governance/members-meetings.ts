@@ -167,6 +167,16 @@ export interface MembersMeeting {
   title: string;
   status: string;
   notes: string | null;
+  /**
+   * The business to be transacted, as stated in the notice (By-Law Part VII).
+   *
+   * ⛔ Only the business in the notice may be transacted at a SPECIAL meeting of
+   * the members, so one cannot be properly called until this is written. Null
+   * for an AGM, whose business the by-law fixes — there is nothing for a person
+   * to supply. Distinct from `notes`, which is the board's internal note; this
+   * is what members are entitled to read.
+   */
+  purpose: string | null;
   hasAgenda: boolean;
   hasMinutes: boolean;
   documentCount: number;
@@ -198,6 +208,17 @@ export interface MembersMeeting {
 export function membersMeetingGaps(meeting: MembersMeeting): string[] {
   const gaps: string[] = [];
   if (meeting.status === "cancelled") return gaps;
+
+  // ⛔ A special meeting of the members with no stated business cannot be
+  // properly called: By-Law Part VII allows only the business set out in the
+  // notice to be transacted, so a notice with nothing in it discharges the
+  // obligation while permitting nothing. Not asked of an AGM, whose business
+  // the by-law fixes.
+  if (meeting.meetingType === "special_members" && !meeting.purpose?.trim()) {
+    gaps.push(
+      "No business is stated. Only what the notice says may be transacted at a special meeting, so write what this one is for."
+    );
+  }
 
   if (!meeting.event) {
     gaps.push("There is no event page for members to look at.");

@@ -2559,6 +2559,7 @@ export type Database = {
           package_send_count: number
           package_sent_at: string | null
           proxy_form_sent_at: string | null
+          purpose: string | null
           status: string
           title: string
           updated_at: string
@@ -2581,6 +2582,7 @@ export type Database = {
           package_send_count?: number
           package_sent_at?: string | null
           proxy_form_sent_at?: string | null
+          purpose?: string | null
           status?: string
           title: string
           updated_at?: string
@@ -2603,6 +2605,7 @@ export type Database = {
           package_send_count?: number
           package_sent_at?: string | null
           proxy_form_sent_at?: string | null
+          purpose?: string | null
           status?: string
           title?: string
           updated_at?: string

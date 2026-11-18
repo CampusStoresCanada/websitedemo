@@ -333,3 +333,70 @@ export async function recordMembersMeetingSendAction(
   revalidate(meetingId);
   return { ok: true, meetingId };
 }
+
+/**
+ * Write the business this meeting is called to transact.
+ *
+ * ⛔ By-Law Part VII: only the business stated in the notice may be transacted
+ * at a special meeting of the members. This is that statement — what members
+ * are entitled to read — and it is deliberately NOT
+ * `board_meetings.notes`, which is the board's own internal note on a meeting.
+ *
+ * Not offered for an AGM: its business is fixed by the by-law (directors are
+ * elected, the financial statements are presented, the previous minutes
+ * approved), so there is nothing for a person to decide.
+ */
+export async function saveMembersMeetingPurposeAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await requireBoardStaff();
+  if (!auth.ok) return auth;
+
+  const meetingId = String(formData.get("meetingId") ?? "").trim();
+  const purpose = String(formData.get("purpose") ?? "").trim();
+  if (!meetingId) return { ok: false, error: "Which meeting?" };
+
+  const meeting = await getMembersMeeting(meetingId);
+  if (!meeting) return { ok: false, error: "That members' meeting no longer exists." };
+  if (meeting.meetingType !== "special_members")
+    return {
+      ok: false,
+      error:
+        "An annual general meeting's business is set by the by-law — directors are elected, the " +
+        "financial statements are presented, the previous minutes are approved — so there is " +
+        "nothing to state here.",
+    };
+
+  // ⚠️ Refused once notice is out. Members were told what would be transacted,
+  // and Part VII permits only that; widening it afterwards would let business
+  // through that nobody was given notice of. Changing it means giving fresh
+  // notice, which is a decision for the board and not an edit.
+  if (meeting.noticeSentAt && purpose !== (meeting.purpose ?? ""))
+    return {
+      ok: false,
+      error:
+        `Notice went out on ${meeting.noticeSentAt.slice(0, 10)} stating this meeting's ` +
+        `business. Only what members were told may be transacted, so changing it now needs ` +
+        `fresh notice rather than an edit.`,
+    };
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("board_meetings")
+    .update({ purpose: purpose || null, updated_at: new Date().toISOString() })
+    .eq("id", meetingId);
+  if (error) return { ok: false, error: `The business could not be saved: ${error.message}` };
+
+  await logAuditEventSafe({
+    actorId: auth.userId,
+    action: "members_meeting.purpose_set",
+    entityType: "board_meeting",
+    entityId: meetingId,
+    details: { meetingDate: meeting.meetingDate, stated: Boolean(purpose) },
+  });
+
+  revalidate(meetingId);
+  // The public event page renders this, so its cache has to go too.
+  if (meeting.event?.slug) revalidatePath(`/events/${meeting.event.slug}`);
+  return { ok: true, meetingId };
+}

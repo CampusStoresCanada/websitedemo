@@ -24,6 +24,7 @@ function meeting(over: Partial<MembersMeeting> = {}): MembersMeeting {
     title: "CSC Annual General Meeting — 2027-01-21",
     status: "upcoming",
     notes: null,
+    purpose: null,
     hasAgenda: false,
     hasMinutes: false,
     documentCount: 0,
@@ -314,5 +315,37 @@ describe("meetingDivergence", () => {
     expect(msg).toContain("2027-02-04");
     expect(msg).toContain("2027-01-21");
     expect(msg).toMatch(/notice may\s+already have been given/);
+  });
+});
+
+describe("a special meeting needs its business stated", () => {
+  const special = (over: Partial<MembersMeeting> = {}): MembersMeeting =>
+    meeting({ meetingType: "special_members", ...over });
+
+  it("⛔ asks for the business when a special meeting has none", () => {
+    // Part VII: only what the notice says may be transacted. A notice with
+    // nothing in it discharges the obligation while permitting nothing.
+    expect(membersMeetingGaps(special({ purpose: null })).join(" ")).toMatch(
+      /No business is stated/
+    );
+  });
+
+  it("stops asking once it is written", () => {
+    expect(
+      membersMeetingGaps(special({ purpose: "To approve the sale of the Guelph warehouse." }))
+        .join(" ")
+    ).not.toMatch(/No business is stated/);
+  });
+
+  it("treats whitespace as unstated", () => {
+    expect(membersMeetingGaps(special({ purpose: "   " })).join(" ")).toMatch(
+      /No business is stated/
+    );
+  });
+
+  it("does NOT ask it of an AGM — the by-law fixes that business", () => {
+    expect(membersMeetingGaps(meeting({ purpose: null })).join(" ")).not.toMatch(
+      /No business is stated/
+    );
   });
 });

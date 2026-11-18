@@ -96,6 +96,16 @@ export default async function EventDetailPage({
   const isPublic    = event.audience_mode === "public";
   const isBoardOnly = event.audience_mode === "board";
   const canViewFull = isPublic || isAuthenticated;
+
+  // The business of a special meeting of the members, if this event is one's
+  // page. One lookup by `board_meetings.event_id`, null for every ordinary
+  // event — which is almost all of them.
+  const { getMembersMeetingByEventId } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const linkedMeeting = await getMembersMeetingByEventId(event.id);
+  const membersMeetingPurpose =
+    linkedMeeting?.meetingType === "special_members" ? linkedMeeting.purpose : null;
   // A completed event is readable but closed. Registration actions refuse
   // anything that is not 'published' (lib/actions/event-registration.ts:53,
   // :497), so showing the controls here would only offer a button that errors
@@ -263,6 +273,31 @@ export default async function EventDetailPage({
 
           {event.description && (
             <p className="text-gray-600 text-lg mb-6 leading-relaxed">{event.description}</p>
+          )}
+
+          {/* ⛔ The business of a special members' meeting, read from the
+              MEETING — By-Law Part VII permits only what the notice states to
+              be transacted, so members are entitled to see it here. Rendered
+              from `board_meetings.purpose` rather than written into
+              `body_html`: that body is editable in the Events form, so a
+              derived copy would be clobbered by the next edit and two
+              statements of the meeting's business could then disagree about
+              what may lawfully be transacted.
+
+              Above the body on purpose. It is the limit on the meeting, not
+              colour for it. */}
+          {canViewFull && membersMeetingPurpose && (
+            <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Business of this meeting
+              </h2>
+              <p className="mt-2 whitespace-pre-line text-gray-700">
+                {membersMeetingPurpose}
+              </p>
+              <p className="mt-3 text-xs text-gray-500">
+                Only this business may be transacted at the meeting (By-Law Part VII).
+              </p>
+            </div>
           )}
 
           {canViewFull && event.body_html ? (

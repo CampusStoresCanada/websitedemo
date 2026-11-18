@@ -40,6 +40,7 @@ import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import RecordSendByHand from "@/components/admin/members-meetings/RecordSendByHand";
+import MeetingPurpose from "@/components/admin/members-meetings/MeetingPurpose";
 import { DateTimeRange } from "@/components/ui/LocalDate";
 import { getMembersMeetingView } from "@/lib/governance/members-meeting-view";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
@@ -513,6 +514,17 @@ export default async function MembersMeetingPage({
           meeting.election ? `${meeting.election.cycleYear} election` : null
         }
       />
+
+      {/* ⛔ Only for a special meeting. An AGM's business is fixed by the
+          by-law, and asking a person to restate it would invite them to narrow
+          it. */}
+      {meeting.meetingType === "special_members" && (
+        <MeetingPurpose
+          meetingId={meeting.id}
+          purpose={meeting.purpose}
+          noticeSentAt={meeting.noticeSentAt}
+        />
+      )}
 
       {/* ── The event page members see, edited in place ───────────────────── */}
       <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
