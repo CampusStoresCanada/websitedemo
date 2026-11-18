@@ -11,7 +11,7 @@
 import Link from "next/link";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
-import MembersMeetingSetup from "@/components/admin/members-meetings/MembersMeetingSetup";
+import MeetingDateForm from "@/components/admin/members-meetings/MeetingDateControls";
 import { resolveAgmDate } from "@/lib/elections/schedule";
 import { CSC_ELECTIONS_CONFIG } from "@/lib/elections/config";
 import { listMembersMeetings } from "@/lib/governance/members-meetings-service";
@@ -55,7 +55,7 @@ export default async function NewMembersMeetingPage() {
     <div className="space-y-6">
       <AdminPageHeader
         title="Schedule a members' meeting"
-        description="By-Law Part VII. Set the date, the times and the place; the event page members see is created from them as a draft."
+        description="By-Law Part VII. Settle the day it sits; its event page is created as a draft, and the hour and the place are set on it next."
         actions={
           <Link
             href="/admin/members-meetings"
@@ -66,17 +66,7 @@ export default async function NewMembersMeetingPage() {
         }
       />
 
-      <MembersMeetingSetup
-        meetingId={null}
-        meetingDate={suggested}
-        startsAt={null}
-        endsAt={null}
-        isVirtual={null}
-        location={null}
-        virtualLink={null}
-        eventStatus={null}
-        electionLabel={null}
-      />
+      <MeetingDateForm meetingId={null} meetingDate={suggested} electionLabel={null} />
 
       <p className="text-xs text-gray-500">
         {suggested

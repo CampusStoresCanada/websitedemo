@@ -26,9 +26,10 @@ import { ensureAgmMeetingAndEvent } from "@/lib/elections/cycle";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import {
   agmEventSlug,
+  instantAtMeetingZone,
   isMembersMeetingType,
-  venueFields,
-  type MeetingVenue,
+  meetingDateOf,
+  wallTimeAtMeetingZone,
 } from "@/lib/governance/members-meetings";
 import { getMembersMeeting } from "@/lib/governance/members-meetings-service";
 
@@ -42,10 +43,6 @@ async function requireBoardStaff() {
   return { ok: true as const, userId: auth.user.id };
 }
 
-function isVenue(value: string): value is MeetingVenue {
-  return value === "virtual" || value === "in_person" || value === "hybrid";
-}
-
 function revalidate(meetingId?: string) {
   revalidatePath("/admin/members-meetings");
   if (meetingId) revalidatePath(`/admin/members-meetings/${meetingId}`);
@@ -55,18 +52,17 @@ function revalidate(meetingId?: string) {
 }
 
 /**
- * Schedule a members' meeting, or change the one that is already scheduled.
+ * Call a meeting of the members, or move one that is already called.
  *
- * The date, the times and the place are the four things a person knows and the
- * system cannot work out — the board picks when and where it sits. Everything
- * else is derived: the title, the event's slug, its members-only audience, and
- * the type.
+ * ⛔ The DATE is the only thing this writes, and that is the point. The hour,
+ * the venue, the address, the joining link and the page copy are event fields
+ * and are edited by `EventForm` on the meeting page — the one form this
+ * codebase has for an event. A second form here used to re-implement six of
+ * its fields; it is gone.
  *
- * ⛔ `slug` is passed to `updateEvent` on purpose. That function re-derives the
- * slug from the title whenever `starts_at` changes, and the AGM notice looks
- * the event up by `agmEventSlug(year)` to check it is published — letting the
- * slug drift would turn a notice already sent into a dead link. See
- * `agmEventSlug`.
+ * The date is not an event field because the election joins to the meeting on
+ * `board_meetings.meeting_date` (there is no FK) and measures its nomination,
+ * ballot and Part VII S4(b) notice windows back from it.
  */
 export async function scheduleMembersMeetingAction(formData: FormData): Promise<ActionResult> {
   const auth = await requireBoardStaff();
@@ -74,24 +70,9 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
 
   const meetingId = String(formData.get("meetingId") ?? "").trim() || null;
   const meetingDate = String(formData.get("meetingDate") ?? "").trim();
-  const startsAt = String(formData.get("startsAt") ?? "").trim();
-  const endsAt = String(formData.get("endsAt") ?? "").trim();
-  const venueRaw = String(formData.get("venue") ?? "").trim();
-  const location = String(formData.get("location") ?? "");
-  const virtualLink = String(formData.get("virtualLink") ?? "");
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate))
     return { ok: false, error: "Pick the date the meeting is held." };
-  if (!isVenue(venueRaw))
-    return { ok: false, error: "Say whether the meeting is in person, online, or both." };
-  if (!startsAt) return { ok: false, error: "Set the time the meeting starts." };
-  if (endsAt && endsAt <= startsAt)
-    return { ok: false, error: "The meeting cannot end before it starts." };
-
-  const venue = venueRaw;
-  const fields = venueFields(venue, { location, virtualLink });
-  if (venue !== "virtual" && !fields.location)
-    return { ok: false, error: "An in-person meeting needs an address." };
 
   const db = createAdminClient();
 
@@ -120,16 +101,14 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
     };
   }
 
-  // Changing the DATE once an election is running is not an edit, it is moving
-  // the meeting the whole election schedule is derived from — the nomination
-  // window, the ballot window and the Part VII S4(b) notice window are all
-  // measured back from it, and notice may already be out stating the old date.
-  // Refused here rather than quietly re-deriving under people who have been
-  // told something else.
+  // Moving an existing meeting.
   if (meetingId) {
     const existing = await getMembersMeeting(meetingId);
     if (!existing) return { ok: false, error: "That members' meeting no longer exists." };
 
+    // Changing the date once an election is running is not an edit, it is
+    // moving the meeting the whole election schedule is derived from, and
+    // notice may already be out stating the old date.
     if (existing.meetingDate !== meetingDate && existing.election) {
       return {
         ok: false,
@@ -147,6 +126,46 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
         .update({ meeting_date: meetingDate, updated_at: new Date().toISOString() })
         .eq("id", meetingId);
       if (error) return { ok: false, error: `The date could not be changed: ${error.message}` };
+
+      // The event has to follow the meeting onto the new day, keeping the hour
+      // the board set. `updateEvent` refuses an event whose day no longer
+      // matches its meeting, so leaving this would lock every later edit out of
+      // the Events form. The meeting row is updated first so that check passes.
+      if (existing.event?.startsAt) {
+        const startWall = wallTimeAtMeetingZone(existing.event.startsAt);
+        const nextStart = startWall ? instantAtMeetingZone(meetingDate, startWall) : null;
+        if (!nextStart)
+          return {
+            ok: false,
+            error:
+              `The meeting moved to ${meetingDate}, but ${startWall ?? "its start time"} does not ` +
+              `exist on that day in Eastern time — set the time again on the event page.`,
+          };
+
+        let nextEnd: string | undefined;
+        if (existing.event.endsAt) {
+          const endWall = wallTimeAtMeetingZone(existing.event.endsAt);
+          const endDate = meetingDateOf(existing.event.endsAt);
+          // An end time on the following day stays on the following day.
+          const endTargetDate =
+            endDate && endDate !== existing.meetingDate
+              ? (meetingDateOf(new Date(new Date(`${meetingDate}T12:00:00Z`).getTime() + 86400000).toISOString()) ?? meetingDate)
+              : meetingDate;
+          nextEnd =
+            (endWall ? instantAtMeetingZone(endTargetDate, endWall) : null) ?? undefined;
+        }
+
+        const moved = await updateEvent(existing.event.id, {
+          slug: existing.event.slug,
+          starts_at: nextStart,
+          ends_at: nextEnd,
+        });
+        if (!moved.success)
+          return {
+            ok: false,
+            error: `The meeting moved but its event page did not: ${moved.error}`,
+          };
+      }
     }
   }
 
@@ -167,25 +186,25 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
       error: `The meeting was saved but its event page could not be created. ${ensured.note}`,
     };
 
-  const updated = await updateEvent(ensured.eventId, {
+  // ⛔ Pin the slug and the audience. `updateEvent` re-derives the slug from the
+  // title whenever `starts_at` changes, and `sendAgmNotice` looks the event up
+  // by `agmEventSlug(year)` and puts `/events/<slug>` inside the notice it
+  // sends — a drifted slug turns notice already given into a dead link, and
+  // notice is discharged once. The audience is members, never public.
+  const pinned = await updateEvent(ensured.eventId, {
     slug: agmEventSlug(cycleYear),
-    starts_at: startsAt,
-    ends_at: endsAt || undefined,
-    is_virtual: fields.is_virtual,
-    location: fields.location ?? "",
-    virtual_link: fields.virtual_link ?? "",
     audience_mode: "members",
   });
 
-  if (!updated.success)
-    return { ok: false, error: `The meeting was saved but its details were not: ${updated.error}` };
+  if (!pinned.success)
+    return { ok: false, error: `The meeting was saved but its event was not pinned: ${pinned.error}` };
 
   await logAuditEventSafe({
     actorId: auth.userId,
     action: "members_meeting_scheduled",
     entityType: "board_meeting",
     entityId: ensured.meetingId,
-    details: { meetingDate, venue, startsAt, endsAt: endsAt || null },
+    details: { meetingDate },
   });
 
   revalidate(ensured.meetingId);

@@ -152,3 +152,53 @@ export async function getMembersMeeting(id: string): Promise<MembersMeeting | nu
   const [hydrated] = await hydrate([row]);
   return hydrated ?? null;
 }
+
+/**
+ * The members' meeting an event belongs to, if it is one.
+ *
+ * Used by `updateEvent` to tell whether the event being edited is the event
+ * page of a meeting of the members — in which case its date is governance and
+ * cannot be moved from the Events form. Returns null for every ordinary event,
+ * which is almost all of them, so it costs one indexed lookup.
+ */
+export async function getMembersMeetingByEventId(
+  eventId: string
+): Promise<MembersMeeting | null> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("board_meetings")
+    .select(MEETING_COLUMNS)
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const row = data as MeetingRow;
+  if (!isMembersMeetingType(row.meeting_type)) return null;
+
+  const [hydrated] = await hydrate([row]);
+  return hydrated ?? null;
+}
+
+/**
+ * The members' meeting sitting on a given date, if there is one.
+ *
+ * ⚠️ This is the date join, named honestly and in one place. `elections` has no
+ * `meeting_id` column — it carries `agm_date`, and the meeting carries
+ * `meeting_date`, and equal dates is the whole relation. Every caller that
+ * needs to get from an election to its meeting should come through here rather
+ * than writing the match again, so that the day the column is added there is
+ * one line to change.
+ */
+export async function getMembersMeetingByDate(date: string): Promise<MembersMeeting | null> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("board_meetings")
+    .select(MEETING_COLUMNS)
+    .in("meeting_type", MEMBERS_MEETING_TYPES as readonly string[])
+    .eq("meeting_date", date)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const [hydrated] = await hydrate([data as MeetingRow]);
+  return hydrated ?? null;
+}

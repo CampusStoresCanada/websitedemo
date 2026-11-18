@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
-  MEMBERS_MEETING_TYPES,
   MEMBERS_MEETING_LABELS,
-  isMembersMeetingType,
+  MEMBERS_MEETING_TYPES,
   agmEventSlug,
-  venueOf,
-  venueFields,
+  instantAtMeetingZone,
+  isMembersMeetingType,
+  meetingDateOf,
   membersMeetingGaps,
   type MembersMeeting,
+  venueFields,
+  venueOf,
+  wallTimeAtMeetingZone,
 } from "@/lib/governance/members-meetings";
 
 function meeting(over: Partial<MembersMeeting> = {}): MembersMeeting {
@@ -168,5 +171,86 @@ describe("membersMeetingGaps", () => {
 
   it("reports nothing outstanding for a cancelled meeting", () => {
     expect(membersMeetingGaps(meeting({ status: "cancelled", event: null }))).toEqual([]);
+  });
+});
+
+// ─── The date a meeting sits on, in the zone it is called in ────────────────
+//
+// These matter because the election joins to the meeting on `meeting_date`
+// with no foreign key. Deriving that date in the wrong zone puts the meeting
+// on the wrong day and silently unhooks it from its own election.
+
+describe("meetingDateOf", () => {
+  it("reads the Eastern calendar day, not the UTC one", () => {
+    // 2027-01-21 17:00Z is noon Eastern on the 21st — the real 2027 AGM.
+    expect(meetingDateOf("2027-01-21T17:00:00Z")).toBe("2027-01-21");
+  });
+
+  it("keeps an evening Eastern meeting on its own day", () => {
+    // 7 p.m. Eastern on the 21st is 00:00Z on the 22nd. Taking the UTC date
+    // would file the meeting a day late.
+    expect(meetingDateOf("2027-01-22T00:00:00Z")).toBe("2027-01-21");
+  });
+
+  it("accepts a Supabase timestamp with no zone marker", () => {
+    // `timestamp without time zone` comes back as "YYYY-MM-DD HH:mm:ss".
+    expect(meetingDateOf("2027-01-21 17:00:00")).toBe("2027-01-21");
+  });
+
+  it("returns null for something that is not a timestamp", () => {
+    expect(meetingDateOf("not a date")).toBeNull();
+  });
+});
+
+describe("wallTimeAtMeetingZone", () => {
+  it("gives the hour the board set, in Eastern", () => {
+    expect(wallTimeAtMeetingZone("2027-01-21T17:00:00Z")).toBe("12:00");
+  });
+
+  it("accounts for daylight time in summer", () => {
+    // July is EDT (UTC-4), so 16:00Z is noon, not 11:00.
+    expect(wallTimeAtMeetingZone("2027-07-21T16:00:00Z")).toBe("12:00");
+  });
+});
+
+describe("instantAtMeetingZone", () => {
+  it("round-trips a winter meeting", () => {
+    const iso = instantAtMeetingZone("2027-01-21", "12:00");
+    expect(iso).toBe("2027-01-21T17:00:00.000Z");
+    expect(meetingDateOf(iso!)).toBe("2027-01-21");
+    expect(wallTimeAtMeetingZone(iso!)).toBe("12:00");
+  });
+
+  it("round-trips a summer meeting at the other offset", () => {
+    // ⛔ The offset is NOT fixed. Assuming -5 year-round would put this an
+    // hour out, which is exactly the bug this helper exists to avoid.
+    const iso = instantAtMeetingZone("2027-07-21", "12:00");
+    expect(iso).toBe("2027-07-21T16:00:00.000Z");
+    expect(wallTimeAtMeetingZone(iso!)).toBe("12:00");
+  });
+
+  it("preserves the hour when a meeting moves across the DST boundary", () => {
+    // Moving a noon-Eastern meeting from January to July must stay noon
+    // Eastern — not shift by the offset difference.
+    const winter = instantAtMeetingZone("2027-01-21", "12:00")!;
+    const moved = instantAtMeetingZone("2027-07-21", wallTimeAtMeetingZone(winter)!)!;
+    expect(wallTimeAtMeetingZone(moved)).toBe("12:00");
+    expect(winter).not.toBe(moved);
+  });
+
+  it("keeps an evening meeting on the day it was called for", () => {
+    const iso = instantAtMeetingZone("2027-01-21", "19:00")!;
+    expect(iso).toBe("2027-01-22T00:00:00.000Z");
+    expect(meetingDateOf(iso)).toBe("2027-01-21");
+  });
+
+  it("refuses a wall time that does not exist on that day", () => {
+    // 02:30 on the spring-forward morning never happens in Eastern.
+    expect(instantAtMeetingZone("2027-03-14", "02:30")).toBeNull();
+  });
+
+  it("refuses malformed input rather than guessing", () => {
+    expect(instantAtMeetingZone("2027-1-21", "12:00")).toBeNull();
+    expect(instantAtMeetingZone("2027-01-21", "noon")).toBeNull();
   });
 });

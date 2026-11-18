@@ -304,6 +304,37 @@ export async function updateEvent(
     }
   }
 
+  // ⛔ A members' meeting's DATE is governance, not an event detail. The
+  // election joins to the meeting on `board_meetings.meeting_date` (there is no
+  // FK), and the Part VII S4(b) notice window, the nomination window and the
+  // ballot window are all measured back from it. Moving the event to another
+  // day here would leave `meeting_date` stale, silently unhook the election
+  // from its own meeting, and make `generateAgmAgenda` report that no AGM
+  // meeting record exists. The hour and the place are ordinary event edits and
+  // pass straight through; only a change of DAY is refused, and it is refused
+  // rather than synced because moving a members' meeting means re-deriving the
+  // election schedule under people who may already have been given notice.
+  if (payload.starts_at) {
+    const { getMembersMeetingByEventId } = await import(
+      "@/lib/governance/members-meetings-service"
+    );
+    const { meetingDateOf } = await import("@/lib/governance/members-meetings");
+    const membersMeeting = await getMembersMeetingByEventId(id);
+    if (membersMeeting) {
+      const nextDate = meetingDateOf(payload.starts_at);
+      if (nextDate && nextDate !== membersMeeting.meetingDate) {
+        return {
+          success: false,
+          error:
+            `This is the event page of a meeting of the members, held on ` +
+            `${membersMeeting.meetingDate}. The time and the place can be changed here, but ` +
+            `the day cannot — the election schedule and the notice window are measured from ` +
+            `it. Change the date on the meeting itself.`,
+        };
+      }
+    }
+  }
+
   const updates: Record<string, unknown> = { ...payload, updated_at: new Date().toISOString() };
 
   // Re-derive slug if title or starts_at changed (and slug not explicitly set)

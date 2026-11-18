@@ -187,3 +187,86 @@ export function membersMeetingGaps(meeting: MembersMeeting): string[] {
   }
   return gaps;
 }
+
+// ─── The date is governance, not an event detail ─────────────────────────────
+
+/**
+ * The zone a meeting of the members is CALLED in.
+ *
+ * ⚠️ Not the reader's zone and not the server's. The AGM is convened in
+ * Eastern — that is the anchor the board sets the hour in — so the calendar day
+ * a meeting "is on" has to be worked out in Eastern too. A 7 p.m. Eastern
+ * meeting is 00:00 UTC the NEXT day; deriving the date from the UTC portion of
+ * `starts_at` would put it on the wrong day and silently unhook it from the
+ * election, which joins on `meeting_date`.
+ *
+ * Reading times back for a person is a different job and belongs to
+ * `LocalDate`, which renders in whatever zone the reader is in.
+ */
+export const MEMBERS_MEETING_TIME_ZONE = "America/Toronto";
+
+/**
+ * The calendar date a meeting sits on, in the zone it is called in.
+ *
+ * `starts_at` is stored as UTC (see `parseUTC` in `lib/utils.ts`); this maps it
+ * back to the day the board means by it.
+ */
+export function meetingDateOf(startsAtUtcIso: string): string | null {
+  const normalized =
+    startsAtUtcIso.endsWith("Z") || startsAtUtcIso.includes("+")
+      ? startsAtUtcIso
+      : startsAtUtcIso.replace(" ", "T") + "Z";
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return null;
+  // en-CA with an explicit zone yields YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: MEMBERS_MEETING_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** The wall-clock time ("HH:mm") a meeting starts at, in the zone it is called in. */
+export function wallTimeAtMeetingZone(startsAtUtcIso: string): string | null {
+  const normalized =
+    startsAtUtcIso.endsWith("Z") || startsAtUtcIso.includes("+")
+      ? startsAtUtcIso
+      : startsAtUtcIso.replace(" ", "T") + "Z";
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: MEMBERS_MEETING_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+/**
+ * The UTC instant of a given wall-clock time on a given day, in the zone the
+ * meeting is called in. Used when a meeting MOVES: the board means "still noon
+ * Eastern, a week later", not "the same UTC instant plus seven days".
+ *
+ * ⚠️ Solved by trying both Eastern offsets and keeping whichever round-trips,
+ * rather than assuming one. A move across the March or November boundary
+ * changes the offset, and assuming -5 would quietly shift the meeting an hour.
+ * Returns null for a wall time that does not exist on that day (the spring
+ * forward gap), which the caller reports rather than guessing at.
+ */
+export function instantAtMeetingZone(date: string, wallTime: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!/^\d{2}:\d{2}$/.test(wallTime)) return null;
+
+  for (const offsetHours of [5, 4]) {
+    const guess = new Date(`${date}T${wallTime}:00.000Z`);
+    guess.setUTCHours(guess.getUTCHours() + offsetHours);
+    if (
+      meetingDateOf(guess.toISOString()) === date &&
+      wallTimeAtMeetingZone(guess.toISOString()) === wallTime
+    ) {
+      return guess.toISOString();
+    }
+  }
+  return null;
+}

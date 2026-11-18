@@ -16,10 +16,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
-import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
 import PhaseSection from "@/components/admin/elections/PhaseSection";
-import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
 import DirectorTermsEditor from "@/components/admin/elections/DirectorTermsEditor";
@@ -27,15 +25,13 @@ import {
   getCommitteeReview,
   getNoticeState,
   countOutstandingBallots,
-  getAgmPackageState,
   getElectionTimeline,
   getCandidateOutcomes,
 } from "@/lib/elections/service";
+import { getMembersMeetingByDate } from "@/lib/governance/members-meetings-service";
 import {
   requestWithdrawalAction,
   sendCallForNominationsAction,
-  sendAgmNoticeAction,
-  sendProxyFormAction,
   chaseIncompleteAction,
   chaseCosignaturesAction,
   notifyCandidatesAction,
@@ -43,9 +39,6 @@ import {
   closeNominationsAction,
   circulateBallotsAction,
   saveReminderScheduleAction,
-  uploadFinancialStatementsAction,
-  sendAgmPackageAction,
-  generateAgmAgendaAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
@@ -102,10 +95,6 @@ export default async function ElectionReviewPage({
     circulated?: string;
     reminderError?: string;
     remindersSaved?: string;
-    packageError?: string;
-    uploaded?: string;
-    packageSent?: string;
-    agendaGenerated?: string;
     cosignersChased?: string;
     asOf?: string;
   }>;
@@ -117,10 +106,6 @@ export default async function ElectionReviewPage({
     circulated,
     reminderError,
     remindersSaved,
-    packageError,
-    uploaded,
-    packageSent,
-    agendaGenerated,
     cosignersChased,
     asOf: asOfParam,
   } = await searchParams;
@@ -169,18 +154,17 @@ export default async function ElectionReviewPage({
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
     review;
   const callSentAt = (election.config as unknown as { callSentAt?: string }).callSentAt ?? null;
+
+  // The meeting these directors are elected at. Notice, the package and the
+  // proxy register live there now — see the note further down.
+  const membersMeeting = await getMembersMeetingByDate(election.schedule.agmDate);
+  const meetingLink = membersMeeting ? `/admin/members-meetings/${membersMeeting.id}` : null;
   const ballotConfig = election.config as unknown as {
     ballotsCirculatedAt?: string;
     ballotCirculationCount?: number;
   };
   const ballotsCirculatedAt = ballotConfig.ballotsCirculatedAt ?? null;
   const ballotCirculationCount = ballotConfig.ballotCirculationCount ?? 0;
-  const packageConfig = election.config as unknown as {
-    agmPackageSentAt?: string;
-    agmPackageSendCount?: number;
-  };
-  const agmPackageSentAt = packageConfig.agmPackageSentAt ?? null;
-  const agmPackageSendCount = packageConfig.agmPackageSendCount ?? 0;
 
   async function askToWithdraw(formData: FormData) {
     "use server";
@@ -235,21 +219,7 @@ export default async function ElectionReviewPage({
     );
   }
 
-  async function sendNotice(formData: FormData) {
-    "use server";
-    const r = await sendAgmNoticeAction(slug, formData);
-    redirect(
-      `/admin/elections/${slug}${r.ok ? "?noticeSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
-  }
 
-  async function sendProxy() {
-    "use server";
-    const r = await sendProxyFormAction(slug);
-    redirect(
-      `/admin/elections/${slug}${r.ok ? "?proxySent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
-    );
-  }
 
   async function circulate() {
     "use server";
@@ -259,35 +229,8 @@ export default async function ElectionReviewPage({
     );
   }
 
-  async function uploadFinancials(formData: FormData) {
-    "use server";
-    const r = await uploadFinancialStatementsAction(slug, formData);
-    redirect(
-      `/admin/elections/${slug}${
-        r.ok ? "?uploaded=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
-      }`
-    );
-  }
 
-  async function generateAgenda(formData: FormData) {
-    "use server";
-    const r = await generateAgmAgendaAction(slug, formData);
-    redirect(
-      `/admin/elections/${slug}${
-        r.ok ? "?agendaGenerated=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
-      }`
-    );
-  }
 
-  async function sendPackage(formData: FormData) {
-    "use server";
-    const r = await sendAgmPackageAction(slug, formData);
-    redirect(
-      `/admin/elections/${slug}${
-        r.ok ? "?packageSent=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
-      }`
-    );
-  }
 
   async function saveReminders(formData: FormData) {
     "use server";
@@ -325,7 +268,6 @@ export default async function ElectionReviewPage({
     election.config,
     "nominations"
   );
-  const agmPackage = await getAgmPackageState(slug);
   // Only once certified — before that countElection refuses and there is no
   // "elected" to count, so asking earlier would be a query that always fails.
   // The service history behind the term-limit check, per nominee. Loaded here
@@ -549,9 +491,14 @@ export default async function ElectionReviewPage({
             // timeline sends you to it rather than posting an empty one.
             closeNominations: "close-nominations",
             circulateBallots: circulate,
-            sendAgmNotice: "agm-notice",
-            sendProxyForm: sendProxy,
-            sendAgmPackage: "agm-package",
+            // ⛔ These three are MEETING business and their panels live on the
+            // meeting, so the step is a link there, not a press here. A string
+            // starting with "/" is followed as a path (see ElectionTimeline);
+            // the bare anchors these used to be would now scroll to nothing.
+            // Do not re-add a send here — the panel is the one control.
+            sendAgmNotice: meetingLink ? `${meetingLink}#agm-notice` : undefined,
+            sendProxyForm: meetingLink ? `${meetingLink}#agm-notice` : undefined,
+            sendAgmPackage: meetingLink ? `${meetingLink}#agm-package` : undefined,
             notifyCandidates: tellCandidates,
           }}
         />
@@ -593,20 +540,29 @@ export default async function ElectionReviewPage({
         </div>
       )}
 
-      {noticeState && (
-        <PhaseSection
-          state={sect("field_fixed")}
-          title="Notice of the meeting"
-          summary={
-            noticeState.noticeSentAt
-              ? `Given ${formatDate(noticeState.noticeSentAt)}`
-              : `Window ${noticeState.window.opensOn} to ${noticeState.window.closesOn}`
-          }
-        >
-          <div id="agm-notice" className="scroll-mt-24">
-            <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
+      {/* ⛔ Notice, the members' package and the proxy register are NOT here.
+          They are meeting business and live on the meeting itself, under
+          Members' Meetings. The election is one item of business ON that
+          meeting's agenda; it does not own the meeting. Moved 2026-11-18 —
+          do not add a second copy here. */}
+      {meetingLink && (
+        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">The meeting itself</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Notice of the meeting, the members&apos; package, the agenda and the proxy register
+            belong to the meeting these directors are elected at.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-4 text-xs">
+            <Link href={meetingLink} className="text-[#163D6D] hover:underline">
+              {noticeState?.noticeSentAt
+                ? `Notice given ${formatDate(noticeState.noticeSentAt)} →`
+                : "Notice of the meeting →"}
+            </Link>
+            <Link href={`${meetingLink}/proxies`} className="text-[#163D6D] hover:underline">
+              Proxy register →
+            </Link>
           </div>
-        </PhaseSection>
+        </section>
       )}
 
       {/* The election's obligations belong on the board's own list, assigned to
@@ -734,38 +690,6 @@ export default async function ElectionReviewPage({
           progressing is the reliable signal.
         </p>
       </PhaseSection>
-
-      {agmPackage && (
-        <PhaseSection
-          state={sect("field_fixed")}
-          title="Members' AGM package"
-          summary={agmPackageSentAt ? `Sent ${formatDate(agmPackageSentAt)}` : "not sent"}
-        >
-        <div id="agm-package" className="scroll-mt-24">
-        <AgmPackagePanel
-          items={agmPackage.items}
-          outstanding={agmPackage.outstanding}
-          complete={agmPackage.complete}
-          summary={agmPackage.summary}
-          hasMeeting={agmPackage.meetingId !== null}
-          financialsSupplied={agmPackage.financialDocumentId !== null}
-          upload={uploadFinancials}
-          generateAgenda={generateAgenda}
-          agendaSupplied={
-            agmPackage.items.find((i) => i.key === "agenda")?.state === "supplied"
-          }
-          send={sendPackage}
-          sentAt={agmPackageSentAt ? formatDate(agmPackageSentAt) : null}
-          recipientCount={messages?.find((m) => m.key === "agm_package")?.recipientCount ?? null}
-          sendCount={agmPackageSendCount}
-          error={packageError}
-          uploaded={Boolean(uploaded)}
-          sent={Boolean(packageSent)}
-          agendaGenerated={Boolean(agendaGenerated)}
-        />
-        </div>
-        </PhaseSection>
-      )}
 
       <PhaseSection
         state={sect("nominating")}
