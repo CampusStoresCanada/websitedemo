@@ -84,27 +84,6 @@ const PARTNER_PAGE_FIELD_STEPS = new Set([
 const PARTNER_ORG_TYPE = "Vendor Partner";
 
 
-/**
- * Nothing leaves this job before this moment.
- *
- * The Town Hall invite went to 529 people on 2026-09-21 and the ask in it is
- * "go and sign in". Uptake is slow by nature, and a profile nudge landing on
- * the same inbox the next morning competes with the one thing we asked for.
- * The meeting itself is Wednesday 2026-09-23, 12:00–13:30 Eastern.
- *
- * It is also the guard this job was missing. Giving a step a sendAfterDays
- * does not mean "five days from now" — it means five days from
- * journey_started_at, and the journeys that exist began in May. Scheduling
- * procurement on 2026-09-21 therefore made it instantly overdue for all 97 of
- * them, which is precisely the instant backlog the note above warns about and
- * precisely what happened.
- *
- * Self-expiring on purpose: no deploy is needed to lift it, and a forgotten
- * flag that silently stops all onboarding mail would be worse than the problem
- * it solves. Delete the constant and this block once it is behind us.
- */
-const QUIET_UNTIL = Date.parse("2026-09-24T00:00:00Z");
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for the DB rows we read
 // ─────────────────────────────────────────────────────────────────────────────
@@ -696,13 +675,6 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = createAdminClient() as any;
   const result: NudgeJobResult = { processed: 0, sent: 0, skipped: 0, errors: [], log: [] };
-
-  if (Date.now() < QUIET_UNTIL) {
-    result.log.push(
-      `quiet period: sending nothing until ${new Date(QUIET_UNTIL).toISOString()} (Town Hall 2026-09-23)`
-    );
-    return result;
-  }
 
   // ── 1. Check conditional flags once for this run ──────────────────────────
   const [conferenceActive, benchmarkingOpen] = await Promise.all([

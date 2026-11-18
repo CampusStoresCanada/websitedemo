@@ -7,10 +7,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: import.meta.dirname,
   },
-  typescript: {
-    // Temporary unblock for deploys while DB-generated types are resynced.
-    ignoreBuildErrors: true,
-  },
   // The board-minutes drafting contract is read from disk at runtime so the
   // skill files stay the single source of truth (skills/csc-board-minutes/).
   // Without this, they are not traced into the serverless bundle and the read
