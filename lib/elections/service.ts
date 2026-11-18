@@ -4833,6 +4833,15 @@ export async function getElectionTimeline(
     .eq("election_id", election.id)
     .maybeSingle();
 
+  // The meeting's own facts, through the one reader that knows how an election
+  // is matched to its meeting. ⚠️ Do not re-write the `agm_date == meeting_date`
+  // match here — see `getMembersMeetingByDate`.
+  const { getMembersMeetingByDate } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const { membersMeetingGaps } = await import("@/lib/governance/members-meetings");
+  const membersMeeting = await getMembersMeetingByDate(election.schedule.agmDate);
+
   return buildElectionTimeline(
     {
       cycleYear: election.cycleYear,
@@ -4856,6 +4865,9 @@ export async function getElectionTimeline(
           }
         : null,
       eventPublished: notice?.eventPage.readyForNotice ?? false,
+      eventStartSet: Boolean(membersMeeting?.event?.startsAt),
+      eventGaps: membersMeeting ? membersMeetingGaps(membersMeeting) : [],
+      agendaDrafted: membersMeeting?.hasAgenda ?? false,
       nominationsReceived: nominations.length,
       validatedNominees: validated,
       ballotsReturned: ballotsReturned ?? 0,

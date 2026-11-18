@@ -496,6 +496,9 @@ export default async function ElectionReviewPage({
             // starting with "/" is followed as a path (see ElectionTimeline);
             // the bare anchors these used to be would now scroll to nothing.
             // Do not re-add a send here — the panel is the one control.
+            // The meeting's own stages, same spine, controls on the meeting.
+            publishEvent: meetingLink ?? undefined,
+            generateAgenda: meetingLink ? `${meetingLink}#agm-package` : undefined,
             sendAgmNotice: meetingLink ? `${meetingLink}#agm-notice` : undefined,
             sendProxyForm: meetingLink ? `${meetingLink}#agm-notice` : undefined,
             sendAgmPackage: meetingLink ? `${meetingLink}#agm-package` : undefined,

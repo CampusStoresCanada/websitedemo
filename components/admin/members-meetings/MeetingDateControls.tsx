@@ -17,16 +17,16 @@
  *    `meeting_date` and derives its nomination, ballot and notice windows from
  *    it, so moving it is not an edit but a re-derivation. It locks once an
  *    election is built on it.
- *  - PUBLISHING, because `transitionEventStatus` mints the Google Meet link and
- *    pushes the entry out, and that is the act that calls the meeting in public.
+ * ⛔ PUBLISHING is not here either. It is a stage of the meeting, so its press
+ * lives in the spine (`ElectionTimeline` on the meeting page) alongside notice
+ * and the package. A second publish button beside the event details is what was
+ * here before, and two presses for one act is the thing this section exists to
+ * undo.
  */
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  scheduleMembersMeetingAction,
-  publishMembersMeetingEventAction,
-} from "@/lib/actions/members-meetings";
+import { scheduleMembersMeetingAction } from "@/lib/actions/members-meetings";
 
 export interface MeetingDateFormProps {
   meetingId: string | null;
@@ -114,40 +114,5 @@ export default function MeetingDateForm(props: MeetingDateFormProps) {
       )}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
     </section>
-  );
-}
-
-/**
- * Publish the event page. Shown only while it is a draft — notice cannot be
- * given until members have a page to be sent to.
- */
-export function PublishEventButton({ meetingId }: { meetingId: string }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div className="mt-3">
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() =>
-          start(async () => {
-            setError(null);
-            const r = await publishMembersMeetingEventAction(meetingId);
-            if (!r.ok) setError(r.error);
-            else router.refresh();
-          })
-        }
-        className="rounded-md bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#122f54] disabled:opacity-50"
-      >
-        {pending ? "Publishing…" : "Publish the event page"}
-      </button>
-      <p className="mt-1 text-xs text-gray-500">
-        Members can see it, a joining link is minted for an online meeting, and notice can be
-        given.
-      </p>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-    </div>
   );
 }

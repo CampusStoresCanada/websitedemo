@@ -89,6 +89,18 @@ export interface TimelineFacts {
   noticeWindow: { opensOn: string; closesOn: string; proxyDueOn: string } | null;
   /** The AGM's event page must be published before notice can be given. */
   eventPublished: boolean;
+  /** Whether the event has a start time yet — publishing is blocked without one. */
+  eventStartSet: boolean;
+  /**
+   * What is still missing from the meeting's event page, in prose.
+   *
+   * From `membersMeetingGaps`. These are the DETAIL of the publish stage, not a
+   * list of their own: a second "still outstanding" box beside this spine is
+   * the scattering this file exists to undo.
+   */
+  eventGaps: string[];
+  /** Whether an agenda has been drafted onto the meeting record. */
+  agendaDrafted: boolean;
   nominationsReceived: number;
   validatedNominees: number;
   ballotsReturned: number;
@@ -273,9 +285,43 @@ export function buildElectionTimeline(
     });
   }
 
+  // 4b — The event page members are sent to.
+  //
+  // Notice links to it, so it has to be public before notice can be given.
+  // That dependency was previously visible only as a `blockedBy` on the notice
+  // stage, which told you that you were stuck without giving the thing you were
+  // stuck on a place to be done. It is a stage of the meeting in its own right.
+  const w = facts.noticeWindow;
+  stages.push({
+    key: "event_published",
+    label: "The event page members see",
+    on: null,
+    // Due by the time notice can first be given, not by the meeting.
+    until: w?.opensOn ?? null,
+    windowLabel: null,
+    state: facts.eventPublished
+      ? "done"
+      : w && today > w.opensOn
+        ? "overdue"
+        : "current",
+    detail: facts.eventPublished
+      ? "Published, so notice can link to it."
+      : facts.eventGaps.length > 0
+        ? facts.eventGaps.join(" ")
+        : "Publishing it lets members see the meeting, mints the joining link for an online meeting, and unblocks notice.",
+    action: facts.eventPublished
+      ? null
+      : {
+          key: "publishEvent",
+          label: "Publish the event page",
+          blockedBy: facts.eventStartSet
+            ? null
+            : "Set the time the meeting starts — members have to be told when.",
+        },
+  });
+
   // 5 — Notice of meeting. A window, not a deadline.
   const noticeSent = day(facts.noticeSentAt);
-  const w = facts.noticeWindow;
   stages.push({
     key: "agm_notice",
     label: "Notice of the meeting",
@@ -328,13 +374,34 @@ export function buildElectionTimeline(
     action: proxySent ? null : { key: "sendProxyForm", label: "Send the proxy form", blockedBy: null },
   });
 
+  // 6b — The agenda.
+  //
+  // Before the package, because the agenda goes INSIDE the package: sending the
+  // package without one is sending members a meeting they cannot follow. The
+  // press is in the package panel; this stage is what makes the ordering
+  // visible rather than something you discover from a missing item.
+  const packageSeason = w ? today >= w.opensOn : today >= s.ballotsCloseAt;
+  stages.push({
+    key: "agenda",
+    label: "Agenda for the meeting",
+    on: null,
+    until: null,
+    windowLabel: null,
+    state: facts.agendaDrafted ? "done" : packageSeason ? "current" : "upcoming",
+    detail: facts.agendaDrafted
+      ? "Drafted onto the meeting record."
+      : "Generated from the chair's script so the two cannot drift, then edited by hand if the board wants it different.",
+    action: facts.agendaDrafted
+      ? null
+      : { key: "generateAgenda", label: "Generate the agenda", blockedBy: null },
+  });
+
   // 7 — The members' package.
   const packageSent = day(facts.packageSentAt);
   // Only "current" once the meeting is actually being prepared. Marked current
   // year-round it becomes the headline in August, ahead of the call for
   // nominations that is the real next act — which is exactly backwards for a
   // screen whose job is to say what to do now.
-  const packageSeason = w ? today >= w.opensOn : today >= s.ballotsCloseAt;
   stages.push({
     key: "agm_package",
     label: "Members' AGM package",

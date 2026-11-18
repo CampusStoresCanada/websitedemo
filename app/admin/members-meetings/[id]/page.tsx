@@ -36,19 +36,20 @@ import {
   membersMeetingGaps,
   venueOf,
 } from "@/lib/governance/members-meetings";
-import MeetingDateForm, {
-  PublishEventButton,
-} from "@/components/admin/members-meetings/MeetingDateControls";
+import MeetingDateForm from "@/components/admin/members-meetings/MeetingDateControls";
 import EventFormClient from "@/components/admin/events/EventFormClient";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
+import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import LocalDate from "@/components/ui/LocalDate";
 import { getEvent } from "@/lib/actions/events";
 import {
   getNoticeState,
   getAgmPackageState,
   getElection,
+  getElectionTimeline,
 } from "@/lib/elections/service";
+import { publishMembersMeetingEventAction } from "@/lib/actions/members-meetings";
 import {
   sendAgmNoticeAction,
   sendProxyFormAction,
@@ -94,6 +95,7 @@ export default async function MembersMeetingPage({
   searchParams: Promise<{
     error?: string;
     noticeSent?: string;
+    published?: string;
     proxySent?: string;
     packageError?: string;
     uploaded?: string;
@@ -114,6 +116,7 @@ export default async function MembersMeetingPage({
   const {
     error: pageError,
     noticeSent,
+    published,
     proxySent,
     packageError,
     uploaded,
@@ -137,13 +140,14 @@ export default async function MembersMeetingPage({
   const fullEvent = eventResult?.success ? eventResult.data : null;
 
   // Notice and the package are keyed by election slug — see the file note.
-  const [noticeState, agmPackage, election] = electionSlug
+  const [noticeState, agmPackage, election, spine] = electionSlug
     ? await Promise.all([
         getNoticeState(electionSlug),
         getAgmPackageState(electionSlug),
         getElection(electionSlug),
+        getElectionTimeline(electionSlug),
       ])
-    : [null, null, null];
+    : [null, null, null, null];
 
   const packageConfig = (election?.config ?? {}) as {
     agmPackageSentAt?: string;
@@ -153,6 +157,13 @@ export default async function MembersMeetingPage({
   const agmPackageSendCount = packageConfig.agmPackageSendCount ?? 0;
 
   const back = `/admin/members-meetings/${id}`;
+  const electionHref = electionSlug ? `/admin/elections/${electionSlug}` : undefined;
+
+  async function publishEvent() {
+    "use server";
+    const r = await publishMembersMeetingEventAction(id);
+    redirect(`${back}${r.ok ? "?published=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`);
+  }
 
   async function sendNotice(formData: FormData) {
     "use server";
@@ -224,25 +235,68 @@ export default async function MembersMeetingPage({
           Notice of the meeting has been given.
         </p>
       )}
+      {published && (
+        <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          The event page is published. Members can see the meeting, and notice can be given.
+        </p>
+      )}
       {proxySent && (
         <p className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
           The proxy form has been sent.
         </p>
       )}
 
-      {gaps.length > 0 && (
-        <section className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
-          <h2 className="text-sm font-semibold text-amber-900">
-            Still outstanding
-          </h2>
-          <ul className="mt-2 space-y-1">
-            {gaps.map((g) => (
-              <li key={g} className="text-sm text-amber-800">
-                • {g}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* ── One spine, in the order things happen ─────────────────────────
+          ⛔ This is the whole point of the section. The meeting and its
+          election are ONE activity, so publishing the page, giving notice,
+          drafting the agenda, sending the package, nominations and ballots are
+          stages of one ordered list — not a progress box here and a timeline
+          on another screen. Same `buildElectionTimeline` the election page
+          renders, so the two cannot drift; each page runs the actions it owns
+          and links out for the rest.
+
+          The event-page gaps that used to be their own amber box are now the
+          DETAIL of the publish stage. Do not put them back beside this. */}
+      {spine ? (
+        <ElectionTimeline
+          stages={spine}
+          title="What remains before this meeting"
+          subtitle="In the order it happens. Every date moves with the day the meeting sits."
+          actions={{
+            // Ours, run from here.
+            publishEvent,
+            sendProxyForm: sendProxy,
+            // Panels on this page — a string that is not a path is the id of
+            // the panel below that owns the real form.
+            sendAgmNotice: "agm-notice",
+            generateAgenda: "agm-package",
+            sendAgmPackage: "agm-package",
+            // The election's own steps: its controls live on its screen.
+            sendCall: electionHref,
+            closeNominations: electionHref,
+            circulateBallots: electionHref,
+            sealElection: electionHref,
+            certifyElection: electionHref,
+            notifyCandidates: electionHref,
+            announceResults: electionHref,
+          }}
+        />
+      ) : (
+        gaps.length > 0 && (
+          <section className="rounded-lg border border-amber-200 bg-amber-50 px-5 py-4">
+            <h2 className="text-sm font-semibold text-amber-900">Still outstanding</h2>
+            <p className="mt-1 text-xs text-amber-800">
+              No election is open for this meeting, so there is no cycle to lay out yet.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {gaps.map((g) => (
+                <li key={g} className="text-sm text-amber-800">
+                  • {g}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
       )}
 
       <MeetingDateForm
@@ -314,9 +368,6 @@ export default async function MembersMeetingPage({
               </Row>
             </dl>
 
-            {meeting.event.status === "draft" && (
-              <PublishEventButton meetingId={meeting.id} />
-            )}
 
             <details className="mt-4 border-t border-gray-100 pt-3">
               <summary className="cursor-pointer text-sm font-medium text-[#163D6D]">
