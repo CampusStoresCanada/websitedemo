@@ -2553,8 +2553,12 @@ export type Database = {
           minutes_html: string | null
           minutes_updated_at: string | null
           notes: string | null
+          notice_sent_at: string | null
           notion_page_id: string | null
           notion_page_url: string | null
+          package_send_count: number
+          package_sent_at: string | null
+          proxy_form_sent_at: string | null
           status: string
           title: string
           updated_at: string
@@ -2571,8 +2575,12 @@ export type Database = {
           minutes_html?: string | null
           minutes_updated_at?: string | null
           notes?: string | null
+          notice_sent_at?: string | null
           notion_page_id?: string | null
           notion_page_url?: string | null
+          package_send_count?: number
+          package_sent_at?: string | null
+          proxy_form_sent_at?: string | null
           status?: string
           title: string
           updated_at?: string
@@ -2589,8 +2597,12 @@ export type Database = {
           minutes_html?: string | null
           minutes_updated_at?: string | null
           notes?: string | null
+          notice_sent_at?: string | null
           notion_page_id?: string | null
           notion_page_url?: string | null
+          package_send_count?: number
+          package_sent_at?: string | null
+          proxy_form_sent_at?: string | null
           status?: string
           title?: string
           updated_at?: string
@@ -5435,6 +5447,115 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_registration_changes: {
+        Row: {
+          actor_id: string | null
+          conference_id: string
+          created_at: string
+          from_entity_id: string
+          from_purchase_id: string | null
+          holder_person_id: string | null
+          id: string
+          organization_id: string
+          reason: string | null
+          seat_id: string
+          to_entity_id: string
+          to_purchase_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          conference_id: string
+          created_at?: string
+          from_entity_id: string
+          from_purchase_id?: string | null
+          holder_person_id?: string | null
+          id?: string
+          organization_id: string
+          reason?: string | null
+          seat_id: string
+          to_entity_id: string
+          to_purchase_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          conference_id?: string
+          created_at?: string
+          from_entity_id?: string
+          from_purchase_id?: string | null
+          holder_person_id?: string | null
+          id?: string
+          organization_id?: string
+          reason?: string | null
+          seat_id?: string
+          to_entity_id?: string
+          to_purchase_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_registration_changes_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_from_entity_id_fkey"
+            columns: ["from_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_from_purchase_id_fkey"
+            columns: ["from_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "entity_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_holder_person_id_fkey"
+            columns: ["holder_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_seat_id_fkey"
+            columns: ["seat_id"]
+            isOneToOne: false
+            referencedRelation: "entity_balance_seats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_to_entity_id_fkey"
+            columns: ["to_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_registration_changes_to_purchase_id_fkey"
+            columns: ["to_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "entity_purchases"
             referencedColumns: ["id"]
           },
         ]
@@ -8786,6 +8907,8 @@ export type Database = {
       }
       governance_role_assignments: {
         Row: {
+          access_from: string | null
+          access_until: string | null
           appointing_resolution: string | null
           body_id: string
           conference_id: string | null
@@ -8799,15 +8922,13 @@ export type Database = {
           person_profile_id: string | null
           role_key: string
           seat_key: string | null
-          access_from: string | null
-
-          access_until: string | null
-
           term_end: string | null
           term_start: string
           updated_at: string
         }
         Insert: {
+          access_from?: string | null
+          access_until?: string | null
           appointing_resolution?: string | null
           body_id: string
           conference_id?: string | null
@@ -8821,15 +8942,13 @@ export type Database = {
           person_profile_id?: string | null
           role_key: string
           seat_key?: string | null
-          access_from?: string | null
-
-          access_until?: string | null
-
           term_end?: string | null
           term_start: string
           updated_at?: string
         }
         Update: {
+          access_from?: string | null
+          access_until?: string | null
           appointing_resolution?: string | null
           body_id?: string
           conference_id?: string | null
@@ -8843,10 +8962,6 @@ export type Database = {
           person_profile_id?: string | null
           role_key?: string
           seat_key?: string | null
-          access_from?: string | null
-
-          access_until?: string | null
-
           term_end?: string | null
           term_start?: string
           updated_at?: string
@@ -16092,6 +16207,16 @@ export type Database = {
           previous_status: string
           previous_user_id: string
         }[]
+      }
+      change_registration_offer: {
+        Args: {
+          p_actor_id: string
+          p_conference_id: string
+          p_reason: string
+          p_seat_id: string
+          p_to_entity_id: string
+        }
+        Returns: Json
       }
       commit_swap_request: {
         Args: {

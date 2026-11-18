@@ -26,22 +26,33 @@
 // ─── Which meetings are members' meetings ────────────────────────────────────
 
 /**
- * Today the AGM is the only one. By-Law Part VII contemplates other meetings of
- * the members, and `meeting_type` is a free text column, so adding one is an
- * entry here plus a label below.
+ * The AGM is the standing one; `special_members` is a meeting of the members
+ * called for a particular purpose (By-Law Part VII S3).
  *
  * ⚠️ `"special"` is deliberately NOT in this list. It already means a special
  * meeting of the BOARD in `POST /api/admin/board/meetings`, and reading one
  * value as two different kinds of meeting is how the AGM got lost in the board
- * meeting list in the first place. A special members' meeting needs its own
- * value when it is first called.
+ * meeting list in the first place. That is why the members' one is spelled
+ * `special_members` rather than reusing it.
+ *
+ * ⛔ `board_meetings.meeting_type` is CHECK-constrained, not free text — adding
+ * a value here alone does nothing. The constraint allows
+ * ('regular','special','agm','special_members') as of the 2026-11-18 migration.
  */
-export const MEMBERS_MEETING_TYPES = ["agm"] as const;
+export const MEMBERS_MEETING_TYPES = ["agm", "special_members"] as const;
 
 export type MembersMeetingType = (typeof MEMBERS_MEETING_TYPES)[number];
 
 export const MEMBERS_MEETING_LABELS: Record<MembersMeetingType, string> = {
   agm: "Annual General Meeting",
+  special_members: "Special Meeting of the Members",
+};
+
+/** What the board is actually deciding when it calls one. */
+export const MEMBERS_MEETING_DESCRIPTIONS: Record<MembersMeetingType, string> = {
+  agm: "The standing annual meeting. Directors are elected at it, the financial statements are presented, and proxies are exercised.",
+  special_members:
+    "Called for a particular purpose — only the business in the notice may be transacted. No election is opened for it unless the board calls one.",
 };
 
 export function isMembersMeetingType(value: string): value is MembersMeetingType {
@@ -74,6 +85,33 @@ export function agmEventSlug(cycleYear: number): string {
  * three this is. Derived rather than stored so there is nothing to keep in
  * step.
  */
+/**
+ * The event slug for any members' meeting.
+ *
+ * ⛔ The AGM keeps `agmEventSlug` exactly — `sendAgmNotice` looks it up by that
+ * literal convention and the slug is inside notice already given. A special
+ * members' meeting cannot use a per-YEAR slug: two could be called in one year,
+ * and `events.slug` is unique. It is keyed by the DATE instead, which
+ * `board_meetings.meeting_date` already guarantees is unique.
+ */
+export function membersMeetingEventSlug(
+  type: MembersMeetingType,
+  meetingDate: string
+): string {
+  if (type === "agm") return agmEventSlug(Number(meetingDate.slice(0, 4)));
+  return `csc-special-members-meeting-${meetingDate}`;
+}
+
+/** What the meeting row is titled when it is created. */
+export function membersMeetingTitle(
+  type: MembersMeetingType,
+  meetingDate: string
+): string {
+  return type === "agm"
+    ? `CSC Annual General Meeting — ${meetingDate}`
+    : `CSC Special Meeting of the Members — ${meetingDate}`;
+}
+
 export type MeetingVenue = "virtual" | "in_person" | "hybrid";
 
 export const VENUE_LABELS: Record<MeetingVenue, string> = {
@@ -148,6 +186,15 @@ export interface MembersMeeting {
   documentCount: number;
   /** Proxies still standing — a revoked one is not representation. */
   proxyCount: number;
+  /**
+   * What has gone out for this meeting. ⛔ Lives on the meeting, not on the
+   * election — see `recordMembersMeetingSend`. A members' meeting with no
+   * election still has notice and a proxy deadline to discharge.
+   */
+  noticeSentAt: string | null;
+  proxyFormSentAt: string | null;
+  packageSentAt: string | null;
+  packageSendCount: number;
   event: MembersMeetingEvent | null;
   /** The election whose AGM is this meeting, matched on the date. */
   election: MembersMeetingElection | null;

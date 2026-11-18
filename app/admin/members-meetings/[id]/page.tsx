@@ -40,6 +40,7 @@ import EventFormClient from "@/components/admin/events/EventFormClient";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
+import RecordSendByHand from "@/components/admin/members-meetings/RecordSendByHand";
 import LocalDate from "@/components/ui/LocalDate";
 import { getMembersMeetingView } from "@/lib/elections/service";
 import { asOfDate, disableActions } from "@/lib/elections/preview";
@@ -141,7 +142,7 @@ export default async function MembersMeetingPage({
   const view = await getMembersMeetingView(id, asOf ?? undefined);
   if (!view) notFound();
 
-  const { meeting, election, noticeState, agmPackage, candidateCount } = view;
+  const { meeting, noticeState, agmPackage, candidateCount } = view;
   const fullEvent = view.event;
   const spine = asOf ? disableActions(view.spine) : view.spine;
 
@@ -180,12 +181,10 @@ export default async function MembersMeetingPage({
   const recipients = (key: string) =>
     messages?.find((m) => m.key === key)?.recipientCount ?? null;
 
-  const packageConfig = (election?.config ?? {}) as {
-    agmPackageSentAt?: string;
-    agmPackageSendCount?: number;
-  };
-  const agmPackageSentAt = packageConfig.agmPackageSentAt ?? null;
-  const agmPackageSendCount = packageConfig.agmPackageSendCount ?? 0;
+  // ⛔ From the MEETING, not the election's config — see
+  // `recordMembersMeetingSend`. The meeting reader carries its own send record.
+  const agmPackageSentAt = meeting.packageSentAt;
+  const agmPackageSendCount = meeting.packageSendCount;
 
   const back = `/admin/members-meetings/${id}`;
   const electionHref = electionSlug ? `/admin/elections/${electionSlug}` : undefined;
@@ -493,6 +492,9 @@ export default async function MembersMeetingPage({
       <MeetingDateForm
         meetingId={meeting.id}
         meetingDate={meeting.meetingDate}
+        meetingType={
+          isMembersMeetingType(meeting.meetingType) ? meeting.meetingType : "agm"
+        }
         electionLabel={
           meeting.election ? `${meeting.election.cycleYear} election` : null
         }
@@ -612,15 +614,21 @@ export default async function MembersMeetingPage({
             Notice of the meeting
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Notice is prepared once an election is opened for this meeting — the
-            21 to 35 day window under Part VII S4(b) is measured back from the
-            day it sits.
+            The 21 to 35 day window under Part VII S4(b) is measured back from the day this
+            meeting sits, and the spine above shows it. What is not built is the SENDER: notice
+            is composed from an election — the candidates, the committee&rsquo;s report — so for
+            a meeting without one it goes out by hand.
           </p>
+          <RecordSendByHand
+            meetingId={meeting.id}
+            noticeSentAt={meeting.noticeSentAt}
+            proxyFormSentAt={meeting.proxyFormSentAt}
+          />
           <Link
             href="/admin/elections"
             className="mt-3 inline-block text-xs text-[#163D6D] hover:underline"
           >
-            Open a cycle →
+            Open a cycle for this meeting →
           </Link>
         </section>
       )}

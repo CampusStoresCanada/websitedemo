@@ -25,10 +25,10 @@ import { updateEvent, transitionEventStatus } from "@/lib/actions/events";
 import { ensureAgmMeetingAndEvent } from "@/lib/elections/cycle";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import {
-  agmEventSlug,
   instantAtMeetingZone,
   isMembersMeetingType,
   meetingDateOf,
+  membersMeetingEventSlug,
   wallTimeAtMeetingZone,
 } from "@/lib/governance/members-meetings";
 import { getMembersMeeting } from "@/lib/governance/members-meetings-service";
@@ -70,9 +70,13 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
 
   const meetingId = String(formData.get("meetingId") ?? "").trim() || null;
   const meetingDate = String(formData.get("meetingDate") ?? "").trim();
+  const typeRaw = String(formData.get("meetingType") ?? "agm").trim();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate))
     return { ok: false, error: "Pick the date the meeting is held." };
+  if (!isMembersMeetingType(typeRaw))
+    return { ok: false, error: "Say what kind of meeting of the members this is." };
+  const meetingType = typeRaw;
 
   const db = createAdminClient();
 
@@ -176,6 +180,7 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
     agmDate: meetingDate,
     cycleYear,
     createdByProfileId: auth.userId,
+    meetingType,
   });
 
   if (!ensured.meetingId)
@@ -192,7 +197,7 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
   // sends — a drifted slug turns notice already given into a dead link, and
   // notice is discharged once. The audience is members, never public.
   const pinned = await updateEvent(ensured.eventId, {
-    slug: agmEventSlug(cycleYear),
+    slug: membersMeetingEventSlug(meetingType, meetingDate),
     audience_mode: "members",
   });
 
@@ -204,7 +209,7 @@ export async function scheduleMembersMeetingAction(formData: FormData): Promise<
     action: "members_meeting_scheduled",
     entityType: "board_meeting",
     entityId: ensured.meetingId,
-    details: { meetingDate },
+    details: { meetingDate, meetingType },
   });
 
   revalidate(ensured.meetingId);
@@ -241,6 +246,88 @@ export async function publishMembersMeetingEventAction(meetingId: string): Promi
     entityType: "board_meeting",
     entityId: meetingId,
     details: { eventId: meeting.event.id, slug: meeting.event.slug },
+  });
+
+  revalidate(meetingId);
+  return { ok: true, meetingId };
+}
+
+/**
+ * Record that notice, or the proxy form, went out for a meeting with no
+ * election.
+ *
+ * ⛔ Not a second notice system. It writes the same two columns
+ * `sendAgmNotice` and `sendProxyForm` write, read by the same spine. The
+ * senders build their content from an election — the candidates, the
+ * committee's report — so a special meeting of the members has no sender yet;
+ * whoever calls one emails the membership themselves and records the date here.
+ * Without this the columns would be unreachable for such a meeting and its
+ * progress list would say "notice not given" for ever, which is the gap this
+ * closes.
+ *
+ * ⚠️ A date a person supplies, not `now()`. Notice went out when it went out,
+ * and Part VII S4(b) is a window — recording the wrong day misstates whether
+ * the obligation was discharged in time.
+ */
+export async function recordMembersMeetingSendAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await requireBoardStaff();
+  if (!auth.ok) return auth;
+
+  const meetingId = String(formData.get("meetingId") ?? "").trim();
+  const noticeOn = String(formData.get("noticeGivenOn") ?? "").trim();
+  const proxyOn = String(formData.get("proxyFormSentOn") ?? "").trim();
+
+  if (!meetingId) return { ok: false, error: "Which meeting?" };
+  if (!noticeOn && !proxyOn)
+    return { ok: false, error: "Give the date notice was given, or the date the proxy form went out." };
+  for (const [label, value] of [
+    ["Notice", noticeOn],
+    ["The proxy form", proxyOn],
+  ] as const) {
+    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value))
+      return { ok: false, error: `${label}: give the date as YYYY-MM-DD.` };
+  }
+
+  const meeting = await getMembersMeeting(meetingId);
+  if (!meeting) return { ok: false, error: "That members' meeting no longer exists." };
+
+  // The election's own senders own these dates when there is an election —
+  // offering a second way to set them would be two writers for one fact.
+  if (meeting.election)
+    return {
+      ok: false,
+      error:
+        `The ${meeting.election.cycleYear} election is open for this meeting, so notice and the ` +
+        `proxy form are sent from the meeting's own panels and recorded automatically.`,
+    };
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (noticeOn > today || proxyOn > today)
+    return { ok: false, error: "That date is in the future — record it once it has gone out." };
+
+  const { recordMembersMeetingSend } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const result = await recordMembersMeetingSend(meetingId, {
+    // Stored as an instant at the start of that day, the same shape the senders
+    // write, so one reader serves both.
+    ...(noticeOn ? { noticeSentAt: `${noticeOn}T00:00:00.000Z` } : {}),
+    ...(proxyOn ? { proxyFormSentAt: `${proxyOn}T00:00:00.000Z` } : {}),
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  await logAuditEventSafe({
+    actorId: auth.userId,
+    action: "members_meeting.send_recorded_by_hand",
+    entityType: "board_meeting",
+    entityId: meetingId,
+    details: {
+      meetingDate: meeting.meetingDate,
+      noticeGivenOn: noticeOn || null,
+      proxyFormSentOn: proxyOn || null,
+    },
   });
 
   revalidate(meetingId);

@@ -377,7 +377,15 @@ export function buildMeetingSpine(
           ? "current"
           : "upcoming",
     detail: noticeSent
-      ? `Given ${noticeSent}.`
+      ? // ⚠️ Say so when it fell outside the window. The election's sender
+        // refuses outside it, so this could only ever read "Given" — but notice
+        // recorded BY HAND for a meeting with no election can carry any past
+        // date, and a bare "Given" would present defective notice as
+        // discharged. Part VII S4(b) is a window: too early is as defective as
+        // too late.
+        w && (noticeSent < w.opensOn || noticeSent > w.closesOn)
+        ? `Given ${noticeSent} — OUTSIDE the ${w.opensOn} to ${w.closesOn} window, so the meeting may not be properly called.`
+        : `Given ${noticeSent}.`
       : !facts.eventPublished
         ? "The meeting's event page is not published, so the link in the notice would show members nothing."
         : w

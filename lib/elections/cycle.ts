@@ -30,7 +30,12 @@ import { CSC_ELECTIONS_CONFIG, type ElectionsConfig } from "./config";
 import { resolveAgmDate, deriveSchedule, validateSchedule } from "./schedule";
 import { mintElectionActionItems, type MintedTask } from "./action-items";
 import { getElection, type Election } from "./service";
-import { agmEventSlug } from "@/lib/governance/members-meetings";
+import {
+  MEMBERS_MEETING_LABELS,
+  membersMeetingEventSlug,
+  membersMeetingTitle,
+  type MembersMeetingType,
+} from "@/lib/governance/members-meetings";
 
 /**
  * How far ahead of the nominations-open date a meeting can be and still be a
@@ -172,21 +177,32 @@ export interface AgmScheduleResult {
 }
 
 /**
- * Schedule the AGM, idempotently.
+ * Schedule a meeting of the members, idempotently.
  *
  * The event is a draft on purpose. A draft virtual event has no Google Calendar
  * entry — `updateEventStatus` mints one on the transition to published — so this
  * puts the date in the system without announcing it to the membership or
  * putting it in anyone's calendar. Publish when the details are settled.
+ *
+ * ⛔ One creator for every members' meeting, not two. `meetingType` defaults to
+ * "agm" so the election kickoff that has always called this is unchanged; the
+ * Members' Meetings screen passes "special_members" when the board calls one
+ * for a particular purpose. The title, the event slug and the page copy all
+ * derive from the type — see `membersMeetingEventSlug`, which keeps the AGM's
+ * load-bearing per-year slug and keys a special meeting by its date instead.
  */
 export async function ensureAgmMeetingAndEvent(input: {
   agmDate: string;
   cycleYear: number;
   createdByProfileId: string;
+  meetingType?: MembersMeetingType;
 }): Promise<AgmScheduleResult> {
   const db = createAdminClient();
-  const title = `CSC Annual General Meeting — ${input.agmDate}`;
-  const eventSlug = agmEventSlug(input.cycleYear);
+  const meetingType: MembersMeetingType = input.meetingType ?? "agm";
+  const isAgm = meetingType === "agm";
+  const title = membersMeetingTitle(meetingType, input.agmDate);
+  const eventSlug = membersMeetingEventSlug(meetingType, input.agmDate);
+  const kind = MEMBERS_MEETING_LABELS[meetingType];
 
   const { data: existingMeeting } = await db
     .from("board_meetings")
@@ -201,8 +217,8 @@ export async function ensureAgmMeetingAndEvent(input: {
   if (existingMeeting) {
     notes.push(
       `A meeting already existed on ${input.agmDate}` +
-        (existingMeeting.meeting_type !== "agm"
-          ? ` with type "${existingMeeting.meeting_type}" — left as it is; check it is the AGM.`
+        (existingMeeting.meeting_type !== meetingType
+          ? ` with type "${existingMeeting.meeting_type}" — left as it is; check it is the ${kind}.`
           : " — left as it is.")
     );
   } else {
@@ -210,7 +226,7 @@ export async function ensureAgmMeetingAndEvent(input: {
       .from("board_meetings")
       .insert({
         meeting_date: input.agmDate,
-        meeting_type: "agm",
+        meeting_type: meetingType,
         title,
         status: "upcoming",
         created_by: input.createdByProfileId,
@@ -218,10 +234,10 @@ export async function ensureAgmMeetingAndEvent(input: {
       .select("id")
       .single();
     if (error) {
-      notes.push(`The AGM meeting could not be created (${error.message}).`);
+      notes.push(`The ${kind} could not be created (${error.message}).`);
     } else {
       meetingId = meeting!.id as string;
-      notes.push("AGM board meeting created.");
+      notes.push(`${kind} created.`);
     }
   }
 
@@ -234,35 +250,47 @@ export async function ensureAgmMeetingAndEvent(input: {
 
     if (existingEvent) {
       eventId = existingEvent.id as string;
-      notes.push("An AGM event with this slug already existed and was reused.");
+      notes.push("An event with this slug already existed and was reused.");
     } else {
       const { data: event, error: eventError } = await db
         .from("events")
         .insert({
           slug: eventSlug,
-          title: `Campus Stores Canada Annual General Meeting — ${input.cycleYear}`,
+          title: isAgm
+            ? `Campus Stores Canada Annual General Meeting — ${input.cycleYear}`
+            : `Campus Stores Canada Special Meeting of the Members — ${input.agmDate}`,
           starts_at: `${input.agmDate}T16:00:00`,
           ends_at: `${input.agmDate}T18:00:00`,
           audience_mode: "members",
           is_virtual: true,
           status: "draft",
           created_by: input.createdByProfileId,
-          body_html:
-            `<p>The ${input.cycleYear} Annual General Meeting of Campus Stores Canada.</p>` +
-            `<p>Directors are elected at this meeting. If more nominees stand than there are seats, ` +
-            `ballots go to member institutions beforehand and the result is announced here; ` +
-            `otherwise the nominees are acclaimed.</p>` +
-            `<p>Each member institution is entitled to attend and to vote.</p>`,
+          body_html: isAgm
+            ? `<p>The ${input.cycleYear} Annual General Meeting of Campus Stores Canada.</p>` +
+              `<p>Directors are elected at this meeting. If more nominees stand than there are seats, ` +
+              `ballots go to member institutions beforehand and the result is announced here; ` +
+              `otherwise the nominees are acclaimed.</p>` +
+              `<p>Each member institution is entitled to attend and to vote.</p>`
+            : // ⚠️ Deliberately says what a special meeting IS rather than what
+              // its business is: only the business stated in the notice may be
+              // transacted, and nothing here knows what that is yet. Whoever
+              // calls it writes the purpose into the page.
+              `<p>A special meeting of the members of Campus Stores Canada.</p>` +
+              `<p>Only the business set out in the notice of this meeting may be transacted at it. ` +
+              `The notice will say what that business is.</p>` +
+              `<p>Each member institution is entitled to attend and to vote.</p>`,
         })
         .select("id")
         .single();
 
       if (eventError) {
         // Not fatal. The meeting and the election are the records that matter.
-        notes.push(`The AGM event could not be created (${eventError.message}).`);
+        notes.push(`The event could not be created (${eventError.message}).`);
       } else {
         eventId = event!.id as string;
-        notes.push("Members-only AGM event created as a DRAFT — publish it to announce the date and put it in the calendar.");
+        notes.push(
+          "Members-only event created as a DRAFT — publish it to announce the date and put it in the calendar."
+        );
       }
     }
 

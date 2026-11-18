@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  MEMBERS_MEETING_DESCRIPTIONS,
   MEMBERS_MEETING_LABELS,
   MEMBERS_MEETING_TYPES,
   agmEventSlug,
+  membersMeetingEventSlug,
+  membersMeetingTitle,
   instantAtMeetingZone,
   isMembersMeetingType,
   meetingDateOf,
@@ -25,6 +28,10 @@ function meeting(over: Partial<MembersMeeting> = {}): MembersMeeting {
     hasMinutes: false,
     documentCount: 0,
     proxyCount: 0,
+    noticeSentAt: null,
+    proxyFormSentAt: null,
+    packageSentAt: null,
+    packageSendCount: 0,
     event: {
       id: "e1",
       slug: "csc-annual-general-meeting-2027",
@@ -252,5 +259,56 @@ describe("instantAtMeetingZone", () => {
   it("refuses malformed input rather than guessing", () => {
     expect(instantAtMeetingZone("2027-1-21", "12:00")).toBeNull();
     expect(instantAtMeetingZone("2027-01-21", "noon")).toBeNull();
+  });
+});
+
+// ─── A special meeting OF THE MEMBERS ───────────────────────────────────────
+
+describe("special meetings of the members", () => {
+  it("is a members' meeting type", () => {
+    expect(isMembersMeetingType("special_members")).toBe(true);
+    expect(MEMBERS_MEETING_LABELS.special_members).toBe("Special Meeting of the Members");
+  });
+
+  it("⛔ keeps 'special' OUT — that is a special meeting of the BOARD", () => {
+    // Reading one value as two kinds of meeting is how the AGM got lost in the
+    // board meeting list. The members' one is spelled `special_members`.
+    expect(isMembersMeetingType("special")).toBe(false);
+    expect(MEMBERS_MEETING_TYPES).not.toContain("special");
+  });
+
+  it("gives the AGM its load-bearing per-year slug, unchanged", () => {
+    // sendAgmNotice looks the event up by this literal and puts it inside the
+    // notice it sends, so it must not drift.
+    expect(membersMeetingEventSlug("agm", "2027-01-21")).toBe(
+      "csc-annual-general-meeting-2027"
+    );
+    expect(membersMeetingEventSlug("agm", "2027-01-21")).toBe(agmEventSlug(2027));
+  });
+
+  it("keys a special meeting by DATE, because two could fall in one year", () => {
+    // `events.slug` is unique, so a per-year slug would collide on the second.
+    expect(membersMeetingEventSlug("special_members", "2027-06-04")).toBe(
+      "csc-special-members-meeting-2027-06-04"
+    );
+    expect(membersMeetingEventSlug("special_members", "2027-06-04")).not.toBe(
+      membersMeetingEventSlug("special_members", "2027-11-12")
+    );
+  });
+
+  it("titles each kind for what it is", () => {
+    expect(membersMeetingTitle("agm", "2027-01-21")).toBe(
+      "CSC Annual General Meeting — 2027-01-21"
+    );
+    expect(membersMeetingTitle("special_members", "2027-06-04")).toBe(
+      "CSC Special Meeting of the Members — 2027-06-04"
+    );
+  });
+
+  it("every type has a label and a description, or the picker renders a blank", () => {
+    for (const t of MEMBERS_MEETING_TYPES) {
+      expect(MEMBERS_MEETING_LABELS[t]?.length).toBeGreaterThan(0);
+      expect(MEMBERS_MEETING_DESCRIPTIONS[t]?.length).toBeGreaterThan(0);
+    }
   });
 });

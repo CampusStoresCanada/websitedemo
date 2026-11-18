@@ -66,6 +66,7 @@ import {
   membersMeetingGaps,
 } from "@/lib/governance/members-meetings";
 import type { Event } from "@/lib/events/types";
+import { logAuditEventSafe } from "@/lib/ops/audit";
 import {
   buildMeetingSpine,
   type ElectionFacts,
@@ -2817,10 +2818,13 @@ export async function getNoticeState(slug: string, onDate = today()): Promise<No
   const election = await getElection(slug);
   if (!election) return null;
 
-  const cfg = election.config as unknown as {
-    agmNoticeSentAt?: string;
-    proxyFormSentAt?: string;
-  };
+  // Read from the MEETING — see `recordMembersMeetingSend`.
+  const { getMembersMeetingSendRecord } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const sent = await getMembersMeetingSendRecord({
+    meetingDate: election.schedule.agmDate,
+  });
 
   const { verdicts } = await evaluateElectionEligibility(election.id);
   const eligible = verdicts.filter((v) => v.isEligible);
@@ -2877,8 +2881,8 @@ export async function getNoticeState(slug: string, onDate = today()): Promise<No
     window: resolveNoticeWindow(election.schedule.agmDate),
     notice: evaluateNoticeWindow(election.schedule.agmDate, onDate),
     proxy: evaluateProxyDeadline(election.schedule.agmDate, onDate),
-    noticeSentAt: cfg.agmNoticeSentAt ?? null,
-    proxySentAt: cfg.proxyFormSentAt ?? null,
+    noticeSentAt: sent?.noticeSentAt ?? null,
+    proxySentAt: sent?.proxyFormSentAt ?? null,
     recipients: eligible.length,
     unreachable,
     eventPage: {
@@ -2958,18 +2962,42 @@ export async function sendAgmNotice(
   // improperly called under Part VII S4.
   const proxyIncluded = Boolean(input.includeProxyForm && !state.proxySentAt);
   const now = new Date().toISOString();
-  await db
-    .from("elections")
-    .update({
-      config: {
-        ...(election.config as unknown as Record<string, unknown>),
-        agmNoticeSentAt: now,
-        agmNoticeSentBy: input.sentByProfileId,
-        ...(proxyIncluded ? { proxyFormSentAt: now } : {}),
-      },
-      updated_at: now,
-    })
-    .eq("id", election.id);
+
+  // ⛔ On the MEETING, not the election. Notice is the meeting's obligation and
+  // a members' meeting with no election has to be able to record it too.
+  const { getMembersMeetingSendRecord, recordMembersMeetingSend } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const sendRecord = await getMembersMeetingSendRecord({
+    meetingDate: election.schedule.agmDate,
+  });
+  if (!sendRecord)
+    return fail(
+      `There is no members' meeting recorded on ${election.schedule.agmDate}, so there is ` +
+        `nowhere to record that notice was given. Schedule the meeting first.`
+    );
+
+  const claimed = await recordMembersMeetingSend(sendRecord.meetingId, {
+    noticeSentAt: now,
+    ...(proxyIncluded ? { proxyFormSentAt: now } : {}),
+  });
+  if (!claimed.ok) return fail(`Notice was not sent: ${claimed.error}`);
+
+  // Provenance for a legal act. It used to be an unread `agmNoticeSentBy` key
+  // on the election's config; the audit log is where this codebase keeps who
+  // did what, and it can actually be queried.
+  await logAuditEventSafe({
+    actorId: input.sentByProfileId,
+    action: "members_meeting.notice_given",
+    entityType: "board_meeting",
+    entityId: sendRecord.meetingId,
+    details: {
+      meetingDate: election.schedule.agmDate,
+      electionSlug: election.slug,
+      proxyFormIncluded: proxyIncluded,
+      recipients: eligible.length,
+    },
+  });
 
   const outcomes = await notifyAgmNotice(election, eligible, {
     agmTime: input.agmTime,
@@ -3002,7 +3030,6 @@ export async function sendProxyForm(
   slug: string,
   sentByProfileId: string
 ): Promise<Result<{ sent: number; failed: number; problems: string[]; wasLate: boolean }>> {
-  const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return fail("That election does not exist.");
 
@@ -3019,17 +3046,31 @@ export async function sendProxyForm(
 
   // Claimed before the send — see sendCallForNominations.
   const now = new Date().toISOString();
-  await db
-    .from("elections")
-    .update({
-      config: {
-        ...(election.config as unknown as Record<string, unknown>),
-        proxyFormSentAt: now,
-        proxyFormSentBy: sentByProfileId,
-      },
-      updated_at: now,
-    })
-    .eq("id", election.id);
+
+  const { getMembersMeetingSendRecord, recordMembersMeetingSend } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const sendRecord = await getMembersMeetingSendRecord({
+    meetingDate: election.schedule.agmDate,
+  });
+  if (!sendRecord)
+    return fail(
+      `There is no members' meeting recorded on ${election.schedule.agmDate}, so there is ` +
+        `nowhere to record that the proxy form was sent. Schedule the meeting first.`
+    );
+
+  const claimed = await recordMembersMeetingSend(sendRecord.meetingId, {
+    proxyFormSentAt: now,
+  });
+  if (!claimed.ok) return fail(`The proxy form was not sent: ${claimed.error}`);
+
+  await logAuditEventSafe({
+    actorId: sentByProfileId,
+    action: "members_meeting.proxy_form_sent",
+    entityType: "board_meeting",
+    entityId: sendRecord.meetingId,
+    details: { meetingDate: election.schedule.agmDate, electionSlug: election.slug },
+  });
 
   const outcomes = await notifyProxyForm(election, eligible, {
     // The appointment page, not the events listing. The old URL pointed at
@@ -3726,14 +3767,15 @@ export async function getAgmPackageState(slug: string): Promise<
   if (!election) return null;
 
   const cfg = election.config as unknown as {
-    agmNoticeSentAt?: string;
-    proxyFormSentAt?: string;
     publicAccountant?: string;
   };
 
+  // ⛔ The send record comes from this same row, not from `election.config` —
+  // notice and the proxy form are the meeting's obligations. Widened the select
+  // rather than adding a query.
   const { data: meeting } = await db
     .from("board_meetings")
-    .select("id, agenda_html")
+    .select("id, agenda_html, notice_sent_at, proxy_form_sent_at")
     .eq("meeting_type", "agm")
     .eq("meeting_date", election.schedule.agmDate)
     .maybeSingle();
@@ -3776,7 +3818,7 @@ export async function getAgmPackageState(slug: string): Promise<
     // Matches getAgmScript: CSC's year ends 31 August before the AGM.
     fiscalYearEnd: `${election.cycleYear - 1}-08-31`,
     publicAccountant: cfg.publicAccountant ?? "MNP LLP",
-    noticeSentAt: cfg.agmNoticeSentAt ?? null,
+    noticeSentAt: (meeting?.notice_sent_at as string) ?? null,
     hasAgenda: Boolean(meeting?.agenda_html),
     priorAgmDate: (prior?.meeting_date as string) ?? null,
     hasPriorMinutes: Boolean(prior?.minutes_html),
@@ -3784,7 +3826,7 @@ export async function getAgmPackageState(slug: string): Promise<
     nominationsClosed,
     candidateCount: candidates.length,
     outcome: (election.outcome as "acclaimed" | "balloted" | null) ?? null,
-    proxyFormSentAt: cfg.proxyFormSentAt ?? null,
+    proxyFormSentAt: (meeting?.proxy_form_sent_at as string) ?? null,
   });
 
   return { ...pkg, meetingId: meeting?.id ?? null, financialDocumentId };
@@ -3911,11 +3953,9 @@ export async function getMemberAgmPackage(
     if (verdict?.reason) blocked = verdict.reason;
   }
 
-  const cfg = election.config as unknown as { agmNoticeSentAt?: string };
-
   const { data: meeting } = await db
     .from("board_meetings")
-    .select("id, agenda_html")
+    .select("id, agenda_html, notice_sent_at")
     .eq("meeting_type", "agm")
     .eq("meeting_date", election.schedule.agmDate)
     .maybeSingle();
@@ -3959,7 +3999,7 @@ export async function getMemberAgmPackage(
     election,
     organizationName,
     blocked,
-    noticeSentAt: cfg.agmNoticeSentAt ?? null,
+    noticeSentAt: (meeting?.notice_sent_at as string) ?? null,
     agendaHtml: (meeting?.agenda_html as string) ?? null,
     priorAgmDate: (prior?.meeting_date as string) ?? null,
     priorMinutesHtml: (prior?.minutes_html as string) ?? null,
@@ -3989,7 +4029,6 @@ export async function sendAgmPackage(
 ): Promise<
   Result<{ institutions: number; sent: number; failed: number; problems: string[]; outstanding: number }>
 > {
-  const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return fail("That election does not exist.");
 
@@ -4022,27 +4061,29 @@ export async function sendAgmPackage(
   const outcomes = await notifyAgmPackage(election, targets, { stillToCome });
   const summary = summarizeOutcomes(outcomes);
 
-  const { data: existing } = await db
-    .from("elections")
-    .select("config")
-    .eq("id", election.id)
-    .single();
-
-  await db
-    .from("elections")
-    .update({
-      config: JSON.parse(
-        JSON.stringify({
-          ...((existing?.config as Record<string, unknown>) ?? {}),
-          agmPackageSentAt: new Date().toISOString(),
-          agmPackageSentBy: sentByProfileId,
-          agmPackageSendCount:
-            (((existing?.config as Record<string, unknown>)?.agmPackageSendCount as number) ?? 0) + 1,
-        })
-      ) as Json,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", election.id);
+  const { getMembersMeetingSendRecord, recordMembersMeetingSend } = await import(
+    "@/lib/governance/members-meetings-service"
+  );
+  const sendRecord = await getMembersMeetingSendRecord({
+    meetingDate: election.schedule.agmDate,
+  });
+  if (sendRecord) {
+    await recordMembersMeetingSend(sendRecord.meetingId, {
+      packageSentAt: new Date().toISOString(),
+      bumpPackageCount: true,
+    });
+    await logAuditEventSafe({
+      actorId: sentByProfileId,
+      action: "members_meeting.package_sent",
+      entityType: "board_meeting",
+      entityId: sendRecord.meetingId,
+      details: {
+        meetingDate: election.schedule.agmDate,
+        electionSlug: election.slug,
+        institutions: targets.length,
+      },
+    });
+  }
 
   return {
     ok: true,
@@ -4957,12 +4998,6 @@ function meetingHalfOf(
   election: Election | null,
   notice: NoticeState | null
 ): Omit<TimelineFacts, "election"> {
-  const cfg = (election?.config ?? null) as {
-    agmNoticeSentAt?: string;
-    proxyFormSentAt?: string;
-    agmPackageSentAt?: string;
-  } | null;
-
   const window = notice
     ? {
         opensOn: notice.window.opensOn,
@@ -4989,9 +5024,11 @@ function meetingHalfOf(
     eventGaps: meeting ? membersMeetingGaps(meeting) : [],
     agendaDrafted: meeting?.hasAgenda ?? false,
     noticeWindow: window,
-    noticeSentAt: cfg?.agmNoticeSentAt ?? null,
-    proxySentAt: cfg?.proxyFormSentAt ?? null,
-    packageSentAt: cfg?.agmPackageSentAt ?? null,
+    // ⛔ From the MEETING. These are its obligations, and a members' meeting
+    // with no election still has to be able to record them.
+    noticeSentAt: meeting?.noticeSentAt ?? null,
+    proxySentAt: meeting?.proxyFormSentAt ?? null,
+    packageSentAt: meeting?.packageSentAt ?? null,
   };
 }
 

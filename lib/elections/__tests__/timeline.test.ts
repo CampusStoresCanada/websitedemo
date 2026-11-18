@@ -261,3 +261,35 @@ describe("the meeting's stages", () => {
     expect(t.find((s) => s.key === "agenda")?.state).toBe("upcoming");
   });
 });
+
+describe("notice recorded outside its window", () => {
+  // The election's sender refuses outside the window, so this could only ever
+  // read "Given". Notice recorded BY HAND for a members' meeting with no
+  // election can carry any past date, and presenting that as discharged would
+  // hide defective notice.
+  it("says so when notice was given too early", () => {
+    const t = buildMeetingSpine(
+      facts({ noticeSentAt: "2026-11-01T00:00:00Z" }), // window opens 2026-12-17
+      "2026-12-20"
+    );
+    expect(t.find((s) => s.key === "agm_notice")?.detail).toMatch(/OUTSIDE/);
+  });
+
+  it("says so when notice was given too late", () => {
+    const t = buildMeetingSpine(
+      facts({ noticeSentAt: "2027-01-10T00:00:00Z" }), // window closed 2026-12-31
+      "2027-01-12"
+    );
+    expect(t.find((s) => s.key === "agm_notice")?.detail).toMatch(/OUTSIDE/);
+  });
+
+  it("reads plainly when it was given inside the window", () => {
+    const t = buildMeetingSpine(
+      facts({ noticeSentAt: "2026-12-20T00:00:00Z" }),
+      "2026-12-22"
+    );
+    const d = t.find((s) => s.key === "agm_notice")?.detail;
+    expect(d).toBe("Given 2026-12-20.");
+    expect(d).not.toMatch(/OUTSIDE/);
+  });
+});

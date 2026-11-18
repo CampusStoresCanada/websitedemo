@@ -27,12 +27,30 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { scheduleMembersMeetingAction } from "@/lib/actions/members-meetings";
+import {
+  MEMBERS_MEETING_DESCRIPTIONS,
+  MEMBERS_MEETING_LABELS,
+  MEMBERS_MEETING_TYPES,
+  type MembersMeetingType,
+} from "@/lib/governance/members-meetings";
 
 export interface MeetingDateFormProps {
   meetingId: string | null;
   meetingDate: string;
   /** Set when an election is already built on this date — the date locks. */
   electionLabel: string | null;
+  meetingType: MembersMeetingType;
+  /**
+   * Whether the KIND can still be chosen. Only when calling a new one: the type
+   * decides the event's slug, and a meeting already has an event page at it.
+   */
+  allowTypeChange?: boolean;
+  /**
+   * The date the by-law rule puts the next AGM on, offered back when the kind
+   * is switched to "agm" — a special meeting's date is the board's to pick, an
+   * AGM's is derived.
+   */
+  agmSuggestion?: string;
 }
 
 export default function MeetingDateForm(props: MeetingDateFormProps) {
@@ -41,9 +59,11 @@ export default function MeetingDateForm(props: MeetingDateFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [date, setDate] = useState(props.meetingDate);
+  const [type, setType] = useState<MembersMeetingType>(props.meetingType);
 
   const locked = !!props.electionLabel;
   const isNew = !props.meetingId;
+  const canChooseType = !!props.allowTypeChange && isNew;
 
   function save() {
     setError(null);
@@ -53,6 +73,7 @@ export default function MeetingDateForm(props: MeetingDateFormProps) {
     const fd = new FormData();
     if (props.meetingId) fd.set("meetingId", props.meetingId);
     fd.set("meetingDate", date);
+    fd.set("meetingType", type);
 
     start(async () => {
       const r = await scheduleMembersMeetingAction(fd);
@@ -66,12 +87,46 @@ export default function MeetingDateForm(props: MeetingDateFormProps) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
       <h2 className="text-sm font-semibold text-gray-900">
-        {isNew ? "When does it sit?" : "When it sits"}
+        {isNew ? "What kind, and when?" : "When it sits"}
       </h2>
       <p className="mt-1 text-xs text-gray-500">
-        By-Law Part VII. The election&apos;s nomination, ballot and notice windows are all
-        measured back from this day.
+        By-Law Part VII. The notice window, the proxy deadline and any election&apos;s
+        nomination and ballot windows are all measured back from this day.
       </p>
+
+      {canChooseType && (
+        <fieldset className="mt-3 space-y-2">
+          <legend className="text-xs font-medium text-gray-700">Kind of meeting</legend>
+          {MEMBERS_MEETING_TYPES.map((t) => (
+            <label key={t} className="flex items-start gap-2">
+              <input
+                type="radio"
+                name="kind"
+                value={t}
+                checked={type === t}
+                disabled={pending}
+                onChange={() => {
+                  setType(t);
+                  // An AGM's date comes from the rule; a special meeting's is
+                  // the board's to pick, so clear the suggestion rather than
+                  // leaving an unrelated date sitting in the field.
+                  if (t === "agm") setDate(props.agmSuggestion ?? "");
+                  else if (date === props.agmSuggestion) setDate("");
+                }}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-900">
+                  {MEMBERS_MEETING_LABELS[t]}
+                </span>
+                <span className="block text-xs text-gray-500">
+                  {MEMBERS_MEETING_DESCRIPTIONS[t]}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <div>
@@ -97,7 +152,11 @@ export default function MeetingDateForm(props: MeetingDateFormProps) {
             disabled={pending}
             className="rounded-md bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#122f54] disabled:opacity-50"
           >
-            {pending ? "Saving…" : isNew ? "Call the meeting" : "Move the meeting"}
+            {pending
+              ? "Saving…"
+              : isNew
+                ? `Call the ${MEMBERS_MEETING_LABELS[type].toLowerCase()}`
+                : "Move the meeting"}
           </button>
         )}
       </div>

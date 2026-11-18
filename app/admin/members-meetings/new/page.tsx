@@ -55,7 +55,7 @@ export default async function NewMembersMeetingPage() {
     <div className="space-y-6">
       <AdminPageHeader
         title="Schedule a members' meeting"
-        description="By-Law Part VII. Settle the day it sits; its event page is created as a draft, and the hour and the place are set on it next."
+        description="By-Law Part VII. Choose the kind and settle the day it sits; its event page is created as a draft, and the hour and the place are set on it next."
         actions={
           <Link
             href="/admin/members-meetings"
@@ -66,12 +66,25 @@ export default async function NewMembersMeetingPage() {
         }
       />
 
-      <MeetingDateForm meetingId={null} meetingDate={suggested} electionLabel={null} />
+      <MeetingDateForm
+        meetingId={null}
+        meetingDate={suggested}
+        meetingType="agm"
+        allowTypeChange
+        agmSuggestion={suggested}
+        electionLabel={null}
+      />
 
       <p className="text-xs text-gray-500">
         {suggested
-          ? `The date is prefilled with the annual general meeting the by-law rule puts in ${suggested.slice(0, 4)}. Change it if the board has settled on another day.`
-          : "Every annual general meeting the rule offers is already scheduled. Pick a date to call another meeting of the members."}
+          ? `For an annual general meeting the date is prefilled with the one the by-law rule puts in ${suggested.slice(0, 4)}; change it if the board has settled on another day. A special meeting's date is the board's to pick.`
+          : "Every annual general meeting the rule offers is already scheduled. A special meeting of the members can be called on any free date."}
+      </p>
+
+      <p className="text-xs text-gray-500">
+        ⚠️ One meeting per date: <code>board_meetings.meeting_date</code> is unique, so a
+        members&apos; meeting cannot share a day with a board meeting. If the date you want is
+        taken, the save will say which meeting holds it.
       </p>
     </div>
   );
