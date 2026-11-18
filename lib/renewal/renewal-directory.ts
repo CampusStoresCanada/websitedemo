@@ -38,6 +38,9 @@ export interface RenewalDirectoryRow {
    *  conference_orders id that included a bundled membership_renewal
    *  purchase, for a Stripe receipt link instead of an invoice PDF. */
   receiptOrderId: string | null;
+  /** What this org still owes on the site: the total, tax included, of every
+   *  invoice of any kind that has been issued and not paid. 0 when nothing is. */
+  balanceCents: number;
   /** Inclusive last day renewal notifications are suppressed for this org,
    *  or null when the chase is running normally. */
   renewalPausedUntil: string | null;
@@ -98,6 +101,9 @@ async function findBundledRenewalOrderIds(
   return receiptOrderByOrg;
 }
 
+/** Issued and not settled: the invoice is asking for money right now. */
+const OWING_STATUSES = ["invoiced", "overdue", "failed"];
+
 export interface RenewalDirectory {
   rows: RenewalDirectoryRow[];
   /** Configured membership programs (lib/policy/engine.ts's getProgramsConfig)
@@ -149,7 +155,7 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
   const orgIds = orgList.map((o) => o.id);
   if (orgIds.length === 0) return { rows: [], programs };
 
-  const [{ data: contactRows }, { data: invoiceRows }] = await Promise.all([
+  const [{ data: contactRows }, { data: invoiceRows }, { data: owingRows, error: owingError }] = await Promise.all([
     db
       .from("contacts")
       .select("organization_id, name, email, work_email, circle_id, is_primary, created_at")
@@ -161,7 +167,16 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       .in("organization_id", orgIds)
       .in("type", ["membership", "partnership"])
       .order("created_at", { ascending: false }),
+    // Not narrowed to these orgs: unpaid invoices are few, and a long id list
+    // in the URL is what PostgREST rejects.
+    db.from("invoices").select("organization_id, total_cents").in("status", OWING_STATUSES),
   ]);
+  if (owingError) throw new Error(`Could not read unpaid invoices: ${owingError.message}`);
+  const balanceByOrg = new Map<string, number>();
+  for (const inv of owingRows ?? []) {
+    if (!inv.organization_id) continue;
+    balanceByOrg.set(inv.organization_id, (balanceByOrg.get(inv.organization_id) ?? 0) + inv.total_cents);
+  }
 
   // Primary contact per org — same preference order as resolveOrgPrimaryContactEmail
   // (lib/supabase/user-lookup.ts): is_primary first, then oldest.
@@ -248,6 +263,7 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       invoiceStatus: invoice?.status ?? null,
       invoicePdfUrl: invoice?.invoice_pdf_url ?? null,
       receiptOrderId: invoice ? null : (receiptOrderByOrg.get(o.id) ?? null),
+      balanceCents: balanceByOrg.get(o.id) ?? 0,
       renewalPausedUntil: o.renewal_notifications_paused_until,
       renewalPauseReason: o.renewal_pause_reason,
       renewalChaseable: isInRenewalChase(

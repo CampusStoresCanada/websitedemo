@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { RenewalDirectoryOrgType, RenewalDirectoryRow } from "@/lib/renewal/renewal-directory";
 import type { MembershipProgramDef } from "@/lib/policy/types";
+import { formatCents } from "@/lib/utils";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
 import { reviveMembership, reviveMembershipToGrace } from "@/lib/actions/renewal";
@@ -479,6 +480,15 @@ function DirectoryRow({
           style={{ color: row.renewalAmountCents == null ? "#b6b6b6" : INK }}
         >
           {formatDollars(row.renewalAmountCents)}
+          {row.balanceCents > 0 && (
+            <div
+              className="text-[10.5px] font-semibold whitespace-nowrap -mx-4"
+              style={{ color: RED }}
+              title={`${formatCents(row.balanceCents)} issued and not paid, tax included`}
+            >
+              owes {formatCents(row.balanceCents)}
+            </div>
+          )}
         </div>
 
         <InvoiceButton row={row} />
@@ -529,6 +539,7 @@ export function RenewalsDirectory({
   );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
+  const [withBalance, setWithBalance] = useState(false);
   const [sort, setSort] = useState<SortKey>("name");
   const [refineOpen, setRefineOpen] = useState(false);
   const [dm, setDm] = useState<{ roomUuid: string; label: string } | null>(null);
@@ -563,6 +574,8 @@ export function RenewalsDirectory({
       list = list.filter((r) => r.membershipStatus && statusFilter.has(r.membershipStatus));
     }
 
+    if (withBalance) list = list.filter((r) => r.balanceCents > 0);
+
     list = [...list].sort((a, b) => {
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "status") return (a.membershipStatus ?? "").localeCompare(b.membershipStatus ?? "");
@@ -572,7 +585,7 @@ export function RenewalsDirectory({
     });
 
     return list;
-  }, [rows, activeType, search, statusFilter, sort]);
+  }, [rows, activeType, search, statusFilter, withBalance, sort]);
 
 
   function toggleStatus(status: string) {
@@ -664,6 +677,13 @@ export function RenewalsDirectory({
                   </label>
                 ))}
               </div>
+              <div className="p-3 border-b" style={{ borderColor: "rgba(22,52,90,0.08)" }}>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Billing</div>
+                <label className="flex items-center gap-1.5 text-[12.5px] py-1 cursor-pointer" style={{ color: INK }}>
+                  <input type="checkbox" checked={withBalance} onChange={(e) => setWithBalance(e.target.checked)} />
+                  With a balance
+                </label>
+              </div>
               <div className="p-3">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Sort by</div>
                 <select
@@ -682,8 +702,26 @@ export function RenewalsDirectory({
           )}
         </div>
 
+        {withBalance && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setWithBalance(false);
+            }}
+            className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-full text-white"
+            style={{ background: INK }}
+            title="Show everyone again"
+          >
+            With a balance ×
+          </button>
+        )}
+
         <span className="ml-auto text-[11.5px] text-gray-500">
           {visible.length} result{visible.length !== 1 ? "s" : ""}
+          {withBalance
+            ? `, owing ${formatCents(visible.reduce((sum, r) => sum + r.balanceCents, 0))}`
+            : ""}
         </span>
       </div>
 
