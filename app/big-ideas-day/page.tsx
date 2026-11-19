@@ -7,6 +7,8 @@ import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import { loadTopicBoard } from "@/lib/actions/conference-topics";
 import OfferCard from "@/components/conference/OfferCard";
 import TopicBoard from "@/components/conference/TopicBoard";
+import { getNamedProspectOffers } from "@/lib/actions/prospective-booth-checkout";
+import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
 /**
  * Big Ideas Day — one public page that changes with who is reading it.
@@ -132,6 +134,22 @@ export default async function BigIdeasDayPage({
 
   const signInHref = `/login?next=${encodeURIComponent("/big-ideas-day")}`;
 
+  /*
+    A company we have on file but that has not joined yet, reading its own link
+    (/big-ideas-day?org=<its id>). It has no login, so the price cannot wait for
+    one: the link is what says who is asking. It buys its rate and the
+    partnership in one checkout, the same pay-first flow /exhibit and
+    /conference-in-a-box use, and the board reviews the application afterwards.
+
+    Null for anyone not named on a Big Ideas Day rate, so a guessed or stale
+    link falls through to the ordinary signed-out page.
+  */
+  const namedProspect =
+    !auth && requested
+      ? await getNamedProspectOffers({ conferenceId: conference.id, prospectOrganizationId: requested })
+      : null;
+  const prospectOffers = (namedProspect?.offers ?? []).filter((o) => /^Big Ideas Day/.test(o.name));
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-12">
       <p className="text-xs font-semibold uppercase tracking-wide text-[#EE2A2E]">
@@ -186,7 +204,35 @@ export default async function BigIdeasDayPage({
         amounts for different partners and nothing at all for members, so any
         number shown here would be wrong for most readers.
       */}
-      {!auth ? (
+      {!auth && namedProspect && prospectOffers.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold text-gray-900">Taking part</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            You would be there as a <strong>participant, not an exhibitor</strong>. Nothing
+            to set up, no stand to manage. This is your rate as {namedProspect.prospect.name},
+            and your CSC partnership is charged in the same checkout.
+          </p>
+          <ExhibitCheckoutForm
+            conferenceId={conference.id}
+            conferenceYear={conference.year}
+            conferenceEdition={conference.edition_code}
+            booths={prospectOffers}
+            label="What you're buying"
+            namePrefix=""
+            prospect={namedProspect.prospect}
+            successUrl={`/conference/${conference.year}/${conference.edition_code}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`}
+            cancelUrl={`/big-ideas-day?org=${namedProspect.prospect.id}`}
+            footnote="Your card is charged for Big Ideas Day plus CSC partnership dues. This does not guarantee approval. The CSC board reviews every new partner application after payment."
+          />
+          <p className="mt-3 text-sm text-gray-600">
+            Already have a CSC login?{" "}
+            <Link href={signInHref} className="font-medium text-[#EE2A2E] hover:underline">
+              Sign in
+            </Link>{" "}
+            and buy from your account instead.
+          </p>
+        </section>
+      ) : !auth ? (
         <section className="mt-10 rounded-xl border border-gray-200 bg-gray-50 p-6">
           <h2 className="text-lg font-semibold text-gray-900">Taking part</h2>
           <p className="mt-1 text-sm text-gray-600">

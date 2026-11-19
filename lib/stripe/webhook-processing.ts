@@ -797,7 +797,11 @@ async function handleCheckoutSessionCompleted(
     }
     if (boothPayment?.id) {
       await enqueueQBMiscReceipt("prospective_booth", boothPayment.id);
-      await triggerProspectiveBoothPaymentConfirmation({ db, paymentId: boothPayment.id });
+      await triggerProspectiveBoothPaymentConfirmation({
+        db,
+        paymentId: boothPayment.id,
+        chargedCents: session.amount_total,
+      });
     }
     return { conferenceOrderId: null };
   }

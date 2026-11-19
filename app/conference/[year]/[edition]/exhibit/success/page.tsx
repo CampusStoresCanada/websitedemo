@@ -21,21 +21,26 @@ export default async function ExhibitSuccessPage({
   const db = createAdminClient();
   const { data: payment } = await db
     .from("prospective_booth_payments")
-    .select("id, company_name, email, amount_cents, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name)")
+    .select("id, company_name, email, amount_cents, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name, kind)")
     .eq("stripe_checkout_session_id", sessionId)
     .maybeSingle();
 
   if (!payment) notFound();
 
-  const boothName = (Array.isArray(payment.booth) ? payment.booth[0] : payment.booth)?.name ?? "";
+  const bought = Array.isArray(payment.booth) ? payment.booth[0] : payment.booth;
+  // Not everything sold this way is a booth: Conference in a Box and the Big
+  // Ideas Day rates come through here too, and neither is "reserved".
+  const boughtLine =
+    bought?.kind === "booth"
+      ? `booth ${bought.name} is reserved and your membership deposit is paid`
+      : `${bought?.name ?? "your purchase"} and your membership deposit are paid`;
   const applyHref = `/apply/partner?paymentId=${payment.id}&companyName=${encodeURIComponent(payment.company_name)}&email=${encodeURIComponent(payment.email)}`;
 
   return (
     <main className="max-w-xl mx-auto px-4 py-16 text-center">
       <h1 className="text-2xl font-semibold text-gray-900">Payment received</h1>
       <p className="mt-3 text-gray-600">
-        Thanks, {payment.company_name} — booth {boothName} is reserved and your
-        membership deposit is paid.
+        Thanks, {payment.company_name} — {boughtLine}.
       </p>
       <p className="mt-3 text-sm text-gray-600">
         This is not final yet. The CSC board still needs to review and approve your

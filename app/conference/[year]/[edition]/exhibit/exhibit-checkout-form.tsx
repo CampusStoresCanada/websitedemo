@@ -25,6 +25,7 @@ export default function ExhibitCheckoutForm({
   successUrl,
   cancelUrl,
   footnote,
+  prospect,
 }: {
   conferenceId: string;
   conferenceYear: number;
@@ -40,8 +41,13 @@ export default function ExhibitCheckoutForm({
   cancelUrl?: string;
   /** Replaces the "charged for the booth plus a partnership deposit" line. */
   footnote?: string;
+  /**
+   * A company we already have on file, reached by its own link. Its name is
+   * shown rather than asked for, and its id lets a named-buyer offer through.
+   */
+  prospect?: { id: string; name: string };
 }) {
-  const [companyName, setCompanyName] = useState("");
+  const [companyName, setCompanyName] = useState(prospect?.name ?? "");
   const [email, setEmail] = useState("");
   const [province, setProvince] = useState("");
   const [boothId, setBoothId] = useState(booths[0]?.id ?? "");
@@ -54,6 +60,7 @@ export default function ExhibitCheckoutForm({
     setError(null);
     startTransition(async () => {
       const baseUrl = window.location.origin;
+      const absolute = (url: string) => (url.startsWith("/") ? `${baseUrl}${url}` : url);
       const conferencePath = `/conference/${conferenceYear}/${conferenceEdition}`;
       const result = await createProspectiveBoothCheckout({
         conferenceId,
@@ -61,9 +68,14 @@ export default function ExhibitCheckoutForm({
         companyName,
         email,
         province,
-        successUrl:
-          successUrl ?? `${baseUrl}${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: cancelUrl ?? `${baseUrl}${conferencePath}/exhibit`,
+        // Stripe refuses a relative return URL, so a path is made absolute here.
+        // Plain concatenation: `new URL()` would encode the braces Stripe
+        // needs to see in {CHECKOUT_SESSION_ID}.
+        successUrl: absolute(
+          successUrl ?? `${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`
+        ),
+        cancelUrl: absolute(cancelUrl ?? `${conferencePath}/exhibit`),
+        ...(prospect ? { prospectOrganizationId: prospect.id } : {}),
       });
       if (!result.success) {
         setError(result.error);
@@ -78,15 +90,22 @@ export default function ExhibitCheckoutForm({
 
   return (
     <form onSubmit={submit} className="mt-8 space-y-4 rounded-xl border border-gray-200 bg-white p-6">
-      <label className="block">
-        <span className="text-sm font-medium text-gray-700">Company name</span>
-        <input
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-          required
-          className={`mt-1 ${inputClass}`}
-        />
-      </label>
+      {prospect ? (
+        <div className="block">
+          <span className="text-sm font-medium text-gray-700">Company name</span>
+          <p className="mt-1 text-sm text-gray-900">{prospect.name}</p>
+        </div>
+      ) : (
+        <label className="block">
+          <span className="text-sm font-medium text-gray-700">Company name</span>
+          <input
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            required
+            className={`mt-1 ${inputClass}`}
+          />
+        </label>
+      )}
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Contact email</span>
         <input

@@ -12,6 +12,7 @@ import {
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { PROVINCES } from "@/lib/constants/provinces";
 import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
+import { directPurchaseAllowed, isDirectPurchaseOnly } from "@/lib/conference/entity-pricing";
 
 /**
  * "Pay first, apply second" for a non-member buying a booth — there is
@@ -52,6 +53,67 @@ async function priceProspectiveMembershipCents(conferenceEndDate: string): Promi
   return proratedStubCents + perCycleCents * (cyclesBridged - 1);
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type NamedProspect = { id: string; name: string; type: string | null };
+
+/** The prospect record a per-company link points at, or null. */
+async function loadProspect(
+  db: ReturnType<typeof createAdminClient>,
+  prospectOrganizationId: string | null | undefined
+): Promise<NamedProspect | null> {
+  if (!prospectOrganizationId || !UUID.test(prospectOrganizationId)) return null;
+  const { data } = await db
+    .from("organizations")
+    .select("id, name, type")
+    .eq("id", prospectOrganizationId)
+    // A partner that has already joined buys from its cart, signed in.
+    .eq("type", "Prospective Partner")
+    .is("archived_at", null)
+    .maybeSingle();
+  return data ?? null;
+}
+
+/**
+ * The named-buyer offers a prospect can buy pay-first, for a per-company link.
+ *
+ * Some rates are sold only to named buyers and kept off the storefront (the
+ * Big Ideas Day rates). A company we have on file as a prospect can be named on
+ * one before it has joined; this is what its link shows. Public on purpose:
+ * the reader has no account yet, and the id in the link is the only thing that
+ * says who they are. Returns null for anything that is not a prospect named on
+ * at least one offer, so a guessed or stale link shows the ordinary page.
+ *
+ * Uses the same predicate createProspectiveBoothCheckout refuses with, so what
+ * the link shows and what the checkout sells cannot drift apart.
+ */
+export async function getNamedProspectOffers(params: {
+  conferenceId: string;
+  prospectOrganizationId: string;
+}): Promise<{ prospect: { id: string; name: string }; offers: Array<{ id: string; name: string; priceCents: number }> } | null> {
+  const db = createAdminClient();
+  const prospect = await loadProspect(db, params.prospectOrganizationId);
+  if (!prospect) return null;
+
+  const { data: rows } = await db
+    .from("conference_entities")
+    .select("id, name, price_cents, attributes")
+    .eq("conference_id", params.conferenceId)
+    .eq("is_for_sale", false)
+    .contains("attributes", { direct_purchase_only: true })
+    .order("price_cents");
+
+  const offers = (rows ?? [])
+    .filter((row) => {
+      const attributes = (row.attributes as Record<string, unknown> | null) ?? {};
+      return isDirectPurchaseOnly(attributes) && directPurchaseAllowed(attributes, prospect, { payingToJoin: true });
+    })
+    .map((row) => ({ id: row.id, name: row.name, priceCents: row.price_cents ?? 0 }));
+
+  if (offers.length === 0) return null;
+  return { prospect: { id: prospect.id, name: prospect.name }, offers };
+}
+
 export async function createProspectiveBoothCheckout(params: {
   conferenceId: string;
   boothEntityId: string;
@@ -60,11 +122,16 @@ export async function createProspectiveBoothCheckout(params: {
   province: string;
   successUrl: string;
   cancelUrl: string;
+  /**
+   * Set by a per-company link: the prospect record this buyer is. It is what
+   * lets a named-buyer offer through, and the company name is then taken from
+   * the record rather than the form.
+   */
+  prospectOrganizationId?: string;
 }): Promise<Result<{ checkoutUrl: string }>> {
-  const companyName = params.companyName.trim();
+  const typedCompanyName = params.companyName.trim();
   const email = params.email.trim().toLowerCase();
   const province = params.province.trim();
-  if (!companyName) return { success: false, error: "Company name is required." };
   if (!email || !email.includes("@")) return { success: false, error: "A valid email is required." };
   if (province !== "Out of Canada" && !PROVINCES.includes(province as (typeof PROVINCES)[number])) {
     return { success: false, error: "A valid province is required." };
@@ -75,7 +142,7 @@ export async function createProspectiveBoothCheckout(params: {
   const [{ data: booth }, { data: conference }] = await Promise.all([
     db
       .from("conference_entities")
-      .select("id, name, kind, is_for_sale, price_cents")
+      .select("id, name, kind, is_for_sale, price_cents, attributes")
       .eq("id", params.boothEntityId)
       .eq("conference_id", params.conferenceId)
       .maybeSingle(),
@@ -86,9 +153,23 @@ export async function createProspectiveBoothCheckout(params: {
       .maybeSingle(),
   ]);
 
-  if (!booth || !booth.is_for_sale) {
-    return { success: false, error: "That isn't available to buy." };
+  if (!booth) return { success: false, error: "That isn't available to buy." };
+
+  // An offer kept off the storefront is sold here only to a prospect it names.
+  // Same predicate getNamedProspectOffers shows it with.
+  const prospect = await loadProspect(db, params.prospectOrganizationId);
+  if (!booth.is_for_sale) {
+    const attributes = (booth.attributes as Record<string, unknown> | null) ?? {};
+    const named =
+      isDirectPurchaseOnly(attributes) && directPurchaseAllowed(attributes, prospect, { payingToJoin: true });
+    if (!named) return { success: false, error: "That isn't available to buy." };
   }
+
+  // The name on file, not the one typed: approval matches this payment's
+  // application back to the prospect record by company name, so a different
+  // spelling would start a second organization beside it.
+  const companyName = prospect?.name ?? typedCompanyName;
+  if (!companyName) return { success: false, error: "Company name is required." };
   const isBooth = booth.kind === "booth";
   if (!conference?.end_date) {
     return { success: false, error: "Conference not found." };
@@ -172,6 +253,7 @@ export async function createProspectiveBoothCheckout(params: {
       company_name: companyName,
       email,
       province,
+      ...(prospect ? { prospect_organization_id: prospect.id } : {}),
     },
   });
 
