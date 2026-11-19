@@ -548,6 +548,35 @@ export async function findVotesToRemind(): Promise<BoardVoteRow[]> {
   );
 }
 
+/**
+ * Put an application back in front of the board after its vote lapsed.
+ *
+ * A lapse is not a decision, so the application is still pending, but
+ * findApplicationsNeedingVote skips anything that has ever had a vote: Butler
+ * will not ask the board twice on its own. This is the deliberate second ask,
+ * pressed by staff. Only a lapse qualifies. A rejection is the board's answer,
+ * a withdrawal was a duplicate, a carried vote is waiting on approval, and an
+ * open vote is still running.
+ */
+export async function callVoteAgain(
+  applicationId: string
+): Promise<{ ok: true; voteId: string; postUrl: string | null } | { ok: false; error: string }> {
+  const db = createAdminClient();
+  const { data: latest } = await db
+    .from("board_votes")
+    .select("id, status")
+    .eq("application_id", applicationId)
+    .order("opened_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!latest) return { ok: false, error: "This application has not had a board vote." };
+  if (latest.status !== "lapsed") {
+    return { ok: false, error: `Only a vote that closed with no decision can be called again. This one is ${latest.status}.` };
+  }
+  return openVoteForApplication(applicationId);
+}
+
 /** Partner applications awaiting review with no vote yet. */
 export async function findApplicationsNeedingVote(): Promise<string[]> {
   const db = createAdminClient();

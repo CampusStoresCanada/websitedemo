@@ -6,6 +6,11 @@
  * anything itself.
  */
 
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { callBoardVoteAgain } from "@/lib/actions/applications";
 import { formatTally, type Tally, type VoteStatus } from "@/lib/board/vote-tally";
 import { formatCloseLabel } from "@/lib/board/vote-schedule";
 
@@ -65,11 +70,68 @@ export function BoardVoteStatus({ vote }: { vote: BoardVoteSummary }) {
       )}
 
       {vote.status === "lapsed" && (
-        <p className="mt-2 text-xs">
-          Voting closed without reaching the threshold either way. This carries to the next board
-          meeting; it is not a decline.
-        </p>
+        <>
+          <p className="mt-2 text-xs">
+            Voting closed without reaching the threshold either way. This carries to the next board
+            meeting; it is not a decline.
+          </p>
+          <CallVoteAgainButton applicationId={vote.applicationId} />
+        </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Butler never asks the board twice on its own, so after a lapse this is the
+ * only way back in front of them. It posts to the board, so it confirms first.
+ */
+function CallVoteAgainButton({ applicationId }: { applicationId: string }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function call() {
+    setBusy(true);
+    setError(null);
+    const result = await callBoardVoteAgain(applicationId);
+    setBusy(false);
+    if (!result.success) {
+      setError(result.error ?? "Could not open the vote.");
+      return;
+    }
+    setConfirming(false);
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-2 text-xs">
+      {confirming ? (
+        <span className="flex flex-wrap items-center gap-2">
+          <span>This posts a new vote to the board.</span>
+          <button
+            type="button"
+            onClick={call}
+            disabled={busy}
+            className="rounded-md bg-amber-900 px-2 py-1 font-medium text-white disabled:opacity-50"
+          >
+            {busy ? "Opening..." : "Open the vote"}
+          </button>
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="underline">
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium"
+        >
+          Call the vote again
+        </button>
+      )}
+      {error && <p className="mt-1 text-red-700">{error}</p>}
     </div>
   );
 }

@@ -38,7 +38,7 @@ import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle
 import { attachLoginToContact } from "@/lib/identity/org-login";
 import { enqueueCircleSync } from "@/lib/circle/sync";
 import { getAccessGroupIds } from "@/lib/circle/config";
-import { markVoteExecuted, withdrawVoteForApplication } from "@/lib/board/vote-service";
+import { callVoteAgain, markVoteExecuted, withdrawVoteForApplication } from "@/lib/board/vote-service";
 import {
   findDuplicateOrganizations,
   UNPAID_INVOICE_STATUSES,
@@ -286,6 +286,31 @@ export async function clearApplicationDuplicateHold(
     auth.ctx.userId,
     `Cleared by admin as not a duplicate: ${trimmed}`
   );
+
+  revalidatePath("/admin/applications");
+  return { success: true };
+}
+
+/**
+ * Admin action: the board's vote on this application closed with no decision,
+ * and staff are asking again. Opens a fresh vote and a fresh post.
+ */
+export async function callBoardVoteAgain(
+  applicationId: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const result = await callVoteAgain(applicationId);
+  if (!result.ok) return { success: false, error: result.error };
+
+  await logAuditEventSafe({
+    action: "board_vote_called_again",
+    entityType: "signup_application",
+    entityId: applicationId,
+    actorId: auth.ctx.userId,
+    details: { vote_id: result.voteId },
+  });
 
   revalidatePath("/admin/applications");
   return { success: true };
