@@ -320,6 +320,7 @@ export async function executeCampaignSend(
         to: r.recipient.contact_email,
         subject: r.subject,
         html: r.bodyHtml,
+        replyTo: campaign.reply_to ?? undefined,
         manageUrl:
           !template?.is_transactional && deliveryId
             ? `${appUrl}/email-preferences/${deliveryId}`
@@ -394,6 +395,8 @@ export async function createCampaign(options: {
   templateId?: string;
   subjectOverride?: string;
   bodyOverride?: string;
+  /** Where replies go. Campaigns send from a no-reply address, so without this a reply reaches nobody. */
+  replyTo?: string;
   audience: AudienceDefinition;
   variableValues?: Record<string, string>;
   triggerSource?: MessageCampaign["trigger_source"];
@@ -419,6 +422,7 @@ export async function createCampaign(options: {
       template_id: templateId,
       subject_override: options.subjectOverride || null,
       body_override: options.bodyOverride || null,
+      reply_to: options.replyTo?.trim() || null,
       audience_definition: options.audience as unknown as import("@/lib/database.types").Json,
       variable_values: (options.variableValues ?? {}) as unknown as import("@/lib/database.types").Json,
       trigger_source: options.triggerSource ?? "manual",

@@ -10137,6 +10137,7 @@ export type Database = {
           created_by: string | null
           id: string
           name: string
+          reply_to: string | null
           scheduled_at: string | null
           sent_at: string | null
           status: Database["public"]["Enums"]["campaign_status"]
@@ -10160,6 +10161,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           name: string
+          reply_to?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["campaign_status"]
@@ -10183,6 +10185,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           name?: string
+          reply_to?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["campaign_status"]

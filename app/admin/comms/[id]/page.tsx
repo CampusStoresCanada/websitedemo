@@ -165,6 +165,9 @@ export default async function CampaignDetailPage({
               <> · <code className="bg-gray-100 rounded px-1 text-xs">{campaign.trigger_event_key}</code></>
             )}
           </p>
+          {campaign.reply_to && (
+            <p className="mt-1 text-sm text-gray-500">Replies go to {campaign.reply_to}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">

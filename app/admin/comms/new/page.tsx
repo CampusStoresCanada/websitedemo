@@ -60,6 +60,9 @@ async function handleCreateCampaign(formData: FormData) {
   const templateId = (formData.get("template_id") as string) || undefined;
   const subjectOverride = (formData.get("subject") as string) || undefined;
   const bodyOverride = (formData.get("body_html") as string) || undefined;
+  const replyTo = (formData.get("reply_to") as string | null)?.trim() || undefined;
+  // The field is type="email", so this only catches a request made around the form.
+  if (replyTo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo)) return;
   const audienceType = formData.get("audience_type") as AudienceType;
   const conferenceId = formData.get("conference_id") as string | null;
   const customEmails = formData.get("custom_emails") as string | null;
@@ -130,6 +133,7 @@ async function handleCreateCampaign(formData: FormData) {
     templateId,
     subjectOverride,
     bodyOverride,
+    replyTo,
     audience,
     variableValues: Object.keys(variableValues).length > 0 ? variableValues : undefined,
     triggerSource: "manual",

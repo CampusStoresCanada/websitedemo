@@ -244,6 +244,20 @@ export default function NewCampaignForm({
           />
         </div>
 
+        {/* Reply-to */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Reply-to (optional)</label>
+          <p className="text-xs text-gray-500 mb-1">
+            Campaigns send from a no-reply address. Add an address here if replies should reach someone.
+          </p>
+          <input
+            type="email"
+            name="reply_to"
+            placeholder="name@example.com"
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+          />
+        </div>
+
         {/* Body editor — key forces TipTap to remount with new content on template change */}
         <div>
           <label className="block text-sm font-medium text-gray-700">Body</label>

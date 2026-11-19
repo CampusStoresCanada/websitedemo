@@ -224,6 +224,8 @@ export interface MessageCampaign {
   template_id: string | null;
   subject_override: string | null;
   body_override: string | null;
+  /** Where replies go. Null: no reply-to, replies reach the no-reply sender. */
+  reply_to: string | null;
   audience_definition: AudienceDefinition;
   variable_values: Record<string, string>;
   trigger_source: TriggerSource;
