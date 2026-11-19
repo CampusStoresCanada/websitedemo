@@ -389,19 +389,21 @@ export async function startElectionCycleAction(formData: FormData): Promise<Acti
 
   const cycleYear = Number(formData.get("cycleYear"));
   const seatsAvailable = Number(formData.get("seatsAvailable"));
-  const agmOverride = String(formData.get("agmDateOverride") ?? "").trim() || null;
 
   if (!Number.isInteger(cycleYear) || cycleYear < 2000)
-    return { ok: false, error: "Enter the year the AGM falls in." };
+    return { ok: false, error: "Enter the year the election runs in." };
   if (!Number.isInteger(seatsAvailable) || seatsAvailable < 1)
     return { ok: false, error: "Enter how many seats are up for election." };
 
+  // ⛔ No meeting date. Opening an election no longer schedules, moves or
+  // implies a members' meeting; connecting one is a separate act from either
+  // side. An `agmDateOverride` field posted by an old cached form is ignored
+  // rather than honoured.
   const { startElectionCycle } = await import("@/lib/elections/cycle");
   const result = await startElectionCycle({
     cycleYear,
     seatsAvailable,
     startedByProfileId: auth.user.id,
-    agmDateOverride: agmOverride,
   });
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -946,5 +948,85 @@ export async function generateAgmAgendaAction(
   if (!result.ok) return { ok: false, error: result.error };
 
   revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Connecting an election to a members' meeting
+//
+// ⛔ These two live HERE, in one file, and are imported by BOTH the election
+// screen and the members' meeting screen. The relation has one writer
+// (`lib/governance/meeting-election-link.ts`) and one pair of actions on top of
+// it, for the same reason: a connect on each screen is how the two halves drift,
+// and the drift stays invisible until a notice goes out on the wrong day.
+// ---------------------------------------------------------------------------
+
+/** Revalidate both screens — a connection changes what each of them shows. */
+function revalidateConnection(electionSlug: string, meetingId: string) {
+  revalidatePath("/admin/elections");
+  revalidatePath(`/admin/elections/${electionSlug}`);
+  revalidatePath("/admin/members-meetings");
+  revalidatePath(`/admin/members-meetings/${meetingId}`);
+  revalidatePath("/admin/board");
+}
+
+/**
+ * Connect this election to that members' meeting, deriving the election's
+ * nomination, ballot and notice windows from the day the meeting sits.
+ *
+ * Callable from either side; the form supplies whichever half the screen did
+ * not already know.
+ */
+export async function connectElectionToMeetingAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const electionSlug = String(formData.get("electionSlug") ?? "").trim();
+  const meetingId = String(formData.get("meetingId") ?? "").trim();
+  if (!electionSlug) return { ok: false, error: "Choose an election." };
+  if (!meetingId) return { ok: false, error: "Choose a members' meeting." };
+
+  const { connectElectionToMeeting } = await import("@/lib/governance/meeting-election-link");
+  const result = await connectElectionToMeeting({
+    electionSlug,
+    meetingId,
+    actorId: guard.userId,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidateConnection(electionSlug, meetingId);
+  return { ok: true };
+}
+
+/**
+ * Disconnect, returning the election to setup and clearing its calendar.
+ *
+ * ⛔ Refused once notice, the proxy form or the package has gone out, and once
+ * the election is sealed or certified. The reason is returned as a sentence —
+ * see `disconnectBlockedBecause`, which the screen uses to decide whether to
+ * offer this at all, so the button and the writer cannot disagree.
+ */
+export async function disconnectElectionFromMeetingAction(
+  formData: FormData
+): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const electionSlug = String(formData.get("electionSlug") ?? "").trim();
+  const meetingId = String(formData.get("meetingId") ?? "").trim();
+  if (!electionSlug) return { ok: false, error: "Which election?" };
+
+  const { disconnectElectionFromMeeting } = await import(
+    "@/lib/governance/meeting-election-link"
+  );
+  const result = await disconnectElectionFromMeeting({
+    electionSlug,
+    actorId: guard.userId,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidateConnection(electionSlug, meetingId);
   return { ok: true };
 }

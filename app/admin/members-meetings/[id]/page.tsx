@@ -39,6 +39,7 @@ import EventFormClient from "@/components/admin/events/EventFormClient";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
+import ConnectElectionAndMeeting from "@/components/admin/members-meetings/ConnectElectionAndMeeting";
 import RecordSendByHand from "@/components/admin/members-meetings/RecordSendByHand";
 import MeetingPurpose from "@/components/admin/members-meetings/MeetingPurpose";
 import { DateTimeRange } from "@/components/ui/LocalDate";
@@ -172,10 +173,25 @@ export default async function MembersMeetingPage({
   };
   const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
   const { getServerAuthState } = await import("@/lib/auth/server");
-  const [messages, authState] = await Promise.all([
+  const { listConnectableElections, disconnectBlockedBecause } = await import(
+    "@/lib/governance/meeting-election-link"
+  );
+  // ⛔ In the SAME wave. The page is one pass on purpose — three reads of the
+  // election and two of the meeting per render measured 17-23s once.
+  const [messages, authState, connectableElections] = await Promise.all([
     electionSlug ? getElectionMessagesForSlug(electionSlug) : Promise.resolve(null),
     getServerAuthState(),
+    meeting.election ? Promise.resolve([]) : listConnectableElections(),
   ]);
+
+  // Whether the connection may still be undone. The PURE reader, so the button
+  // and the writer cannot disagree about it.
+  const disconnectBlocked = meeting.election
+    ? disconnectBlockedBecause({
+        electionStatus: meeting.election.status,
+        meeting,
+      })
+    : null;
   const stageMessages: Record<string, NonNullable<typeof messages>[number][]> = {};
   for (const m of messages ?? []) {
     const stageKey = MESSAGE_STAGES[m.key];
@@ -701,49 +717,47 @@ export default async function MembersMeetingPage({
         </section>
 
         {/* ── The election, which is business ON the agenda ──────────────── */}
-        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
-          <h2 className="text-sm font-semibold text-gray-900">The election</h2>
-          {meeting.election ? (
-            <>
-              <p className="mt-1 text-xs text-gray-500">
-                One item of business at this meeting: directors are elected at
-                it.
-              </p>
-              <dl className="mt-3">
-                <Row label="Cycle">{meeting.election.cycleYear}</Row>
-                <Row label="Status">
-                  {meeting.election.status.replace(/_/g, " ")}
-                </Row>
-                <Row label="Seats up">
-                  {meeting.election.seatsAvailable ?? "—"}
-                </Row>
-              </dl>
-              <Link
-                href={`/admin/elections/${meeting.election.slug}`}
-                className="mt-3 inline-block text-xs text-[#163D6D] hover:underline"
-              >
-                Nominations, ballot and results →
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="mt-3 text-sm text-gray-600">
-                No election has been opened for this meeting.
-              </p>
-              <p className="mt-2 text-xs text-gray-500">
-                Open it from Elections and it binds to this date — the
-                nomination, ballot and notice windows are all measured back from
-                the day the meeting sits.
-              </p>
-              <Link
-                href="/admin/elections"
-                className="mt-3 inline-block text-xs text-[#163D6D] hover:underline"
-              >
-                Open a cycle →
-              </Link>
-            </>
-          )}
-        </section>
+        {/*
+          ⛔ ONE surface for the connection. This used to be a card that
+          described the election and, when there was none, told you to go to
+          Elections to open one. Connecting is now an act you can perform from
+          here, so the description and the act are the same panel rather than a
+          card beside a button on another screen.
+        */}
+        <ConnectElectionAndMeeting
+          side="pick-election"
+          electionSlug={null}
+          meetingId={meeting.id}
+          options={connectableElections.map((e) => ({
+            value: e.slug,
+            label: `${e.cycleYear} cycle`,
+            detail: `${e.seatsAvailable} seat${e.seatsAvailable === 1 ? "" : "s"}`,
+          }))}
+          connected={
+            meeting.election
+              ? {
+                  electionSlug: meeting.election.slug,
+                  meetingId: meeting.id,
+                  summary:
+                    "One item of business at this meeting: directors are elected at it.",
+                  facts: [
+                    { label: "Cycle", value: String(meeting.election.cycleYear) },
+                    {
+                      label: "Status",
+                      value: meeting.election.status.replace(/_/g, " "),
+                    },
+                    {
+                      label: "Seats up",
+                      value: String(meeting.election.seatsAvailable ?? "—"),
+                    },
+                  ],
+                  href: `/admin/elections/${meeting.election.slug}`,
+                  hrefLabel: "Nominations, ballot and results",
+                }
+              : null
+          }
+          disconnectBlockedBecause={disconnectBlocked}
+        />
       </div>
 
       <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">

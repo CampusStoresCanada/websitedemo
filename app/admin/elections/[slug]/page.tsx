@@ -15,6 +15,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import ConnectElectionAndMeeting from "@/components/admin/members-meetings/ConnectElectionAndMeeting";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
 import PhaseSection from "@/components/admin/elections/PhaseSection";
@@ -101,7 +102,73 @@ export default async function ElectionReviewPage({
   } = await searchParams;
 
   const review = await getCommitteeReview(slug);
-  if (!review) notFound();
+
+  // ⛔ A null review is TWO different situations. `getCommitteeReview` reads the
+  // SCHEDULED election, so it also returns null for an election that exists but
+  // has no members' meeting connected yet — and that election has to be
+  // reachable, because this screen is where it gets connected. 404-ing it would
+  // make an election you just opened disappear.
+  if (!review) {
+    const { getElection } = await import("@/lib/elections/service");
+    const inSetup = await getElection(slug);
+    if (!inSetup) notFound();
+
+    const { listConnectableMeetings } = await import(
+      "@/lib/governance/meeting-election-link"
+    );
+    const meetings = await listConnectableMeetings();
+
+    return (
+      <div className="space-y-6">
+        <AdminPageHeader
+          title={`${inSetup.cycleYear} Board election`}
+          description={`${inSetup.seatsAvailable} seat${inSetup.seatsAvailable === 1 ? "" : "s"} · in setup, no calendar yet`}
+        />
+
+        <ConnectElectionAndMeeting
+          side="pick-meeting"
+          electionSlug={inSetup.slug}
+          meetingId={null}
+          options={meetings.map((m) => ({
+            // The DATE leads, because that is what the windows are derived from
+            // and what distinguishes one meeting from another. The title is the
+            // detail. (Titles usually contain the date, so putting the title
+            // first printed it twice.)
+            value: m.id,
+            label: formatDate(m.meetingDate),
+            detail: m.title || null,
+            noticeSent: m.noticeSent,
+          }))}
+          connected={null}
+          disconnectBlockedBecause={null}
+        />
+
+        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">What is set</h2>
+          <p className="mt-1 text-xs text-gray-500">
+            Decided at setup, before the outcome is known. Everything dated comes from the
+            meeting.
+          </p>
+          <dl className="mt-3 space-y-1 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-gray-500">Seats up</dt>
+              <dd className="text-gray-900">{inSetup.seatsAvailable}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-gray-500">Status</dt>
+              <dd className="text-gray-900">{inSetup.status.replace(/_/g, " ")}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-gray-500">Tie resolution</dt>
+              <dd className="text-gray-900">
+                {inSetup.config.tabulation.tieResolution.replace(/_/g, " ")}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      </div>
+    );
+  }
 
   // Loaded after the review, which is what persists the eligibility rows this
   // reads — see getElectionMessagesForSlug.

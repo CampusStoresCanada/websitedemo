@@ -213,15 +213,24 @@ export async function getOpenElectionForRenewal(): Promise<
   const e = data?.[0];
   if (!e) return null;
 
+  // ⛔ An election with no members' meeting connected has no dates at all. This
+  // text goes to member stores in a renewal reminder, so a null here would have
+  // printed "nominations are open null to null". The cast could not catch it:
+  // `null < today` is false, so the guard below would have passed it through.
+  const agmDate = e.agm_date as string | null;
+  const nominationsOpenOn = e.nominations_open_at as string | null;
+  const nominationsCloseOn = e.nominations_close_at as string | null;
+  if (!agmDate || !nominationsOpenOn || !nominationsCloseOn) return null;
+
   // Past the AGM there is nothing left to lose by lapsing.
   const today = new Date().toISOString().slice(0, 10);
-  if ((e.agm_date as string) < today) return null;
+  if (agmDate < today) return null;
 
   return {
     cycleYear: e.cycle_year as number,
-    nominationsOpenOn: e.nominations_open_at as string,
-    nominationsCloseOn: e.nominations_close_at as string,
-    agmDate: e.agm_date as string,
+    nominationsOpenOn,
+    nominationsCloseOn,
+    agmDate,
     seatsAvailable: e.seats_available as number,
   };
 }

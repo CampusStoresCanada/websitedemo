@@ -157,7 +157,7 @@ export interface MembersMeetingElection {
    * that off the meeting. When the two differ the meeting has moved and the
    * windows have not — see `meetingDivergence`.
    */
-  windowsDerivedFrom: string;
+  windowsDerivedFrom: string | null;
 }
 
 export interface MembersMeeting {
@@ -350,9 +350,15 @@ export function instantAtMeetingZone(date: string, wallTime: string): string | n
  */
 export function meetingDivergence(input: {
   meetingDate: string;
-  election: { cycleYear: number; windowsDerivedFrom: string } | null;
+  election: { cycleYear: number; windowsDerivedFrom: string | null } | null;
 }): string | null {
   if (!input.election) return null;
+  // ⛔ No windows at all is not a divergence. An election can be connected in
+  // the same breath as being given its calendar, and for the instant before the
+  // derivation lands there is nothing to be out of step WITH. Saying "every
+  // date below is wrong" about an election that has no dates would be noise in
+  // the one place that has to stay loud for the real case.
+  if (input.election.windowsDerivedFrom === null) return null;
   if (input.election.windowsDerivedFrom === input.meetingDate) return null;
 
   return (

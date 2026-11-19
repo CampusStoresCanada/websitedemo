@@ -116,7 +116,7 @@ async function hydrate(rows: MeetingRow[]): Promise<MembersMeeting[]> {
       cycleYear: row.cycle_year as number,
       status: row.status as string,
       seatsAvailable: (row.seats_available as number | null) ?? null,
-      windowsDerivedFrom: row.agm_date as string,
+      windowsDerivedFrom: (row.agm_date as string | null) ?? null,
     });
   }
 

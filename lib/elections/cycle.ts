@@ -15,21 +15,22 @@
  *      thing" — deliberately not automatic, because opening an election is a
  *      governance act with a date the board should have seen.
  *
- * Opening a cycle also schedules the AGM: a board meeting of type `agm` and a
- * members-only event linked to it, exactly as the meetings admin does it. Google
- * Calendar seeded the existing board meetings, but the events apparatus writes
- * the other way too — publishing a virtual event mints the Google event and Meet
- * link. The AGM event is created as a DRAFT, so the date exists in the system,
- * the announce-the-result task has a meeting to hang off, and nothing reaches
- * the membership or the calendar until someone publishes it.
+ * ⛔ Opening a cycle does NOT schedule the AGM, and has not since 2026-11-19.
+ * The election module sets up the election; the AGM & Members' Meetings module
+ * sets up the meeting; connecting them is its own act, available from either
+ * side (`lib/governance/meeting-election-link.ts`).
+ *
+ * Until it is connected an election has NO calendar — every election date is the
+ * meeting date minus N days, so there is nothing to derive from and nothing to
+ * be early or late against. Connecting the meeting is what derives the windows
+ * and mints the obligations that are due relative to them.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/database.types";
 import { CSC_ELECTIONS_CONFIG, type ElectionsConfig } from "./config";
-import { resolveAgmDate, deriveSchedule, validateSchedule } from "./schedule";
-import { mintElectionActionItems, type MintedTask } from "./action-items";
-import { getElection, type Election, isScheduled} from "./service";
+import { resolveAgmDate, deriveSchedule } from "./schedule";
+import type { Election } from "./service";
 import {
   MEMBERS_MEETING_LABELS,
   membersMeetingEventSlug,
@@ -54,17 +55,22 @@ export function electionSlug(bodyKey: string, year: number): string {
 
 export interface CycleStartResult {
   slug: string;
-  agmDate: string;
   seatsAvailable: number;
-  agmMeetingId: string | null;
-  agmEventId: string | null;
-  agmNote: string;
-  tasks: MintedTask[];
+  /**
+   * The rule-derived date the AGM would fall on, offered as a SUGGESTION for
+   * whoever connects a meeting next. Nothing is written from it and no meeting
+   * is created — it is here so the screen can say "the by-law puts it here"
+   * without the election having silently decided it.
+   */
+  suggestedMeetingDate: string | null;
 }
 
 /**
- * Open a cycle: create the election, publish the members-only AGM event, and
- * hand the board its obligations.
+ * Open a cycle: create the election, and nothing else.
+ *
+ * ⛔ No meeting, no event, no windows, no obligations. All four of those are
+ * downstream of a members' meeting being connected, because all four are dated
+ * relative to it. See `connectElectionToMeeting`.
  *
  * `seatsAvailable` is NOT derived. CSC staggers 4 and 5 across alternating
  * years, but a seat can also fall vacant mid-term and be filled by appointment
@@ -77,8 +83,6 @@ export async function startElectionCycle(input: {
   cycleYear: number;
   seatsAvailable: number;
   startedByProfileId: string;
-  /** Override the rule-derived AGM date, e.g. when the board moves it. */
-  agmDateOverride?: string | null;
   config?: ElectionsConfig;
 }): Promise<Result<CycleStartResult>> {
   const db = createAdminClient();
@@ -92,17 +96,12 @@ export async function startElectionCycle(input: {
     .maybeSingle();
   if (!body) return fail(`No governance body "${bodyKey}".`);
 
-  const agmDate = input.agmDateOverride ?? resolveAgmDate(config, input.cycleYear);
-  if (!agmDate)
-    return fail(
-      "The AGM date could not be derived and no override was given. Set one explicitly."
-    );
-
-  const schedule = deriveSchedule(agmDate, config);
-  const problems = validateSchedule(schedule);
-  if (problems.length) return fail(problems.join(" "));
-
   if (input.seatsAvailable < 1) return fail("At least one seat must be up for election.");
+
+  // ⛔ NOT a required input any more, and never written here. The windows are
+  // derived from the meeting at the moment one is connected. This is only the
+  // by-law's suggestion, for the screen to show.
+  const suggestedMeetingDate = resolveAgmDate(config, input.cycleYear);
 
   const slug = electionSlug(bodyKey, input.cycleYear);
   const { data: already } = await db.from("elections").select("id").eq("slug", slug).maybeSingle();
@@ -114,11 +113,9 @@ export async function startElectionCycle(input: {
       slug,
       body_id: body.id,
       cycle_year: input.cycleYear,
-      agm_date: agmDate,
-      nominations_open_at: schedule.nominationsOpenAt,
-      nominations_close_at: schedule.nominationsCloseAt,
-      ballots_open_at: schedule.ballotsOpenAt,
-      ballots_close_at: schedule.ballotsCloseAt,
+      // ⛔ No dates and no meeting. `elections_schedule_matches_meeting_link`
+      // enforces all-five-or-none, so an election in setup is a legal row and a
+      // half-scheduled one is not.
       seats_available: input.seatsAvailable,
       status: "draft",
       // Round-tripped through JSON so the snapshot satisfies `Json`: the config
@@ -136,34 +133,6 @@ export async function startElectionCycle(input: {
     .single();
   if (error || !election) return fail(`Could not create the election: ${error?.message}`);
 
-  // The AGM itself: a board meeting of type `agm` plus a members-only event
-  // linked to it, mirroring POST /api/admin/board/meetings. Held as a DRAFT —
-  // the date is in the system and the announce-the-result task has somewhere to
-  // land, but nothing is announced and no Google Calendar event exists until a
-  // person publishes it. Publishing is what pushes it out.
-  const agm = await ensureAgmMeetingAndEvent({
-    agmDate,
-    cycleYear: input.cycleYear,
-    createdByProfileId: input.startedByProfileId,
-  });
-
-  // ⛔ Bind the election to the meeting. Before 2026-11-18 the only link was
-  // `agm_date = meeting_date`, so a meeting that later moved made the join find
-  // nothing and the election silently looked unbound. Set here rather than in
-  // the insert above because the meeting does not exist until the line above
-  // runs, and BEFORE the getElection below so the minted action items parent to
-  // a linked election.
-  if (agm.meetingId) {
-    const { error: linkError } = await db
-      .from("elections")
-      .update({ meeting_id: agm.meetingId })
-      .eq("id", election.id);
-    // Not fatal: the date match still resolves it, and `meetingDivergence`
-    // reports an unlinked election rather than hiding it.
-    if (linkError)
-      console.error("[elections] could not link the cycle to its meeting:", linkError.message);
-  }
-
   // Seats. Incumbents are left blank — filling them means asserting whose term
   // ends this cycle, which is exactly what the human confirming seatsAvailable
   // has just checked against the register.
@@ -171,23 +140,17 @@ export async function startElectionCycle(input: {
     await db.from("election_seats").insert({ election_id: election.id, seat_key: `seat-${i}` });
   }
 
-  // Minted AFTER the AGM meeting exists, so "Announce the result at the annual
-  // general meeting" parents to the AGM rather than to December's meeting.
-  // ⛔ Action items are DUE on dates relative to the meeting, so they cannot be
-  // minted for an election that has no members' meeting connected yet. Once the
-  // election and the meeting are set up separately, minting belongs to the act
-  // that connects them -- that is the moment the due dates come into existence.
-  const loaded = await getElection(slug);
-  const tasks = loaded && isScheduled(loaded) ? await mintElectionActionItems(loaded) : [];
+  // ⛔ No obligations are minted here. Every election action item is DUE on a
+  // date measured back from the meeting — "give notice", "circulate ballots",
+  // "announce the result at the annual general meeting" — and none of those due
+  // dates exist yet. `connectElectionToMeeting` mints them, because connecting
+  // is the moment they come into existence and the moment the result can be
+  // parented to the right meeting rather than to whatever December's was.
 
   return ok({
     slug,
-    agmDate,
     seatsAvailable: input.seatsAvailable,
-    agmMeetingId: agm.meetingId,
-    agmEventId: agm.eventId,
-    agmNote: agm.note,
-    tasks,
+    suggestedMeetingDate,
   });
 }
 

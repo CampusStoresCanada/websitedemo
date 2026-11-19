@@ -306,6 +306,19 @@ describe("meetingDivergence", () => {
     expect(meetingDivergence({ meetingDate: "2027-01-21", election: null })).toBeNull();
   });
 
+  it("says nothing when the election has NO windows yet", () => {
+    // An election in setup has no calendar at all, so there is nothing for the
+    // meeting to be out of step WITH. Saying "every date below is wrong" about
+    // an election that has no dates would be noise in the one place that has to
+    // stay loud for the real case.
+    expect(
+      meetingDivergence({
+        meetingDate: "2027-01-21",
+        election: { cycleYear: 2027, windowsDerivedFrom: null },
+      })
+    ).toBeNull();
+  });
+
   it("reports BOTH dates when the meeting has moved", () => {
     // The whole point: while the date match was the only link this was silence,
     // indistinguishable from "no election for this meeting".

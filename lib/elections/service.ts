@@ -279,7 +279,17 @@ export const evaluateElectionEligibility = cache(async function evaluateElection
   if (election.error) throw new Error(`[elections] ${election.error.message}`);
 
   const config = resolveElectionsConfig(election.data.config as Partial<ElectionsConfig>);
-  const agmDate = election.data.agm_date as string;
+
+  // ⛔ Eligibility is evaluated AS AT the meeting: "a member in good standing on
+  // the day of the AGM". With no members' meeting connected there is no such
+  // day, and the old `as string` cast let a null through to be compared with
+  // `<`, which is false for every organization rather than an error. Refusing
+  // is the honest answer -- there is nothing to be eligible as at.
+  const agmDate = election.data.agm_date as string | null;
+  if (!agmDate)
+    throw new Error(
+      "[elections] eligibility cannot be evaluated: no members' meeting is connected to this election, so there is no date to assess standing as at."
+    );
   const programs = await getProgramsConfig();
   const votingTypes = new Set(
     programs.filter((p) => p.permissionLevel === "member").map((p) => p.orgTypeValue)
@@ -374,6 +384,12 @@ export async function canOrganizationParticipate(
     .maybeSingle();
   if (!election) return null;
 
+  // ⛔ No connected meeting means no day to assess standing as at, so there is
+  // no verdict to give. Null, not a guess: the caller already treats null as
+  // "cannot say" and gates on it.
+  const agmDate = election.agm_date as string | null;
+  if (!agmDate) return null;
+
   const config = resolveElectionsConfig(election.config as Partial<ElectionsConfig>);
   const programs = await getProgramsConfig();
   const votingTypes = new Set(
@@ -403,7 +419,7 @@ export async function canOrganizationParticipate(
       isVotingProgram: votingTypes.has(o.type as string),
     },
     config.eligibility.participationRule,
-    election.agm_date as string
+    agmDate
   );
 }
 
