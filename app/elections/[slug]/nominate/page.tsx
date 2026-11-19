@@ -17,7 +17,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerAuthState } from "@/lib/auth/server";
 import {
-  getElection,
+  getScheduledElection,
   nominationsOpen,
   resolveActor,
   isOrganizationEligible,
@@ -70,7 +70,7 @@ export default async function NominatePage({
   if (!auth.user)
     return <SignInPrompt returnTo={`/elections/${slug}/nominate`} action="put forward a nomination" />;
 
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) {
     return (
       <ElectionShell eyebrow="Campus Stores Canada · Elections" title="Election not found">

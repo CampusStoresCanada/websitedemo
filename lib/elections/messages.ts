@@ -17,7 +17,7 @@
 import { getTemplate } from "@/lib/comms/templates";
 import { renderTemplateContent } from "@/lib/comms/templates";
 import type { MessageTemplate, TemplateKey } from "@/lib/comms/types";
-import type { Election } from "./service";
+import type { Election, ScheduledElection } from "./service";
 import {
   buildCallForNominations,
   buildBallotsOpen,
@@ -124,7 +124,7 @@ async function describe(
 }
 
 export async function getElectionMessages(
-  election: Election,
+  election: ScheduledElection,
   eligibleOrganizationIds: string[],
   opts: { candidateCount: number }
 ): Promise<StageMessage[]> {
@@ -244,9 +244,9 @@ export async function getElectionMessagesForSlug(
   slug: string
 ): Promise<StageMessage[] | null> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
-  const { getElection, listNominations } = await import("./service");
+  const { getScheduledElection, listNominations } = await import("./service");
 
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const db = createAdminClient();

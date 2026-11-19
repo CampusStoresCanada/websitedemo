@@ -9,7 +9,7 @@
  */
 
 import { notFound, redirect } from "next/navigation";
-import { getElection } from "@/lib/elections/service";
+import { getScheduledElection } from "@/lib/elections/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MEMBERS_MEETING_TYPES } from "@/lib/governance/members-meetings";
 
@@ -21,7 +21,7 @@ export default async function LegacyProxyRegisterRedirect({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) notFound();
 
   const db = createAdminClient();

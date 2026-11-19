@@ -29,7 +29,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
-import type { Election, CandidateOutcome } from "./service";
+import type { ScheduledElection, CandidateOutcome } from "./service";
 import { boardServiceEmailHtml } from "./board-service";
 
 export interface NotifyOutcome {
@@ -304,7 +304,7 @@ async function loadOrgAdminContacts(
 
 /** Tells a nominee they have been nominated, and carries the acceptance link. */
 export async function notifyNominee(
-  election: Election,
+  election: ScheduledElection,
   nomination: { id: string; acceptToken: string; nomineeContactId: string; nomineeOrganizationName: string },
   nominatorOrgName: string
 ): Promise<NotifyOutcome> {
@@ -321,7 +321,7 @@ export async function notifyNominee(
 
 /** Asks each invited institution to co-sign. */
 export async function buildCosigners(
-  election: Election,
+  election: ScheduledElection,
   nominee: { name: string; organizationName: string },
   invitations: { organizationId: string; contactIds: string[]; token: string }[]
 ): Promise<PreparedMessages> {
@@ -370,7 +370,7 @@ export async function buildCosigners(
 }
 
 export async function notifyCosigners(
-  election: Election,
+  election: ScheduledElection,
   nominee: { name: string; organizationName: string },
   invitations: { organizationId: string; contactIds: string[]; token: string }[]
 ): Promise<NotifyOutcome[]> {
@@ -386,7 +386,7 @@ export async function notifyCosigners(
  * and a single named recipient who is on leave stalls the nomination silently.
  */
 export async function notifyStorePermission(
-  election: Election,
+  election: ScheduledElection,
   nomination: { acceptToken: string; nomineeContactId: string; nomineeOrganizationId: string }
 ): Promise<NotifyOutcome[]> {
   const nominee = await loadContact(nomination.nomineeContactId);
@@ -432,7 +432,7 @@ export async function notifyStorePermission(
 
 /** Confirms to the nominee that nothing further is outstanding. */
 export async function notifyNominationReady(
-  election: Election,
+  election: ScheduledElection,
   nomination: {
     acceptToken: string;
     nomineeContactId: string;
@@ -455,7 +455,7 @@ export async function notifyNominationReady(
 
 /** Chases a nomination that is accepted but still short of something. */
 export async function notifyNominationIncomplete(
-  election: Election,
+  election: ScheduledElection,
   nomination: { acceptToken: string; nomineeContactId: string },
   outstanding: string[]
 ): Promise<NotifyOutcome> {
@@ -471,7 +471,7 @@ export async function notifyNominationIncomplete(
 
 /** The call for nominations, to every eligible institution's administrators. */
 export async function buildCallForNominations(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[]
 ): Promise<PreparedMessages> {
   // Resolve every recipient first, then send once. The institutions are read
@@ -499,7 +499,7 @@ export async function buildCallForNominations(
 }
 
 export async function notifyCallForNominations(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[]
 ): Promise<NotifyOutcome[]> {
   const prepared = await buildCallForNominations(election, organizationIds);
@@ -552,7 +552,7 @@ function formatLongDate(iso: string): string {
  * notice that lands with someone on leave has not reached the member.
  */
 export async function buildAgmNotice(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   details: { agmTime: string; location: string | null; agmUrl: string }
 ): Promise<PreparedMessages> {
@@ -607,7 +607,7 @@ export async function buildAgmNotice(
 }
 
 export async function notifyAgmNotice(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   details: { agmTime: string; location: string | null; agmUrl: string }
 ): Promise<NotifyOutcome[]> {
@@ -618,7 +618,7 @@ export async function notifyAgmNotice(
 
 /** The proxy form. Separate obligation, separate date — Part VII S7(b). */
 export async function buildProxyForm(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   details: { proxyFormUrl: string; lateNote?: string | null }
 ): Promise<PreparedMessages> {
@@ -653,7 +653,7 @@ export async function buildProxyForm(
 }
 
 export async function notifyProxyForm(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   details: { proxyFormUrl: string; lateNote?: string | null }
 ): Promise<NotifyOutcome[]> {
@@ -683,7 +683,7 @@ export async function notifyProxyForm(
  * pass, so a branch inside the body would ship to members as literal text.
  */
 export async function buildBallotsOpen(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { candidateCount: number; reminder?: boolean }
 ): Promise<PreparedMessages> {
@@ -719,7 +719,7 @@ export async function buildBallotsOpen(
 }
 
 export async function notifyBallotsOpen(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { candidateCount: number; reminder?: boolean }
 ): Promise<NotifyOutcome[]> {
@@ -742,7 +742,7 @@ export async function notifyBallotsOpen(
  * package is complete.
  */
 export async function buildAgmPackage(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { stillToCome: string }
 ): Promise<PreparedMessages> {
@@ -774,7 +774,7 @@ export async function buildAgmPackage(
 }
 
 export async function notifyAgmPackage(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { stillToCome: string }
 ): Promise<NotifyOutcome[]> {
@@ -792,7 +792,7 @@ export async function notifyAgmPackage(
  * of which is covered by tests where it lives.
  */
 export async function buildElectionResults(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   announcement: { subject: string; html: string }
 ): Promise<PreparedMessages> {
@@ -823,7 +823,7 @@ export async function buildElectionResults(
 }
 
 export async function notifyElectionResults(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   announcement: { subject: string; html: string }
 ): Promise<NotifyOutcome[]> {
@@ -850,7 +850,7 @@ export async function notifyElectionResults(
  * shared template is one careless edit from congratulating somebody who lost.
  */
 export async function buildCandidateResults(
-  election: Election,
+  election: ScheduledElection,
   outcomes: { elected: CandidateOutcome[]; notElected: CandidateOutcome[] },
   group: "elected" | "not_elected"
 ): Promise<PreparedMessages> {
@@ -872,7 +872,7 @@ export async function buildCandidateResults(
 }
 
 export async function notifyCandidateResults(
-  election: Election,
+  election: ScheduledElection,
   outcomes: { elected: CandidateOutcome[]; notElected: CandidateOutcome[] }
 ): Promise<NotifyOutcome[]> {
   const results: NotifyOutcome[] = [];
@@ -895,7 +895,7 @@ export async function notifyCandidateResults(
  * narrower room.
  */
 export async function buildNominationReminder(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { onlyThoseWhoHaveNotNominated: boolean }
 ): Promise<PreparedMessages> {
@@ -928,7 +928,7 @@ export async function buildNominationReminder(
 }
 
 export async function notifyNominationReminder(
-  election: Election,
+  election: ScheduledElection,
   organizationIds: string[],
   opts: { onlyThoseWhoHaveNotNominated: boolean }
 ): Promise<NotifyOutcome[]> {

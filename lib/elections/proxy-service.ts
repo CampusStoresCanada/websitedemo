@@ -444,7 +444,7 @@ export async function getProxyForStore(
 // Page state
 // ─────────────────────────────────────────────────────────────────
 
-import { getElection, resolveActor } from "./service";
+import { getScheduledElection, resolveActor } from "./service";
 
 export interface ProxyState {
   election: { slug: string; cycleYear: number; agmDate: string };
@@ -476,7 +476,7 @@ export async function getProxyState(
   preferredOrganizationId?: string
 ): Promise<ProxyState | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const actor = await resolveActor(profileId, organizations);

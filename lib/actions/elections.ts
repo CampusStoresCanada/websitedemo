@@ -8,7 +8,7 @@ import {
   saveBallot,
   chaseIncompleteNominations,
   sendCallForNominations,
-  getElection,
+  getScheduledElection,
   nominationsOpen,
   acceptNomination,
   declineNomination,
@@ -213,7 +213,7 @@ export async function submitNominationAction(
   const auth = await getServerAuthState();
   if (!auth.user) return { ok: false, error: "Please sign in to nominate." };
 
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return { ok: false, error: "That election does not exist." };
   if (election.status !== "nominating" || !nominationsOpen(election))
     return {
@@ -361,7 +361,7 @@ export async function mintElectionActionItemsAction(slug: string): Promise<Actio
   if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
     return { ok: false, error: "Only the board can create action items." };
 
-  const { getElection: load } = await import("@/lib/elections/service");
+  const { getScheduledElection: load } = await import("@/lib/elections/service");
   const { mintElectionActionItems } = await import("@/lib/elections/action-items");
 
   const election = await load(slug);
@@ -772,8 +772,8 @@ export async function saveReminderScheduleAction(
     }))
     .filter((s) => s.label !== "" && Number.isFinite(s.daysBeforeClose));
 
-  const { getElection } = await import("@/lib/elections/service");
-  const election = await getElection(slug);
+  const { getScheduledElection } = await import("@/lib/elections/service");
+  const election = await getScheduledElection(slug);
   if (!election) return { ok: false, error: "That election does not exist." };
   const otherPhase = election.config.reminders.steps.filter(
     (s) => (s.phase ?? "ballot") !== phase

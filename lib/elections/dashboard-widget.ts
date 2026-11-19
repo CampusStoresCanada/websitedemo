@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getElection, evaluateElectionEligibility, listNominations } from "./service";
+import { getScheduledElection, evaluateElectionEligibility, listNominations } from "./service";
 
 export interface ElectionsWidgetData {
   slug: string;
@@ -122,7 +122,7 @@ export async function getElectionsWidgetData(
 
   if (!row) return null;
 
-  const election = await getElection(row.slug as string);
+  const election = await getScheduledElection(row.slug as string);
   if (!election) return null;
 
   const { summary } = await evaluateElectionEligibility(election.id);

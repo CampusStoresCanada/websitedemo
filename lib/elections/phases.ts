@@ -16,7 +16,7 @@
  * Pure. Takes the election's own state, returns where things sit.
  */
 
-import type { Election } from "./service";
+import type { ScheduledElection } from "./service";
 
 /**
  * The moments the screen organises around. NOT the same as `elections.status`:
@@ -48,7 +48,7 @@ export type SectionState = "past" | "current" | "future";
  * the closing date whether or not anybody had closed anything — which is
  * exactly the state this cycle sat in for three days.
  */
-export function cyclePhase(election: Election, onDate: string): CyclePhase {
+export function cyclePhase(election: ScheduledElection, onDate: string): CyclePhase {
   switch (election.status) {
     case "draft":
       return "before_nominations";
@@ -81,7 +81,7 @@ export function sectionState(section: CyclePhase, current: CyclePhase): SectionS
  * Without this the ballot panels sit on an acclaimed cycle's screen for ever,
  * permanently "future", waiting for a phase that cannot arrive.
  */
-export function phaseApplies(section: CyclePhase, election: Election): boolean {
+export function phaseApplies(section: CyclePhase, election: ScheduledElection): boolean {
   if (section !== "balloting") return true;
   return election.outcome !== "acclaimed";
 }

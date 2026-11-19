@@ -117,6 +117,22 @@ export function today(timezone = "America/Edmonton"): string {
   }).format(new Date());
 }
 
+/**
+ * An election that HAS a calendar, because a members' meeting is connected to
+ * it. Every election date is the meeting date minus N days, so until a meeting
+ * is connected there are no windows to read and no deadline to be in breach of.
+ *
+ * Most of this module only makes sense for a scheduled election -- you cannot
+ * open nominations that have no close date -- so those functions take this type
+ * and the guard happens once, at the edge, instead of at every date read.
+ */
+export type ScheduledElection = Election & { schedule: ElectionSchedule };
+
+/** Narrowing guard: has a members' meeting been connected to this election? */
+export function isScheduled(election: Election): election is ScheduledElection {
+  return election.schedule !== null;
+}
+
 export interface Election {
   id: string;
   slug: string;
@@ -125,7 +141,17 @@ export interface Election {
   seatsAvailable: number;
   status: string;
   outcome: string | null;
-  schedule: ElectionSchedule;
+  /**
+   * NULL while the election is in SETUP, i.e. no members' meeting is connected
+   * yet. Every election date is the meeting date minus N days, so an election
+   * with nothing connected has no calendar at all, and connecting the meeting
+   * is the act that derives one. Enforced in the database by
+   * `elections_schedule_matches_meeting_link`: all five dates, or none.
+   *
+   * ⛔ Do not reach for a fallback here. A guessed window is an interpretation
+   * written into the record of a statutory deadline.
+   */
+  schedule: ElectionSchedule | null;
   config: ElectionsConfig;
   /**
    * The members' meeting these directors are elected at.
@@ -170,16 +196,46 @@ export async function getElection(slug: string): Promise<Election | null> {
     // actually sits, read the meeting through `meetingId`. When the two
     // disagree the meeting has moved and the windows have not: see
     // `meetingDivergence`.
-    schedule: {
-      agmDate: data.agm_date as string,
-      nominationsOpenAt: data.nominations_open_at as string,
-      nominationsCloseAt: data.nominations_close_at as string,
-      ballotsOpenAt: data.ballots_open_at as string,
-      ballotsCloseAt: data.ballots_close_at as string,
-    },
+    //
+    // ⛔ These were `as string` casts until 2026-11-19, which made the compiler
+    // blind: once the columns became nullable, `tsc` still reported zero errors
+    // and a null would have arrived downstream TYPED as a string. Narrow here,
+    // once, so every reader is forced to say what it does with an election that
+    // has no calendar yet.
+    schedule:
+      data.agm_date == null
+        ? null
+        : {
+            agmDate: data.agm_date as string,
+            nominationsOpenAt: data.nominations_open_at as string,
+            nominationsCloseAt: data.nominations_close_at as string,
+            ballotsOpenAt: data.ballots_open_at as string,
+            ballotsCloseAt: data.ballots_close_at as string,
+          },
     // Snapshotted at creation. Never the live default.
     config: resolveElectionsConfig(data.config as Partial<ElectionsConfig>),
   };
+}
+
+/**
+ * The same election, but only when a members' meeting is connected to it.
+ *
+ * ⛔ Use THIS, not `getElection`, for anything that acts on a phase -- opening
+ * nominations, sealing, circulating ballots, giving notice. Those operations
+ * read a window, and an election in setup has none: every election date is the
+ * meeting date minus N days, so a disconnected election has no calendar to be
+ * early or late against. Returning null here is what stops a phase operation
+ * from running against a guess.
+ *
+ * `getElection` remains the full-fidelity loader, for the two places that must
+ * see an election that has not been connected yet: the setup screen offering
+ * "Connect a members' meeting", and the meeting spine, whose election half has
+ * always been nullable.
+ */
+export async function getScheduledElection(slug: string): Promise<ScheduledElection | null> {
+  const election = await getElection(slug);
+  if (!election) return null;
+  return isScheduled(election) ? election : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +658,10 @@ async function hydrateNomination(
 
 export async function getNominationByToken(
   token: string
-): Promise<{ nomination: NominationView; election: Election } | null> {
+  // A nomination can only exist inside an open nomination window, which only
+  // exists once a members' meeting is connected, so the election behind a
+  // nomination token always has a calendar.
+): Promise<{ nomination: NominationView; election: ScheduledElection } | null> {
   const db = createAdminClient();
   const { data } = await db
     .from("nominations")
@@ -613,7 +672,7 @@ export async function getNominationByToken(
 
   const slug = (data.elections as { slug: string } | null)?.slug;
   if (!slug) return null;
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const nomination = await hydrateNomination(data.id as string, election);
@@ -622,6 +681,10 @@ export async function getNominationByToken(
 
 /** Is the nomination window open right now? */
 export function nominationsOpen(election: Election, onDate = today()): boolean {
+  // An election in setup has no calendar, so no window of it is open. This is
+  // the one place the question has a correct answer without a schedule, which
+  // is why the parameter stays `Election`.
+  if (!election.schedule) return false;
   const phase = phaseOn(election.schedule, onDate);
   return phase === "nominating";
 }
@@ -649,7 +712,7 @@ export async function createNomination(input: {
   requestBoardCosignature?: boolean;
 }): Promise<Result<{ nominationId: string; acceptToken: string; cosignTokens: { organizationId: string; token: string }[] }>> {
   const db = createAdminClient();
-  const election = await getElection(input.electionSlug);
+  const election = await getScheduledElection(input.electionSlug);
   if (!election) return fail("That election does not exist.");
 
   if (election.status !== "nominating")
@@ -776,6 +839,10 @@ export async function acceptNomination(
 
   if (nomination.withdrawnAt) return fail("This nomination has been withdrawn.");
   if (nomination.candidateDeclinedAt) return fail("This nomination was already declined.");
+  if (!isScheduled(election))
+    return fail(
+      "No members' meeting is connected to this election yet, so nominations have not opened."
+    );
   if (!nominationsOpen(election))
     return fail(`Nominations closed on ${election.schedule.nominationsCloseAt}.`);
 
@@ -850,7 +917,7 @@ export async function signCosignature(
     return fail("You are not recorded at the institution this request was sent to.");
 
   const nom = sig.nominations as { nominee_contact_id: string; elections: { slug: string } } | null;
-  const election = nom ? await getElection(nom.elections.slug) : null;
+  const election = nom ? await getScheduledElection(nom.elections.slug) : null;
   if (!election) return fail("That election could not be loaded.");
   if (!nominationsOpen(election))
     return fail(`Nominations closed on ${election.schedule.nominationsCloseAt}.`);
@@ -931,7 +998,7 @@ export async function grantStorePermission(
     .select("slug")
     .eq("id", (await db.from("nominations").select("election_id").eq("id", nominationId).single()).data!.election_id)
     .single();
-  const election = electionRow ? await getElection(electionRow.slug as string) : null;
+  const election = electionRow ? await getScheduledElection(electionRow.slug as string) : null;
   const wasComplete = election
     ? ((await hydrateNomination(nominationId, election))?.completeness.complete ?? false)
     : false;
@@ -998,7 +1065,7 @@ export async function withdrawNomination(
 /** Every live nomination, hydrated. Feeds the committee's review view. */
 export async function listNominations(electionSlug: string): Promise<NominationView[]> {
   const db = createAdminClient();
-  const election = await getElection(electionSlug);
+  const election = await getScheduledElection(electionSlug);
   if (!election) return [];
 
   const { data } = await db
@@ -1096,7 +1163,7 @@ export async function getCosignatureByToken(token: string): Promise<{
   signedAt: string | null;
   revokedAt: string | null;
   nomination: NominationView;
-  election: Election;
+  election: ScheduledElection;
 } | null> {
   const db = createAdminClient();
   const { data: sig } = await db
@@ -1108,7 +1175,7 @@ export async function getCosignatureByToken(token: string): Promise<{
 
   const slug = (sig.nominations as { elections: { slug: string } } | null)?.elections?.slug;
   if (!slug) return null;
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const nomination = await hydrateNomination(sig.nomination_id as string, election);
@@ -1141,7 +1208,7 @@ export async function getCosignatureByToken(token: string): Promise<{
  * WHILE THERE IS STILL TIME TO ACT, not once at the close.
  */
 export interface CommitteeReview {
-  election: Election;
+  election: ScheduledElection;
   eligibility: EligibilitySummary;
   nominations: NominationView[];
   /** Nominations that would reach the ballot as things stand. */
@@ -1155,7 +1222,7 @@ export interface CommitteeReview {
 
 export async function getCommitteeReview(slug: string): Promise<CommitteeReview | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const [{ summary }, nominations] = await Promise.all([
@@ -1510,7 +1577,7 @@ export async function submitMemberNomination(input: {
   }>
 > {
   const db = createAdminClient();
-  const election = await getElection(input.electionSlug);
+  const election = await getScheduledElection(input.electionSlug);
   if (!election) return fail("That election does not exist.");
 
   const nominee = await getNominatableContact(election.id, input.nomineeContactId);
@@ -1708,7 +1775,7 @@ export async function inviteAdditionalCosigner(input: {
   if (row.withdrawn_at) return fail("This nomination has been withdrawn.");
   if (row.candidate_declined_at) return fail("This nomination was declined.");
 
-  const election = await getElection((row.elections as { slug: string }).slug);
+  const election = await getScheduledElection((row.elections as { slug: string }).slug);
   if (!election) return fail("That election could not be loaded.");
   if (!nominationsOpen(election))
     return fail(`Nominations closed on ${election.schedule.nominationsCloseAt}.`);
@@ -1800,7 +1867,7 @@ export async function chaseOutstandingCosignatures(
   electionSlug: string
 ): Promise<{ chased: number; institutions: number; outcomes: NotifyOutcome[] }> {
   const db = createAdminClient();
-  const election = await getElection(electionSlug);
+  const election = await getScheduledElection(electionSlug);
   if (!election) return { chased: 0, institutions: 0, outcomes: [] };
   if (!nominationsOpen(election)) return { chased: 0, institutions: 0, outcomes: [] };
 
@@ -1862,7 +1929,7 @@ export async function chaseOutstandingCosignatures(
  * emails, which is how people learn to ignore election mail.
  */
 export async function notifyIfNowComplete(
-  election: Election,
+  election: ScheduledElection,
   nominationId: string,
   wasComplete: boolean
 ): Promise<NotifyOutcome | null> {
@@ -1882,7 +1949,7 @@ export async function notifyIfNowComplete(
 export async function chaseIncompleteNominations(
   electionSlug: string
 ): Promise<{ chased: number; outcomes: NotifyOutcome[] }> {
-  const election = await getElection(electionSlug);
+  const election = await getScheduledElection(electionSlug);
   if (!election) return { chased: 0, outcomes: [] };
 
   const nominations = await listNominations(electionSlug);
@@ -1913,7 +1980,7 @@ export async function sendCallForNominations(
   sentByProfileId: string
 ): Promise<Result<{ institutions: number; sent: number; failed: number; problems: string[] }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   const { data: existing } = await db
@@ -2001,7 +2068,7 @@ export async function closeNominations(
   }>
 > {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
   if (election.status !== "nominating")
     return fail(`Nominations cannot be closed from status "${election.status}".`);
@@ -2086,7 +2153,7 @@ export async function getBallotCandidates(election: Election): Promise<BallotCan
 }
 
 export interface BallotState {
-  election: Election;
+  election: ScheduledElection;
   candidates: BallotCandidate[];
   organization: { id: string; name: string } | null;
   otherOrganizations: { id: string; name: string }[];
@@ -2107,7 +2174,7 @@ export async function getBallotState(
   preferredOrganizationId?: string
 ): Promise<BallotState | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const actor = await resolveActor(profileId, organizations);
@@ -2206,7 +2273,7 @@ export async function saveBallot(input: {
   abstain: boolean;
 }): Promise<Result<{ selections: string[]; abstain: boolean }>> {
   const db = createAdminClient();
-  const election = await getElection(input.electionSlug);
+  const election = await getScheduledElection(input.electionSlug);
   if (!election) return fail("That election does not exist.");
 
   if (election.status !== "balloting")
@@ -2319,7 +2386,7 @@ export async function getTurnout(
   slug: string
 ): Promise<{ eligible: number; returned: number; abstained: number; outstanding: number } | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const { summary } = await evaluateElectionEligibility(election.id);
@@ -2360,7 +2427,7 @@ export interface SealResult {
  */
 export async function sealElection(slug: string): Promise<Result<SealResult>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
   if (election.status !== "balloting")
     return fail(`This election is "${election.status}" — only a balloting election can be sealed.`);
@@ -2422,7 +2489,7 @@ export interface ElectionCount {
  */
 export async function countElection(slug: string): Promise<Result<ElectionCount>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
   if (election.status !== "sealed" && election.status !== "certified")
     return fail(`Ballots must be sealed before they can be counted — this election is "${election.status}".`);
@@ -2522,7 +2589,7 @@ export async function recordTieResolution(
   }
 ): Promise<Result<null>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
   if (!input.note.trim())
     return fail("Record how the tie was resolved and on what authority — this is the precedent.");
@@ -2585,7 +2652,7 @@ export async function certifyElection(
   input: { certifiedByProfileId: string; scrutineerContactId?: string | null }
 ): Promise<Result<{ elected: CountedResult[]; reconciled: boolean }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   // An ACCLAIMED slate is certified from `nominations_closed`, because it never
@@ -2707,7 +2774,7 @@ export async function certifyElection(
 }
 
 export interface AuditView {
-  election: Election;
+  election: ScheduledElection;
   /** Institutions that returned a ballot. Never how they voted. */
   roll: { organizationName: string; firstCastAt: string; abstained: boolean }[];
   sealedCount: number;
@@ -2731,7 +2798,7 @@ export interface AuditView {
  */
 export async function getAuditView(slug: string): Promise<AuditView | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const { data: participation } = await db
@@ -2821,7 +2888,7 @@ export interface NoticeState {
  */
 export async function getNoticeState(slug: string, onDate = today()): Promise<NoticeState | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   // Read from the MEETING — see `recordMembersMeetingSend`.
@@ -2921,7 +2988,7 @@ export async function sendAgmNotice(
   }
 ): Promise<Result<{ sent: number; failed: number; problems: string[]; proxyIncluded: boolean }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   const state = await getNoticeState(slug, input.onDate ?? today());
@@ -3036,7 +3103,7 @@ export async function sendProxyForm(
   slug: string,
   sentByProfileId: string
 ): Promise<Result<{ sent: number; failed: number; problems: string[]; wasLate: boolean }>> {
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   const state = await getNoticeState(slug);
@@ -3114,7 +3181,7 @@ export async function getNominatingCommitteeReport(
   options: { reportDate?: string } = {}
 ): Promise<ReturnType<typeof buildNominatingCommitteeReport> | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const { data: body } = await db
@@ -3247,7 +3314,7 @@ export async function getAgmScript(
   } = {}
 ): Promise<ReturnType<typeof buildAgmScript> | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const [president, treasurer, pastPresident, ed] = await Promise.all([
@@ -3359,7 +3426,7 @@ export async function circulateBallots(
   }>
 > {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   if (election.status !== "balloting")
@@ -3453,7 +3520,7 @@ export async function saveReminderSchedule(
   input: { enabled: boolean; minimumGapDays: number; steps: ReminderStep[] }
 ): Promise<Result<{ plan: ReminderPlan }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   if (input.steps.length === 0 && input.enabled)
@@ -3515,7 +3582,7 @@ export async function getReminderPlan(
   slug: string,
   phase: ReminderPhase = "ballot"
 ): Promise<ReminderPlan | null> {
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
   return planReminders(election.schedule, election.config, phase);
 }
@@ -3527,7 +3594,7 @@ export async function getReminderPlan(
  */
 export async function countOutstandingBallots(slug: string): Promise<number | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const { verdicts } = await evaluateElectionEligibility(election.id);
@@ -3582,7 +3649,7 @@ export async function runDueNominationReminders(
 
   for (const row of live ?? []) {
     const slug = row.slug as string;
-    const election = await getElection(slug);
+    const election = await getScheduledElection(slug);
     if (!election) continue;
 
     const plan = planReminders(election.schedule, election.config, "nominations");
@@ -3681,7 +3748,7 @@ export async function runDueBallotReminders(
 
   for (const row of live ?? []) {
     const slug = row.slug as string;
-    const election = await getElection(slug);
+    const election = await getScheduledElection(slug);
     if (!election) continue;
 
     const plan = planReminders(election.schedule, election.config);
@@ -3769,7 +3836,7 @@ export async function getAgmPackageState(slug: string): Promise<
   | null
 > {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const cfg = election.config as unknown as {
@@ -3855,7 +3922,7 @@ export async function attachFinancialStatements(params: {
   uploadedByProfileId: string;
 }): Promise<Result<{ documentId: string; replaced: boolean }>> {
   const db = createAdminClient();
-  const election = await getElection(params.slug);
+  const election = await getScheduledElection(params.slug);
   if (!election) return fail("That election does not exist.");
 
   const { data: meeting } = await db
@@ -3923,7 +3990,7 @@ export async function getMemberAgmPackage(
   organizations: { organization_id: string; role: string; status: string }[]
 ): Promise<
   | {
-      election: Election;
+      election: ScheduledElection;
       organizationName: string | null;
       blocked: string | null;
       noticeSentAt: string | null;
@@ -3938,7 +4005,7 @@ export async function getMemberAgmPackage(
   | null
 > {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const actor = await resolveActor(profileId, organizations);
@@ -4035,7 +4102,7 @@ export async function sendAgmPackage(
 ): Promise<
   Result<{ institutions: number; sent: number; failed: number; problems: string[]; outstanding: number }>
 > {
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   const pkg = await getAgmPackageState(slug);
@@ -4134,7 +4201,7 @@ export interface CandidateOutcome {
 export async function getCandidateOutcomes(
   slug: string
 ): Promise<{ elected: CandidateOutcome[]; notElected: CandidateOutcome[] } | null> {
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const standing = (await listNominations(slug)).filter(
@@ -4168,7 +4235,7 @@ export async function getCandidateOutcomes(
 
 export async function getResultsAnnouncement(slug: string): Promise<
   | (ResultsAnnouncement & {
-      election: Election;
+      election: ScheduledElection;
       canSend: boolean;
       blockedReason: string | null;
       meetingHasHappened: boolean;
@@ -4179,7 +4246,7 @@ export async function getResultsAnnouncement(slug: string): Promise<
   | null
 > {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const report = await getNominatingCommitteeReport(slug);
@@ -4280,7 +4347,7 @@ export async function getBoardTransition(slug: string): Promise<{
   certified: boolean;
 } | null> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const describe = async (
@@ -4410,7 +4477,7 @@ export async function applyBoardTransition(
       `That takes effect on ${input.effectiveOn}. Moving access before then grants the console to somebody the members have not seated yet, or takes it off a director who is still serving.`
     );
 
-  const election = (await getElection(slug))!;
+  const election = (await getScheduledElection(slug))!;
   const changed: string[] = [];
   const skipped: string[] = [];
 
@@ -4642,7 +4709,7 @@ async function stampTransitionAccess(
 ): Promise<void> {
   const state = await getBoardTransition(slug);
   if (!state) return;
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return;
 
   const until = state.conferenceEndsOn ?? election.schedule.agmDate;
@@ -4680,7 +4747,7 @@ export async function notifyCandidates(
   sentByProfileId: string
 ): Promise<Result<{ elected: number; notElected: number; sent: number; failed: number; problems: string[] }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
   if (election.status !== "certified")
     return fail(
@@ -4827,7 +4894,7 @@ export async function generateAgmAgenda(
   opts: { replace?: boolean; meetingUrl?: string | null } = {}
 ): Promise<Result<{ meetingId: string; items: number; replaced: boolean }>> {
   const db = createAdminClient();
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
 
   const { data: meeting } = await db
@@ -4933,7 +5000,7 @@ export async function getElectedTermsProposal(slug: string): Promise<{
   election: { id: string; bodyId: string; cycleYear: number; status: string };
   terms: ProposedTerm[];
 } | null> {
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   const outcomes = await getCandidateOutcomes(slug);

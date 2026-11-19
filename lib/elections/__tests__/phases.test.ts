@@ -10,8 +10,9 @@
  */
 import { describe, it, expect } from "vitest";
 import { cyclePhase, sectionState, phaseApplies } from "../phases";
-import type { Election } from "../service";
+import type { Election, ScheduledElection } from "../service";
 
+// The fixture always supplies a schedule, so it builds a SCHEDULED election.
 const election = (over: Partial<Election> = {}) =>
   ({
     status: "nominating",
@@ -24,7 +25,7 @@ const election = (over: Partial<Election> = {}) =>
       ballotsCloseAt: "2026-12-07",
     },
     ...over,
-  }) as Election;
+  }) as ScheduledElection;
 
 describe("the phase follows STATUS, not the calendar", () => {
   it("stays in nominations after the closing date, until somebody closes", () => {

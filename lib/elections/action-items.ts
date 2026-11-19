@@ -24,7 +24,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveNoticeWindow } from "./agm-notice";
-import type { Election } from "./service";
+import type { Election, ScheduledElection } from "./service";
 
 /**
  * When notice of the AGM should GO OUT — the first day in the window on which
@@ -33,13 +33,13 @@ import type { Election } from "./service";
  * Those are different dates for a January meeting, and dating the task to the
  * legal deadline is how a notice ends up correctly given into an empty building.
  */
-function noticeShouldGoOut(election: Election): string {
+function noticeShouldGoOut(election: ScheduledElection): string {
   const w = resolveNoticeWindow(election.schedule.agmDate);
   return w.recommendedOn ?? w.closesOn;
 }
 
 /** By-Law Part VII S7(b) — the proxy form deadline. */
-function proxyFormDue(election: Election): string {
+function proxyFormDue(election: ScheduledElection): string {
   return resolveNoticeWindow(election.schedule.agmDate).proxyDueOn;
 }
 
@@ -55,7 +55,7 @@ export interface ElectionTaskTemplate {
   title: string;
   description: string;
   /** Which phase date this hangs off. */
-  dueOn: (election: Election) => string;
+  dueOn: (election: ScheduledElection) => string;
   /** Preferred owner first; later entries are fallbacks if the office is vacant. */
   owners: ElectionRoleKey[];
 }
@@ -237,7 +237,7 @@ async function meetingBefore(date: string): Promise<{ id: string; date: string }
  * title, so a second press does not double the board's list.
  */
 export async function mintElectionActionItems(
-  election: Election,
+  election: ScheduledElection,
   options: { dryRun?: boolean } = {}
 ): Promise<MintedTask[]> {
   const db = createAdminClient();

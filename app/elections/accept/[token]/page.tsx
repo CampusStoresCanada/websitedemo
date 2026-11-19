@@ -72,8 +72,8 @@ export default async function AcceptNominationPage({
 
   const found = previewing
     ? await (async () => {
-        const { getElection } = await import("@/lib/elections/service");
-        const e = await getElection(previewSlug ?? "");
+        const { getScheduledElection } = await import("@/lib/elections/service");
+        const e = await getScheduledElection(previewSlug ?? "");
         return e
           ? {
               nomination: sampleNomination({

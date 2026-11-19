@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerAuthState } from "@/lib/auth/server";
 import {
-  getElection,
+  getScheduledElection,
   listNominatableContacts,
   isOrganizationEligible,
   resolveActor,
@@ -34,7 +34,7 @@ export async function GET(
   const auth = await getServerAuthState();
   if (!auth.user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
 
-  const election = await getElection(slug);
+  const election = await getScheduledElection(slug);
   if (!election) return NextResponse.json({ error: "No such election." }, { status: 404 });
 
   const isGlobalAdmin = auth.globalRole === "admin" || auth.globalRole === "super_admin";

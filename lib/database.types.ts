@@ -7679,17 +7679,17 @@ export type Database = {
       }
       elections: {
         Row: {
-          agm_date: string
-          ballots_close_at: string
-          ballots_open_at: string
+          agm_date: string | null
+          ballots_close_at: string | null
+          ballots_open_at: string | null
           body_id: string
           config: Json
           created_at: string
           cycle_year: number
           id: string
           meeting_id: string | null
-          nominations_close_at: string
-          nominations_open_at: string
+          nominations_close_at: string | null
+          nominations_open_at: string | null
           outcome: string | null
           policy_set_id: string | null
           sealed_at: string | null
@@ -7699,17 +7699,17 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          agm_date: string
-          ballots_close_at: string
-          ballots_open_at: string
+          agm_date?: string | null
+          ballots_close_at?: string | null
+          ballots_open_at?: string | null
           body_id: string
           config: Json
           created_at?: string
           cycle_year: number
           id?: string
           meeting_id?: string | null
-          nominations_close_at: string
-          nominations_open_at: string
+          nominations_close_at?: string | null
+          nominations_open_at?: string | null
           outcome?: string | null
           policy_set_id?: string | null
           sealed_at?: string | null
@@ -7719,17 +7719,17 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          agm_date?: string
-          ballots_close_at?: string
-          ballots_open_at?: string
+          agm_date?: string | null
+          ballots_close_at?: string | null
+          ballots_open_at?: string | null
           body_id?: string
           config?: Json
           created_at?: string
           cycle_year?: number
           id?: string
           meeting_id?: string | null
-          nominations_close_at?: string
-          nominations_open_at?: string
+          nominations_close_at?: string | null
+          nominations_open_at?: string | null
           outcome?: string | null
           policy_set_id?: string | null
           sealed_at?: string | null

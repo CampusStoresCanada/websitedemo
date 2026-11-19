@@ -20,12 +20,12 @@ try {
   /* env may already be set */
 }
 
-const { getElection, evaluateElectionEligibility, countConsecutiveTerms } = await import(
+const { getScheduledElection, evaluateElectionEligibility, countConsecutiveTerms } = await import(
   "../lib/elections/service"
 );
 const { validateSchedule } = await import("../lib/elections/schedule");
 
-const election = await getElection("board-2027");
+const election = await getScheduledElection("board-2027");
 if (!election) throw new Error("board-2027 not found");
 
 console.log("ELECTION");

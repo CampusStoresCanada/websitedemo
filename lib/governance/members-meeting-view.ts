@@ -23,7 +23,8 @@ import {
   evaluateElectionEligibility,
   getAgmPackageState,
   getCandidateOutcomes,
-  getElection,
+  getScheduledElection,
+  type ScheduledElection,
   getNoticeState,
   listNominations,
   today,
@@ -60,7 +61,12 @@ export async function getElectionTimeline(
   slug: string,
   onDate?: string
 ): Promise<TimelineStage[] | null> {
-  const election = await getElection(slug);
+  // ⛔ The SCHEDULED loader. A timeline IS a calendar, and an election with no
+  // members' meeting connected has none -- every election date is the meeting
+  // date minus N days. By `elections_schedule_matches_meeting_link` the two
+  // conditions are the same one, so there is nothing to show and nothing to be
+  // late against.
+  const election = await getScheduledElection(slug);
   if (!election) return null;
 
   // ⛔ By the relation, not by matching dates — `election.meetingId`.
@@ -123,7 +129,11 @@ export async function getMembersMeetingView(
   // resolved first (~150ms) and then everything else fires together. Awaiting
   // the notice state and `electionHalf` in series cost 8.5s + 5.2s instead of
   // the longer of the two.
-  const election = slug ? await getElection(slug) : null;
+  // Reached through `meeting.election`, so this election is connected to THIS
+  // meeting, and connected means scheduled. The scheduled loader states that
+  // rather than leaving it to be assumed, and degrades to no election half if
+  // the invariant is ever violated instead of printing a null date.
+  const election = slug ? await getScheduledElection(slug) : null;
 
   const [noticeState, agmPackage, eventResult, electionFacts, candidateOutcomes] =
     await Promise.all([
@@ -211,7 +221,9 @@ function meetingHalfOf(
 
 /** The election half of the spine's facts. */
 async function electionHalf(
-  election: NonNullable<Awaited<ReturnType<typeof getElection>>>
+  // Reachable only through a connected election, and connected means scheduled,
+  // so the calendar is present by construction rather than by assumption.
+  election: ScheduledElection
 ): Promise<ElectionFacts> {
   const db = createAdminClient();
   const cfg = election.config as unknown as {

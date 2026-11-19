@@ -29,7 +29,7 @@ import type { Json } from "@/lib/database.types";
 import { CSC_ELECTIONS_CONFIG, type ElectionsConfig } from "./config";
 import { resolveAgmDate, deriveSchedule, validateSchedule } from "./schedule";
 import { mintElectionActionItems, type MintedTask } from "./action-items";
-import { getElection, type Election } from "./service";
+import { getElection, type Election, isScheduled} from "./service";
 import {
   MEMBERS_MEETING_LABELS,
   membersMeetingEventSlug,
@@ -173,8 +173,12 @@ export async function startElectionCycle(input: {
 
   // Minted AFTER the AGM meeting exists, so "Announce the result at the annual
   // general meeting" parents to the AGM rather than to December's meeting.
+  // ⛔ Action items are DUE on dates relative to the meeting, so they cannot be
+  // minted for an election that has no members' meeting connected yet. Once the
+  // election and the meeting are set up separately, minting belongs to the act
+  // that connects them -- that is the moment the due dates come into existence.
   const loaded = await getElection(slug);
-  const tasks = loaded ? await mintElectionActionItems(loaded) : [];
+  const tasks = loaded && isScheduled(loaded) ? await mintElectionActionItems(loaded) : [];
 
   return ok({
     slug,

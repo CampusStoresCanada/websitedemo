@@ -474,7 +474,7 @@ try {
     ballots_close_at: iso(20),
   }).eq("id", election.id);
 
-  const coherence = validateSchedule((await svc.getElection(SLUG))!.schedule);
+  const coherence = validateSchedule((await svc.getScheduledElection(SLUG))!.schedule);
   check("ballot schedule is coherent", coherence.length === 0, coherence.join("; "));
 
   const closed = await svc.closeNominations(SLUG);
@@ -489,7 +489,7 @@ try {
   step("Casting a ballot");
   const voter = invites[0];
   const voterOrgs = [{ organization_id: voter.organizationId, role: "org_admin", status: "active" }];
-  const ballotElection = (await svc.getElection(SLUG))!;
+  const ballotElection = (await svc.getScheduledElection(SLUG))!;
   const ballotCandidates = await svc.getBallotCandidates(ballotElection);
   check("candidates read from the frozen status", ballotCandidates.length === 2, `${ballotCandidates.length}`);
   check("candidates are alphabetical",

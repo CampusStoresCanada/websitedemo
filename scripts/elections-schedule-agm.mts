@@ -17,12 +17,12 @@ process.env.ELECTIONS_SUPPRESS_EMAIL = "1";
 
 const slug = process.argv[2] ?? "board-2027";
 const { createAdminClient } = await import("../lib/supabase/admin");
-const { getElection } = await import("../lib/elections/service");
+const { getScheduledElection } = await import("../lib/elections/service");
 const { ensureAgmMeetingAndEvent } = await import("../lib/elections/cycle");
 const { mintElectionActionItems } = await import("../lib/elections/action-items");
 
 const db = createAdminClient();
-const election = await getElection(slug);
+const election = await getScheduledElection(slug);
 if (!election) throw new Error(`${slug} not found`);
 
 const started = (election.config as unknown as { startedBy?: string }).startedBy;

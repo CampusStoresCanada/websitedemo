@@ -17,10 +17,10 @@ process.env.ELECTIONS_SUPPRESS_EMAIL = "1";
 const slug = process.argv[2] ?? "board-2027";
 const dryRun = process.argv.includes("--dry");
 
-const { getElection } = await import("../lib/elections/service");
+const { getScheduledElection } = await import("../lib/elections/service");
 const { mintElectionActionItems } = await import("../lib/elections/action-items");
 
-const election = await getElection(slug);
+const election = await getScheduledElection(slug);
 if (!election) throw new Error(`${slug} not found`);
 
 console.log(`${dryRun ? "DRY RUN — " : ""}action items for ${slug} (AGM ${election.schedule.agmDate})\n`);
