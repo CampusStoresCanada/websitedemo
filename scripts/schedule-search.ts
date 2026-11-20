@@ -1,7 +1,10 @@
 /**
  * RUN THE SCHEDULER ON THIS MACHINE, as hard as you like.
  *
- *   npx tsx --env-file=.env.local scripts/schedule-search.ts <conferenceId> [options]
+ *   npx tsx --tsconfig tsconfig.scripts.json --env-file=.env.local scripts/schedule-search.ts <conferenceId> [options]
+ *
+ * ⛔ `--tsconfig tsconfig.scripts.json` is required: without it the run dies on
+ *   "Cannot find module 'server-only'".
  *
  *     --until-cold          draw until it stops improving (DEFAULT)
  *     --patience N          consecutive non-improving draws before stopping (default 150,
@@ -40,7 +43,7 @@ import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
 import { sendSchedulesForRun } from "@/lib/conference/schedule-delivery";
 import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
-import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
+import { buildSuiteOrgAssignmentsBySuiteId, pinSuiteExhibitors } from "@/lib/conference/suite-assignment";
 import { runSchedulerSearch } from "@/lib/scheduler/run-search";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import type { MeetingSlotInput } from "@/lib/scheduler/types";
@@ -177,23 +180,10 @@ async function main() {
     geometry.suiteOrgAssignmentsBySuiteNumber
   );
 
-  // Only exhibitors whose org actually holds a suite can be scheduled — a booth
-  // without a room does not get meetings.
-  const orgsHoldingSuites = new Set(Object.values(suiteOrgBySuiteId));
-  const exhibitors = candidates.exhibitors.filter((e: (typeof candidates.exhibitors)[number]) => orgsHoldingSuites.has(e.organizationId));
-
-  const suitePinnedExhibitorBySuiteId: Record<string, string> = {};
-  const used = new Set<string>();
-  for (const suite of suites) {
-    const orgId = suiteOrgBySuiteId[suite.id];
-    if (!orgId) continue;
-    const pick = exhibitors.find(
-      (e: (typeof exhibitors)[number]) => e.organizationId === orgId && !used.has(e.registrationId)
-    );
-    if (!pick) continue;
-    suitePinnedExhibitorBySuiteId[suite.id] = pick.registrationId;
-    used.add(pick.registrationId);
-  }
+  // Which seat runs each suite, and so who is scheduled: the same rule the
+  // admin Generate button uses. A booth without a room does not get meetings.
+  const { pinnedSeatBySuiteId: suitePinnedExhibitorBySuiteId, schedulable: exhibitors } =
+    pinSuiteExhibitors(suites, suiteOrgBySuiteId, candidates.exhibitors);
 
   const memberContacts = candidates.delegates
     .map((d: (typeof candidates.delegates)[number]) => ({

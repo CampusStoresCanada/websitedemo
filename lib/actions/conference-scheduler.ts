@@ -10,7 +10,7 @@ import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { generateSchedule } from "@/lib/scheduler/generate";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
-import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
+import { buildSuiteOrgAssignmentsBySuiteId, pinSuiteExhibitors } from "@/lib/conference/suite-assignment";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
 import { lateAdd } from "@/lib/scheduler/late-add";
 import { validateScheduleConstraints } from "@/lib/scheduler/constraints";
@@ -383,30 +383,9 @@ export async function createSchedulerDraftRun(
     const schedulingPolicy = await getSchedulingConfig();
     const scaffolding = await ensureMeetingScaffolding(conferenceId);
     const candidates = await loadEligibleCandidates(conferenceId);
-    // A seat with someone named runs a suite first; an unnamed seat stands in
-    // for its company until a name arrives (meeting-candidates.ts).
-    const orderedExhibitors = [...candidates.exhibitors].sort(
-      (a, b) => Number(!a.userId) - Number(!b.userId) || a.registrationId.localeCompare(b.registrationId)
-    );
-    const exhibitorByOrg = new Map<string, ExhibitorProfile[]>();
-    for (const exhibitor of orderedExhibitors) {
-      const list = exhibitorByOrg.get(exhibitor.organizationId) ?? [];
-      list.push(exhibitor);
-      exhibitorByOrg.set(exhibitor.organizationId, list);
-    }
-    const usedPinnedExhibitorRegistrationIds = new Set<string>();
-    const suitePinnedExhibitorBySuiteId: Record<string, string> = {};
-    for (const suite of scaffolding.suites) {
-      const orgId = scaffolding.suiteOrgAssignmentsBySuiteId[suite.id];
-      if (!orgId) continue;
-      const candidatesForOrg = exhibitorByOrg.get(orgId) ?? [];
-      const chosen = candidatesForOrg.find(
-        (row) => !usedPinnedExhibitorRegistrationIds.has(row.registrationId)
-      );
-      if (!chosen) continue;
-      suitePinnedExhibitorBySuiteId[suite.id] = chosen.registrationId;
-      usedPinnedExhibitorRegistrationIds.add(chosen.registrationId);
-    }
+    // Which seat runs each suite: one rule, shared with scripts/schedule-search.ts.
+    const { pinnedSeatBySuiteId: suitePinnedExhibitorBySuiteId, schedulable: schedulableExhibitors } =
+      pinSuiteExhibitors(scaffolding.suites, scaffolding.suiteOrgAssignmentsBySuiteId, candidates.exhibitors);
 
     /**
      * MEETINGS ARE A SUITE BENEFIT. An exhibitor whose booth includes no suite
@@ -467,15 +446,6 @@ export async function createSchedulerDraftRun(
       };
     }
 
-    /**
-     * ⛔ The seats that RUN a suite, one per suite — not every seat at a
-     * suite-holding company. A company's other staff seats have no room of
-     * their own; counting them made each a phantom exhibitor "below target"
-     * and divided the per-exhibitor target by people instead of rooms. Now that
-     * unnamed seats stand in for their company this would be most of them.
-     */
-    const pinnedSeatIds = new Set(Object.values(suitePinnedExhibitorBySuiteId));
-    const schedulableExhibitors = candidates.exhibitors.filter((e) => pinnedSeatIds.has(e.registrationId));
     const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
     const exhibitorsWithoutSuiteEntitlement = candidates.exhibitors.filter(
       (e) => !orgIdsHoldingSuites.has(e.organizationId)

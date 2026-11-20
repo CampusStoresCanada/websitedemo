@@ -45,3 +45,47 @@ export function buildSuiteOrgAssignmentsBySuiteId(
  * nothing can take a room it does not hold. A guard that can never fire reads
  * like protection and is really just something else to keep in step.
  */
+
+/**
+ * Which exhibitor seat runs each suite, and so which seats are scheduled.
+ *
+ * ⛔ ONE RULE, TWO CALLERS: the admin Generate button and
+ * `scripts/schedule-search.ts`. The script carried its own copy, which fell
+ * behind the button on 2026-10-26: it pinned whichever seat came first rather
+ * than a named one, so a company's named person could be left off their own
+ * suite's meetings, and it passed every staff seat to the solver, so 54 seats
+ * with no room each read as an exhibitor below target (rehearsal, 2026-11-20).
+ *
+ * A seat with someone named runs a suite first; an unnamed seat stands in for
+ * its company until a name arrives. One seat per suite, never reused: two
+ * suites need two people.
+ */
+export function pinSuiteExhibitors<
+  E extends { registrationId: string; organizationId: string; userId: string }
+>(
+  suites: Suite[],
+  suiteOrgBySuiteId: Record<string, string>,
+  exhibitors: readonly E[]
+): { pinnedSeatBySuiteId: Record<string, string>; schedulable: E[] } {
+  const ordered = [...exhibitors].sort(
+    (a, b) => Number(!a.userId) - Number(!b.userId) || a.registrationId.localeCompare(b.registrationId)
+  );
+  const byOrg = new Map<string, E[]>();
+  for (const exhibitor of ordered) {
+    const list = byOrg.get(exhibitor.organizationId) ?? [];
+    list.push(exhibitor);
+    byOrg.set(exhibitor.organizationId, list);
+  }
+  const used = new Set<string>();
+  const pinnedSeatBySuiteId: Record<string, string> = {};
+  for (const suite of suites) {
+    const orgId = suiteOrgBySuiteId[suite.id];
+    if (!orgId) continue;
+    const chosen = (byOrg.get(orgId) ?? []).find((row) => !used.has(row.registrationId));
+    if (!chosen) continue;
+    pinnedSeatBySuiteId[suite.id] = chosen.registrationId;
+    used.add(chosen.registrationId);
+  }
+  // The seats that RUN a suite, not every seat at a suite-holding company.
+  return { pinnedSeatBySuiteId, schedulable: exhibitors.filter((e) => used.has(e.registrationId)) };
+}
