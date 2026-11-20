@@ -137,10 +137,22 @@ export default async function BigIdeasDayPage({
   const talksVenueId = refOf(slot?.id, "where");
   const dayId = refOf(session.id, "when");
 
-  const venueIds = [tablesVenueId, talksVenueId].filter((v): v is string => Boolean(v));
+  const venueIds = [tablesVenueId, talksVenueId, dayId].filter((v): v is string => Boolean(v));
   const { data: venues } = venueIds.length
-    ? await db.from("conference_entities").select("id, name").in("id", venueIds)
+    ? await db.from("conference_entities").select("id, name, attributes").in("id", venueIds)
     : { data: [] };
+  // The day is on the schedule too. "2027-02-04" read as UTC so it cannot slip
+  // a day in a runtime west of Greenwich.
+  const dayIso = ((venues ?? []).find((v) => v.id === dayId)?.attributes as { date?: unknown } | null)?.date;
+  const dayLabel =
+    typeof dayIso === "string"
+      ? new Date(`${dayIso}T00:00:00Z`).toLocaleDateString("en-CA", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          timeZone: "UTC",
+        })
+      : null;
   const venueName = (id: string | null) => (venues ?? []).find((v) => v.id === id)?.name ?? null;
   const tablesRoom = venueName(tablesVenueId);
   const talksRoom = venueName(talksVenueId);
@@ -160,18 +172,29 @@ export default async function BigIdeasDayPage({
     .filter((r) => r.to_entity_id === dayId && inRoom.has(r.from_entity_id))
     .map((r) => r.from_entity_id);
   const { data: mealRows } = sameDayInRoom.length
-    ? await db.from("conference_entities").select("attributes").eq("kind", "meal").in("id", sameDayInRoom)
+    ? await db.from("conference_entities").select("name, attributes").eq("kind", "meal").in("id", sameDayInRoom)
     : { data: [] };
   const meals = (mealRows ?? [])
-    .map((m) => (m.attributes as Record<string, unknown> | null) ?? {})
-    .filter((a): a is { start_time: string; end_time: string } =>
-      typeof a.start_time === "string" && typeof a.end_time === "string"
+    .map((m) => ({ name: m.name, a: (m.attributes as Record<string, unknown> | null) ?? {} }))
+    .filter((m): m is { name: string; a: { start_time: string; end_time: string } } =>
+      typeof m.a.start_time === "string" && typeof m.a.end_time === "string"
     )
-    .map((a) => ({ start: a.start_time, end: a.end_time }));
+    // "Lunch - Thursday" is named for the build workspace; the day is already
+    // in the heading here.
+    .map((m) => ({ label: m.name.split(" - ")[0].trim(), start: m.a.start_time, end: m.a.end_time }));
   const talkWindows =
     talksRoom && typeof attrs.start_time === "string" && typeof attrs.end_time === "string"
       ? openWindows({ start: attrs.start_time, end: attrs.end_time }, meals)
       : [];
+
+  // The presentation room's day in order: what is served, and the stretches
+  // between where presentations run.
+  const dayStart = typeof attrs.start_time === "string" ? attrs.start_time : null;
+  const dayEnd = typeof attrs.end_time === "string" ? attrs.end_time : null;
+  const glance = [
+    ...meals.map((m) => ({ start: toMinutes(m.start), end: toMinutes(m.end), label: m.label, talks: false })),
+    ...talkWindows.map((w) => ({ ...w, label: "Presentations", talks: true })),
+  ].sort((a, z) => a.start - z.start);
 
   const auth = await getOptionalAuthContext();
   const isAdmin = Boolean(auth && isGlobalAdmin(auth.globalRole));
@@ -279,88 +302,12 @@ export default async function BigIdeasDayPage({
       : null;
   const prospectOffers = (namedProspect?.offers ?? []).filter((o) => /^Big Ideas Day/.test(o.name));
 
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-12">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[#EE2A2E]">
-        {conference.name}
-      </p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1A1A1A]">Big Ideas Day</h1>
+  // A company reading its own pay-first link came here to buy, so its checkout
+  // stays near the top. For everyone else the price follows what is on.
+  const buyFirst = Boolean(!auth && namedProspect && prospectOffers.length > 0);
 
-      {purpose ? (
-        <p className="mt-6 text-base leading-relaxed text-gray-700">{purpose}</p>
-      ) : null}
-
-      {/*
-        Wording shared with the invitation emails on purpose — "unconference"
-        and "participant, not an exhibitor". A reader who clicks through from
-        the email should meet the same words twice rather than wonder whether
-        this is the same thing.
-      */}
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">How the day runs</h2>
-        <p className="mt-3 text-sm leading-relaxed text-gray-700">
-          It runs as an <strong>unconference</strong>.
-        </p>
-        <ul className="mt-3 space-y-2 text-sm leading-relaxed text-gray-700">
-          <li>
-            {tablesRoom ? <strong>{tablesRoom}</strong> : "The main room"} runs table
-            conversations that members put forward in advance. Pull up a chair at whichever
-            table you want, and move when the conversation stops being useful to you.
-          </li>
-          <li>
-            {talksRoom ? <strong>{talksRoom}</strong> : "A second room"} runs{" "}
-            {PRESENTATION_MINUTES}-minute presentations from partners.
-            {talkWindows.length > 0 ? (
-              <>
-                {" "}
-                They run {talkWindows.map((w) => `${clock(w.start)} to ${clock(w.end)}`).join(", ")}.
-              </>
-            ) : null}
-            {meals.length > 0 ? " Breakfast, lunch and the breaks are served in the same room." : null}{" "}
-            You can drift between the two rooms all day.
-          </li>
-          <li>
-            Presenters stay in the room afterwards rather than packing up, so a session
-            starts a conversation instead of ending one.
-          </li>
-          {/*
-            ⛔ This said "the manager and director sessions folded into this
-            day". Removed 2026-10-06: it came to me from another session citing
-            the Town Hall recording, I never saw that recording, and Steve — who
-            ran the town hall — did not recognise the claim. It was never in the
-            invitation emails either, so the page was the only place it reached a
-            reader. Do not restore it without a source someone can point at.
-          */}
-          <li>
-            It is open to every role in the store, not only the general merchandise buyer —
-            the course materials person, the operations lead and the people who never get
-            sent to a trade show are all in the room.
-          </li>
-        </ul>
-      </section>
-
-      {partnersInRoom.length > 0 ? (
-        <section className="mt-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-            Partners in the room so far
-          </h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {partnersInRoom.map((partner) => (
-              <span
-                key={partner.id}
-                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
-              >
-                {partner.logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={partner.logoUrl} alt="" className="h-4 w-4 rounded-full object-contain" />
-                ) : null}
-                {partner.name}
-              </span>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
+  const takingPart = (
+    <>
       {/*
         Signed out: the room, not the price. Participation costs different
         amounts for different partners and nothing at all for members, so any
@@ -486,6 +433,67 @@ export default async function BigIdeasDayPage({
           )}
         </section>
       ) : null}
+    </>
+  );
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#EE2A2E]">
+        {conference.name}
+      </p>
+      <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1A1A1A]">Big Ideas Day</h1>
+
+      {/*
+        When and where, before anything else. The page used to describe the day
+        without ever saying which day it was.
+      */}
+      {dayLabel || (dayStart && dayEnd) ? (
+        <p className="mt-2 text-sm font-medium text-gray-700">
+          {[
+            dayLabel,
+            dayStart && dayEnd ? `${clock(toMinutes(dayStart))} to ${clock(toMinutes(dayEnd))}` : null,
+            [tablesRoom, talksRoom].filter(Boolean).join(" and ") || null,
+          ]
+            .filter(Boolean)
+            .join(" \u00b7 ")}
+        </p>
+      ) : null}
+
+      {purpose ? (
+        <p className="mt-6 text-base leading-relaxed text-gray-700">{purpose}</p>
+      ) : null}
+
+      {glance.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+            The day at a glance
+          </h2>
+          {tablesRoom && dayStart && dayEnd ? (
+            <p className="mt-3 text-sm leading-relaxed text-gray-700">
+              <strong>Table conversations</strong> run in {tablesRoom} from{" "}
+              {clock(toMinutes(dayStart))} to {clock(toMinutes(dayEnd))}. Alongside them, in{" "}
+              {talksRoom}:
+            </p>
+          ) : null}
+          <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
+            {glance.map((row) => (
+              <li key={`${row.start}-${row.label}`} className="flex gap-4 px-4 py-2.5 text-sm">
+                <span className="w-28 shrink-0 tabular-nums text-gray-500">
+                  {clock(row.start)} to {clock(row.end)}
+                </span>
+                <span className={row.talks ? "font-semibold text-gray-900" : "text-gray-600"}>
+                  {row.label}
+                  {row.talks ? (
+                    <span className="ml-2 font-normal text-gray-500">{PRESENTATION_MINUTES} minutes each</span>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {buyFirst ? takingPart : null}
 
       {board?.success ? (
         <TopicBoard
@@ -503,6 +511,102 @@ export default async function BigIdeasDayPage({
           signedOut={!auth}
         />
       ) : null}
+
+      {partnersInRoom.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+            Partners in the room so far
+          </h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {partnersInRoom.map((partner) => (
+              <span
+                key={partner.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
+              >
+                {partner.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={partner.logoUrl} alt="" className="h-4 w-4 rounded-full object-contain" />
+                ) : null}
+                {partner.name}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {buyFirst ? null : takingPart}
+
+      {/*
+        Wording shared with the invitation emails on purpose — "unconference"
+        and "participant, not an exhibitor". A reader who clicks through from
+        the email should meet the same words twice rather than wonder whether
+        this is the same thing.
+      */}
+      <section className="mt-12 border-t border-gray-200 pt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">How it works</h2>
+        <p className="mt-3 text-sm leading-relaxed text-gray-700">
+          It runs as an <strong>unconference</strong>.
+        </p>
+        <ul className="mt-3 space-y-2 text-sm leading-relaxed text-gray-700">
+          <li>
+            {tablesRoom ? <strong>{tablesRoom}</strong> : "The main room"} runs table
+            conversations that members put forward in advance. Pull up a chair at whichever
+            table you want, and move when the conversation stops being useful to you.
+          </li>
+          <li>
+            {talksRoom ? <strong>{talksRoom}</strong> : "A second room"} runs{" "}
+            {PRESENTATION_MINUTES}-minute presentations from partners. You can drift between
+            the two rooms all day.
+          </li>
+          <li>
+            Presenters stay in the room afterwards rather than packing up, so a session
+            starts a conversation instead of ending one.
+          </li>
+          {/*
+            ⛔ This said "the manager and director sessions folded into this
+            day". Removed 2026-10-06: it came to me from another session citing
+            the Town Hall recording, I never saw that recording, and Steve — who
+            ran the town hall — did not recognise the claim. It was never in the
+            invitation emails either, so the page was the only place it reached a
+            reader. Do not restore it without a source someone can point at.
+          */}
+          <li>
+            It is open to every role in the store, not only the general merchandise buyer —
+            the course materials person, the operations lead and the people who never get
+            sent to a trade show are all in the room.
+          </li>
+        </ul>
+
+        {/*
+          Moved here from above the lists, 2026-11-20, so a member reaches the
+          first thing they can vote on without reading five paragraphs. The
+          words are the ones the board carried; only the place changed.
+        */}
+        <h3 className="mt-6 text-sm font-semibold text-gray-900">Voting and picking</h3>
+        <div className="mt-2 space-y-3 text-sm leading-relaxed text-gray-700">
+          <p>
+            If none of it appeals, say so, because that tells us something silence
+            doesn&apos;t. Either way come back later, since people keep adding and the list
+            in December won&apos;t be the list today.
+          </p>
+          <p>
+            Picking a table conversation isn&apos;t a ballot and it isn&apos;t binding on us.
+            We aren&apos;t choosing on votes alone, we might fold two topics together when
+            they&apos;re really the same conversation, and we&apos;ll place things so the day
+            holds together. What your picks do is tell us what people actually want to spend
+            an hour on, which is the thing we can&apos;t guess from here.
+          </p>
+          <p>
+            One thing worth knowing before you pick. If you choose a table conversation, be
+            ready to sit at that table on the day. You don&apos;t need to prepare anything,
+            bring slides, or have the answer. Just turn up and talk.
+          </p>
+          <p>
+            Change your mind as often as you like. Nothing&apos;s final until we publish the
+            day.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }

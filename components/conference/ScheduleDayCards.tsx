@@ -189,6 +189,14 @@ export default function ScheduleDayCards({
               RSVP →
             </Link>
           )}
+          {item.id === BIG_IDEAS_DAY_ID && (
+            <Link
+              href="/big-ideas-day"
+              className="mt-1 inline-block text-xs font-medium text-[#EE2A2E] hover:underline"
+            >
+              See what&apos;s on →
+            </Link>
+          )}
           {children.length > 0 && (
             <ul className="mt-2 space-y-2 border-l-2 border-[#E5E5E5] pl-3">
               {children.map((child) => renderItem(child, childrenOf))}

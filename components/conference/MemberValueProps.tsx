@@ -23,6 +23,7 @@ const DAYS = [
     color: "#64748B",
     tagline: "The floor, plus Big Ideas Day.",
     detail: "A half day on the trade show floor with every exhibitor, alongside Big Ideas Day, a combined track for Course Materials, Operations, and their related vendors to present, discuss, and come together around the big ideas shaping our industry now and in the future.",
+    link: { href: "/big-ideas-day", label: "See what's on at Big Ideas Day →" },
   },
 ];
 
@@ -71,6 +72,11 @@ export default async function MemberValueProps({
             </h3>
             <p className="mt-2 text-sm font-medium text-[#1A1A1A]">{day.tagline}</p>
             <p className="mt-2 text-sm text-[#1A1A1A]/80">{day.detail}</p>
+            {"link" in day && day.link ? (
+              <Link href={day.link.href} className="mt-3 text-sm font-medium text-[#EE2A2E] hover:underline">
+                {day.link.label}
+              </Link>
+            ) : null}
           </div>
         ))}
       </div>

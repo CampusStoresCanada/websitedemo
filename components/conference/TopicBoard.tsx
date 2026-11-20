@@ -148,34 +148,12 @@ export default function TopicBoard({
       */}
       <h2 className="text-lg font-semibold text-gray-900">What gets talked about is up to you</h2>
       {canVote ? (
-        <div className="mt-2 max-w-2xl space-y-3 text-sm leading-relaxed text-gray-600">
-          <p>
-            The topics below come from members and from partners. Partners pitch
-            presentations and members put forward table conversations. Vote for the
-            presentations you want to see, and pick the table conversations you&apos;d
-            want to sit at. Choose as many as you like. If none of it appeals, say so,
-            because that tells us something silence doesn&apos;t. Either way come back
-            later, since people keep adding and the list in December won&apos;t be the list
-            today.
-          </p>
-          <p>If something&apos;s missing, add it. That&apos;s rather the point.</p>
-          <p>
-            Picking a table conversation isn&apos;t a ballot and it isn&apos;t binding on us. We
-            aren&apos;t choosing on votes alone, we might fold two topics together when
-            they&apos;re really the same conversation, and we&apos;ll place things so the
-            day holds together. What your picks do is tell us what people actually want to
-            spend an hour on, which is the thing we can&apos;t guess from here.
-          </p>
-          <p>
-            One thing worth knowing before you pick. If you choose a table conversation, be
-            ready to sit at that table on the day. You don&apos;t need to prepare anything, bring slides,
-            or have the answer. Just turn up and talk.
-          </p>
-          <p className="text-gray-500">
-            Change your mind as often as you like. Nothing&apos;s final until we publish the
-            day.
-          </p>
-        </div>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-gray-600">
+          {/* The longer explanation lives under "How it works" at the foot of the page. */}
+          Vote for the presentations you want to see and pick the table conversations
+          you&apos;d want to sit at. Choose as many as you like, and if something&apos;s
+          missing, add it.
+        </p>
       ) : (
         <p className="mt-1 max-w-2xl text-sm text-gray-600">
           The topics below come from members and from partners. Partners pitch
