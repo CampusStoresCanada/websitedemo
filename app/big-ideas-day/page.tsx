@@ -230,7 +230,36 @@ export default async function BigIdeasDayPage({
   const admitting = new Set((involvedRefs ?? []).map((r) => r.from_entity_id));
   const alreadyIn = (reach ?? []).some((b) => b.entity_id && admitting.has(b.entity_id));
 
-  const board = buyerOrgId ? await loadTopicBoard(conference.id, buyerOrgId) : null;
+  /*
+    Which partners are coming, for everyone including a signed-out reader.
+
+    Kari, via Sean, 2026-11-19: "the description doesn't give much and I think
+    having a way to see who is signed up would help." Same source and the same
+    chips as "Who you'll meet" on /attend: real purchases in entity_balances,
+    not the catalogue. Asked of the graph (`admitting`), never of an offer
+    name, for the reason spelled out above.
+
+    Partners only. A member store's registration is not something it agreed to
+    have advertised, and "who is signed up" in that thread meant the partners.
+  */
+  const { data: holderRows } = admitting.size
+    ? await db
+        .from("entity_balances")
+        .select("organizations(id, name, type, is_test, logo_url)")
+        .eq("conference_id", conference.id)
+        .in("entity_id", [...admitting])
+    : { data: [] };
+  const partnersById = new Map<string, { id: string; name: string; logoUrl: string | null }>();
+  for (const row of holderRows ?? []) {
+    const o = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
+    if (!o || o.is_test || o.type !== "Vendor Partner") continue;
+    partnersById.set(o.id, { id: o.id, name: o.name, logoUrl: o.logo_url });
+  }
+  const partnersInRoom = [...partnersById.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // The board is public: what has been pitched is half of "what is this day".
+  // Picking and proposing still need a sign-in, which loadTopicBoard decides.
+  const board = await loadTopicBoard(conference.id, buyerOrgId);
 
   const signInHref = `/login?next=${encodeURIComponent("/big-ideas-day")}`;
 
@@ -309,6 +338,28 @@ export default async function BigIdeasDayPage({
           </li>
         </ul>
       </section>
+
+      {partnersInRoom.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+            Partners in the room so far
+          </h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {partnersInRoom.map((partner) => (
+              <span
+                key={partner.id}
+                className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700"
+              >
+                {partner.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={partner.logoUrl} alt="" className="h-4 w-4 rounded-full object-contain" />
+                ) : null}
+                {partner.name}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/*
         Signed out: the room, not the price. Participation costs different
