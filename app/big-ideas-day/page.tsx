@@ -43,6 +43,46 @@ export const metadata = {
  */
 const PITCH_DEADLINE = { iso: "2026-12-04", label: "Friday, December 4" };
 
+/** Steve, 2026-11-20: a presentation is "a formal 20 minute thing". */
+const PRESENTATION_MINUTES = 20;
+/** The thing a partner buys to pitch one. Same name conference-topics.ts gates on. */
+const PRESENTATION_OFFER_NAME = "Big Ideas Presentations";
+
+const toMinutes = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+};
+const clock = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  return `${((h + 11) % 12) + 1}:${String(minutes % 60).padStart(2, "0")}`;
+};
+
+/**
+ * When presentations can run: the day, minus whatever is being served in the
+ * same room.
+ *
+ * Derived rather than typed in, because the presentations share their room
+ * with breakfast, lunch and the breaks. Move lunch and these move with it; a
+ * hand-written list would keep promising a talk in the middle of the buffet.
+ */
+function openWindows(
+  day: { start: string; end: string },
+  busy: Array<{ start: string; end: string }>
+): Array<{ start: number; end: number }> {
+  const windows: Array<{ start: number; end: number }> = [];
+  let cursor = toMinutes(day.start);
+  const end = toMinutes(day.end);
+  for (const b of [...busy].sort((a, z) => toMinutes(a.start) - toMinutes(z.start))) {
+    const from = toMinutes(b.start);
+    const to = toMinutes(b.end);
+    if (to <= cursor || from >= end) continue;
+    if (from - cursor >= PRESENTATION_MINUTES) windows.push({ start: cursor, end: from });
+    cursor = Math.max(cursor, to);
+  }
+  if (end - cursor >= PRESENTATION_MINUTES) windows.push({ start: cursor, end });
+  return windows;
+}
+
 export default async function BigIdeasDayPage({
   searchParams,
 }: {
@@ -72,6 +112,66 @@ export default async function BigIdeasDayPage({
 
   const attrs = (session.attributes as Record<string, unknown> | null) ?? {};
   const purpose = typeof attrs.purpose === "string" ? attrs.purpose : null;
+
+  /*
+    Two rooms, read off the schedule rather than named here. The table
+    conversations are wherever the session is; the presentations are wherever
+    the presentation slot is. Each is one `where` reference in the build
+    workspace, so a room change there reaches this page and the schedule alike.
+  */
+  const { data: slot } = await db
+    .from("conference_entities")
+    .select("id")
+    .eq("conference_id", conference.id)
+    .eq("name", PRESENTATION_OFFER_NAME)
+    .maybeSingle();
+  const { data: placeRefs } = await db
+    .from("conference_entity_refs")
+    .select("from_entity_id, role, to_entity_id")
+    .eq("conference_id", conference.id)
+    .in("from_entity_id", [session.id, ...(slot ? [slot.id] : [])])
+    .in("role", ["where", "when"]);
+  const refOf = (fromId: string | undefined, role: string) =>
+    (placeRefs ?? []).find((r) => r.from_entity_id === fromId && r.role === role)?.to_entity_id ?? null;
+  const tablesVenueId = refOf(session.id, "where");
+  const talksVenueId = refOf(slot?.id, "where");
+  const dayId = refOf(session.id, "when");
+
+  const venueIds = [tablesVenueId, talksVenueId].filter((v): v is string => Boolean(v));
+  const { data: venues } = venueIds.length
+    ? await db.from("conference_entities").select("id, name").in("id", venueIds)
+    : { data: [] };
+  const venueName = (id: string | null) => (venues ?? []).find((v) => v.id === id)?.name ?? null;
+  const tablesRoom = venueName(tablesVenueId);
+  const talksRoom = venueName(talksVenueId);
+
+  // Whatever is served in the presentation room that day.
+  const { data: sharedRefs } =
+    talksVenueId && dayId
+      ? await db
+          .from("conference_entity_refs")
+          .select("from_entity_id, role, to_entity_id")
+          .eq("conference_id", conference.id)
+          .in("to_entity_id", [talksVenueId, dayId])
+          .in("role", ["where", "when"])
+      : { data: [] };
+  const inRoom = new Set((sharedRefs ?? []).filter((r) => r.to_entity_id === talksVenueId).map((r) => r.from_entity_id));
+  const sameDayInRoom = (sharedRefs ?? [])
+    .filter((r) => r.to_entity_id === dayId && inRoom.has(r.from_entity_id))
+    .map((r) => r.from_entity_id);
+  const { data: mealRows } = sameDayInRoom.length
+    ? await db.from("conference_entities").select("attributes").eq("kind", "meal").in("id", sameDayInRoom)
+    : { data: [] };
+  const meals = (mealRows ?? [])
+    .map((m) => (m.attributes as Record<string, unknown> | null) ?? {})
+    .filter((a): a is { start_time: string; end_time: string } =>
+      typeof a.start_time === "string" && typeof a.end_time === "string"
+    )
+    .map((a) => ({ start: a.start_time, end: a.end_time }));
+  const talkWindows =
+    talksRoom && typeof attrs.start_time === "string" && typeof attrs.end_time === "string"
+      ? openWindows({ start: attrs.start_time, end: attrs.end_time }, meals)
+      : [];
 
   const auth = await getOptionalAuthContext();
   const isAdmin = Boolean(auth && isGlobalAdmin(auth.globalRole));
@@ -174,11 +274,22 @@ export default async function BigIdeasDayPage({
         </p>
         <ul className="mt-3 space-y-2 text-sm leading-relaxed text-gray-700">
           <li>
-            The main room runs table conversations that members and vendors put forward in
-            advance. Pull up a chair at whichever table you want, and move when the
-            conversation stops being useful to you.
+            {tablesRoom ? <strong>{tablesRoom}</strong> : "The main room"} runs table
+            conversations that members put forward in advance. Pull up a chair at whichever
+            table you want, and move when the conversation stops being useful to you.
           </li>
-          <li>A second room runs short presentations. Everyone drifts between the two.</li>
+          <li>
+            {talksRoom ? <strong>{talksRoom}</strong> : "A second room"} runs{" "}
+            {PRESENTATION_MINUTES}-minute presentations from partners.
+            {talkWindows.length > 0 ? (
+              <>
+                {" "}
+                They run {talkWindows.map((w) => `${clock(w.start)} to ${clock(w.end)}`).join(", ")}.
+              </>
+            ) : null}
+            {meals.length > 0 ? " Breakfast, lunch and the breaks are served in the same room." : null}{" "}
+            You can drift between the two rooms all day.
+          </li>
           <li>
             Presenters stay in the room afterwards rather than packing up, so a session
             starts a conversation instead of ending one.
@@ -335,6 +446,9 @@ export default async function BigIdeasDayPage({
           canPropose={board.data.canPropose}
           proposeBlockedReason={board.data.proposeBlockedReason}
           deadlineLabel={PITCH_DEADLINE.label}
+          tablesRoom={tablesRoom}
+          talksRoom={talksRoom}
+          presentationMinutes={PRESENTATION_MINUTES}
         />
       ) : null}
     </div>

@@ -7,9 +7,15 @@ import { proposeTopic, saveTopicBallot, type TopicChip } from "@/lib/actions/con
  * The Big Ideas Day topic board: everything proposed, and what this member
  * picked out of it.
  *
- * Member topics and partner topics sit in one list on purpose — they are
- * chosen between under the same rules, so separating them would tell a reader
- * the choice is not really open.
+ * Two headed lists over ONE board. A partner's pitch is a formal presentation
+ * in one room; a member's is an informal table conversation in another (Steve,
+ * 2026-11-20). Under one heading the page told members to "sit at" a talk.
+ *
+ * ⛔ The split is a heading, not a second system. Both lists are the same
+ * chips, the same picks and the same ballot, so the choice is still open
+ * across all of it. What decides the list is who proposed it, which is the
+ * line the deposit already draws: partners pay to pitch a presentation,
+ * members pay nothing to put a table forward.
  */
 export default function TopicBoard({
   conferenceId,
@@ -20,6 +26,9 @@ export default function TopicBoard({
   canPropose,
   proposeBlockedReason,
   deadlineLabel,
+  tablesRoom,
+  talksRoom,
+  presentationMinutes,
 }: {
   conferenceId: string;
   organizationId: string | null;
@@ -30,7 +39,29 @@ export default function TopicBoard({
   proposeBlockedReason: string | null;
   /** e.g. "Friday, December 4" — the date pitches have to be in by. */
   deadlineLabel: string | null;
+  /** Room names off the schedule. Null until the build workspace names one. */
+  tablesRoom: string | null;
+  talksRoom: string | null;
+  presentationMinutes: number;
 }) {
+  const presentations = topics.filter((t) => t.orgType === "Vendor Partner");
+  const tables = topics.filter((t) => t.orgType !== "Vendor Partner");
+  const groups = [
+    {
+      key: "presentations",
+      heading: "Presentations",
+      where: [`${presentationMinutes} minutes each`, talksRoom].filter(Boolean).join(", "),
+      empty: "No presentations pitched yet.",
+      topics: presentations,
+    },
+    {
+      key: "tables",
+      heading: "Table conversations",
+      where: tablesRoom ?? "",
+      empty: "No table conversations put forward yet.",
+      topics: tables,
+    },
+  ];
   const [chosen, setChosen] = useState<string[]>(topics.filter((t) => t.chosen).map((t) => t.id));
   const [voted, setVoted] = useState(hasBallot);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
@@ -98,8 +129,9 @@ export default function TopicBoard({
       {canVote ? (
         <div className="mt-2 max-w-2xl space-y-3 text-sm leading-relaxed text-gray-600">
           <p>
-            The topics below come from members and from partners, all in one list. Pick the
-            ones you&apos;d want to sit at. Pick all of them. If none of it appeals, say so,
+            The topics below come from members and from partners. Partners pitch
+            presentations and members put forward table conversations. Pick the ones
+            you&apos;d want to be in the room for. Pick all of them. If none of it appeals, say so,
             because that tells us something silence doesn&apos;t. Either way come back
             later, since people keep adding and the list in December won&apos;t be the list
             today.
@@ -113,8 +145,8 @@ export default function TopicBoard({
             spend an hour on, which is the thing we can&apos;t guess from here.
           </p>
           <p>
-            One thing worth knowing before you pick. If you choose a topic, be ready to sit
-            at that table on the day. You don&apos;t need to prepare anything, bring slides,
+            One thing worth knowing before you pick. If you choose a table conversation, be
+            ready to sit at that table on the day. You don&apos;t need to prepare anything, bring slides,
             or have the answer. Just turn up and talk.
           </p>
           <p className="text-gray-500">
@@ -124,8 +156,9 @@ export default function TopicBoard({
         </div>
       ) : (
         <p className="mt-1 max-w-2xl text-sm text-gray-600">
-          The topics below come from members and from partners, all in one list. Member
-          stores pick the ones they want to sit at.
+          The topics below come from members and from partners. Partners pitch
+          presentations and members put forward table conversations. Member stores pick
+          the ones they want to be in the room for.
         </p>
       )}
 
@@ -134,8 +167,17 @@ export default function TopicBoard({
           No topics yet. {canPropose ? "Put the first one forward." : ""}
         </p>
       ) : (
-        <ul className="mt-5 space-y-2">
-          {topics.map((topic) => {
+        groups.map((group) => (
+        <div key={group.key} className="mt-6">
+          <h3 className="text-sm font-semibold text-gray-900">
+            {group.heading}
+            {group.where ? <span className="ml-2 font-normal text-gray-500">{group.where}</span> : null}
+          </h3>
+          {group.topics.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">{group.empty}</p>
+          ) : null}
+        <ul className="mt-2 space-y-2">
+          {group.topics.map((topic) => {
             const picked = chosen.includes(topic.id);
             const Chip = canVote ? "button" : "div";
             return (
@@ -171,6 +213,8 @@ export default function TopicBoard({
             );
           })}
         </ul>
+        </div>
+        ))
       )}
 
       {canVote ? (
