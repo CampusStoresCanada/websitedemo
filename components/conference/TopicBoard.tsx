@@ -31,6 +31,7 @@ export default function TopicBoard({
   talksRoom,
   presentationMinutes,
   signedOut,
+  openPropose = false,
 }: {
   conferenceId: string;
   organizationId: string | null;
@@ -51,6 +52,11 @@ export default function TopicBoard({
    * the real form rather than a drawing of one.
    */
   signedOut: boolean;
+  /**
+   * Arrived on the "suggest a topic" link (/big-ideas-day?suggest=1, the one
+   * posted in Circle): the form is already open and in view.
+   */
+  openPropose?: boolean;
 }) {
   // Running pitches lead each list, presentations in the order they run.
   const runningFirst = (a: TopicChip, z: TopicChip) =>
@@ -285,9 +291,13 @@ export default function TopicBoard({
           conferenceId={conferenceId}
           organizationId={organizationId}
           deadlineLabel={deadlineLabel}
+          startOpen={openPropose}
         />
       ) : proposeBlockedReason ? (
-        <p className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <p
+          // The link lands here too, so a partner without a slot sees why.
+          ref={openPropose ? (el) => el?.scrollIntoView({ block: "center" }) : undefined}
+          className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {proposeBlockedReason}
         </p>
       ) : null}
@@ -300,6 +310,7 @@ function ProposeTopicForm({
   organizationId,
   deadlineLabel,
   preview = false,
+  startOpen = false,
 }: {
   conferenceId: string;
   /** Null only in preview, where nothing can be submitted. */
@@ -307,8 +318,16 @@ function ProposeTopicForm({
   deadlineLabel: string | null;
   /** The form as a signed-out reader sees it behind GreyBlur: open, and inert. */
   preview?: boolean;
+  /** Open, scrolled to and focused on arrival: the deep link's landing. */
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(preview);
+  const [open, setOpen] = useState(preview || startOpen);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  useEffect(() => {
+    if (!startOpen) return;
+    formRef.current?.scrollIntoView({ block: "center" });
+    formRef.current?.querySelector("input")?.focus({ preventScroll: true });
+  }, [startOpen]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -340,6 +359,7 @@ function ProposeTopicForm({
 
   return (
     <form
+      ref={formRef}
       className="mt-6 space-y-3 rounded-xl border border-gray-200 bg-white p-5"
       onSubmit={(e) => {
         e.preventDefault();

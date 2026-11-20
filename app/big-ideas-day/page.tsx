@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getOptionalAuthContext, isGlobalAdmin } from "@/lib/auth/guards";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
@@ -47,7 +47,7 @@ const PITCH_DEADLINE = { iso: "2026-12-04", label: "Friday, December 4" };
 export default async function BigIdeasDayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string; fixtures?: string }>;
+  searchParams: Promise<{ org?: string; fixtures?: string; suggest?: string }>;
 }) {
   const query = await searchParams;
   const db = createAdminClient();
@@ -78,6 +78,17 @@ export default async function BigIdeasDayPage({
   ].sort((a, z) => a.start - z.start);
 
   const auth = await getOptionalAuthContext();
+
+  /*
+    The "suggest a topic" link, made to be posted in Circle:
+    /big-ideas-day?suggest=1. Signed in, it lands on the open form. Signed
+    out, it goes through sign-in and comes back to the same link, so the form
+    is the first thing a member sees either way.
+  */
+  const suggest = query.suggest === "1";
+  if (suggest && !auth) {
+    redirect(`/login?next=${encodeURIComponent("/big-ideas-day?suggest=1")}`);
+  }
   const isAdmin = Boolean(auth && isGlobalAdmin(auth.globalRole));
   const ownOrgIds = auth?.activeOrgIds ?? [];
   const requested = query.org?.trim();
@@ -391,6 +402,7 @@ export default async function BigIdeasDayPage({
           talksRoom={talksRoom}
           presentationMinutes={PRESENTATION_MINUTES}
           signedOut={!auth}
+          openPropose={suggest}
         />
       ) : null}
 
