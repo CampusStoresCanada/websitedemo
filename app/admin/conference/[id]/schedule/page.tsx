@@ -4,20 +4,27 @@ import { getBuildWorkspace, getMeetingSetup } from "@/lib/actions/conference-ent
 import { getConferenceScheduleTimeline } from "@/lib/conference/schedule-service";
 import ScheduleTimeline from "@/components/admin/conference/ScheduleTimeline";
 import MeetingSetupPanel from "@/components/admin/conference/MeetingSetupPanel";
+import BigIdeasPitchesPanel from "@/components/admin/conference/BigIdeasPitchesPanel";
+import { listTopicsForStaff } from "@/lib/actions/conference-topics";
 
 export const metadata = { title: "Conference Schedule | Admin" };
 
 export default async function ConferenceSchedulePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ fixtures?: string }>;
 }) {
   const { id } = await params;
-  const [result, scheduleTimeline, workspaceResult, meetingSetupResult] = await Promise.all([
+  // ?fixtures=1 shows the test organisations' pitches in place of the real ones.
+  const fixtures = (await searchParams).fixtures === "1";
+  const [result, scheduleTimeline, workspaceResult, meetingSetupResult, pitchesResult] = await Promise.all([
     getConference(id),
     getConferenceScheduleTimeline(id, { viewerRole: "admin" }),
     getBuildWorkspace(id),
     getMeetingSetup(id),
+    listTopicsForStaff(id, { fixtures }),
   ]);
   if (!result.success || !result.data) {
     return <div className="text-center py-12 text-gray-500">Conference not found.</div>;
@@ -33,6 +40,12 @@ export default async function ConferenceSchedulePage({
         entities={workspaceResult.success ? workspaceResult.data.entities : []}
         timeZone={timeZone}
       />
+
+      {/* Placing a pitch is scheduling it, so it sits with the schedule. Shown
+          only once the conference has a Big Ideas Day to place things into. */}
+      {pitchesResult.success && pitchesResult.data.dayLabel ? (
+        <BigIdeasPitchesPanel board={pitchesResult.data} fixtures={fixtures} />
+      ) : null}
 
       {meetingSetupResult.success ? (
         <MeetingSetupPanel conferenceId={conference.id} initial={meetingSetupResult.data} />

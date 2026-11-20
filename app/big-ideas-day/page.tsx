@@ -7,6 +7,7 @@ import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import { loadTopicBoard } from "@/lib/actions/conference-topics";
 import OfferCard from "@/components/conference/OfferCard";
 import TopicBoard from "@/components/conference/TopicBoard";
+import { PRESENTATION_MINUTES, clock, loadBigIdeasDay, toMinutes } from "@/lib/conference/big-ideas-day";
 import { getNamedProspectOffers } from "@/lib/actions/prospective-booth-checkout";
 import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
@@ -43,50 +44,10 @@ export const metadata = {
  */
 const PITCH_DEADLINE = { iso: "2026-12-04", label: "Friday, December 4" };
 
-/** Steve, 2026-11-20: a presentation is "a formal 20 minute thing". */
-const PRESENTATION_MINUTES = 20;
-/** The thing a partner buys to pitch one. Same name conference-topics.ts gates on. */
-const PRESENTATION_OFFER_NAME = "Big Ideas Presentations";
-
-const toMinutes = (hhmm: string) => {
-  const [h, m] = hhmm.split(":").map(Number);
-  return h * 60 + m;
-};
-const clock = (minutes: number) => {
-  const h = Math.floor(minutes / 60);
-  return `${((h + 11) % 12) + 1}:${String(minutes % 60).padStart(2, "0")}`;
-};
-
-/**
- * When presentations can run: the day, minus whatever is being served in the
- * same room.
- *
- * Derived rather than typed in, because the presentations share their room
- * with breakfast, lunch and the breaks. Move lunch and these move with it; a
- * hand-written list would keep promising a talk in the middle of the buffet.
- */
-function openWindows(
-  day: { start: string; end: string },
-  busy: Array<{ start: string; end: string }>
-): Array<{ start: number; end: number }> {
-  const windows: Array<{ start: number; end: number }> = [];
-  let cursor = toMinutes(day.start);
-  const end = toMinutes(day.end);
-  for (const b of [...busy].sort((a, z) => toMinutes(a.start) - toMinutes(z.start))) {
-    const from = toMinutes(b.start);
-    const to = toMinutes(b.end);
-    if (to <= cursor || from >= end) continue;
-    if (from - cursor >= PRESENTATION_MINUTES) windows.push({ start: cursor, end: from });
-    cursor = Math.max(cursor, to);
-  }
-  if (end - cursor >= PRESENTATION_MINUTES) windows.push({ start: cursor, end });
-  return windows;
-}
-
 export default async function BigIdeasDayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; fixtures?: string }>;
 }) {
   const query = await searchParams;
   const db = createAdminClient();
@@ -102,95 +63,15 @@ export default async function BigIdeasDayPage({
     .maybeSingle();
   if (!conference) notFound();
 
-  const { data: session } = await db
-    .from("conference_entities")
-    .select("id, name, attributes")
-    .eq("conference_id", conference.id)
-    .eq("name", "Big Ideas Day")
-    .maybeSingle();
-  if (!session) notFound();
-
-  const attrs = (session.attributes as Record<string, unknown> | null) ?? {};
-  const purpose = typeof attrs.purpose === "string" ? attrs.purpose : null;
-
-  /*
-    Two rooms, read off the schedule rather than named here. The table
-    conversations are wherever the session is; the presentations are wherever
-    the presentation slot is. Each is one `where` reference in the build
-    workspace, so a room change there reaches this page and the schedule alike.
-  */
-  const { data: slot } = await db
-    .from("conference_entities")
-    .select("id")
-    .eq("conference_id", conference.id)
-    .eq("name", PRESENTATION_OFFER_NAME)
-    .maybeSingle();
-  const { data: placeRefs } = await db
-    .from("conference_entity_refs")
-    .select("from_entity_id, role, to_entity_id")
-    .eq("conference_id", conference.id)
-    .in("from_entity_id", [session.id, ...(slot ? [slot.id] : [])])
-    .in("role", ["where", "when"]);
-  const refOf = (fromId: string | undefined, role: string) =>
-    (placeRefs ?? []).find((r) => r.from_entity_id === fromId && r.role === role)?.to_entity_id ?? null;
-  const tablesVenueId = refOf(session.id, "where");
-  const talksVenueId = refOf(slot?.id, "where");
-  const dayId = refOf(session.id, "when");
-
-  const venueIds = [tablesVenueId, talksVenueId, dayId].filter((v): v is string => Boolean(v));
-  const { data: venues } = venueIds.length
-    ? await db.from("conference_entities").select("id, name, attributes").in("id", venueIds)
-    : { data: [] };
-  // The day is on the schedule too. "2027-02-04" read as UTC so it cannot slip
-  // a day in a runtime west of Greenwich.
-  const dayIso = ((venues ?? []).find((v) => v.id === dayId)?.attributes as { date?: unknown } | null)?.date;
-  const dayLabel =
-    typeof dayIso === "string"
-      ? new Date(`${dayIso}T00:00:00Z`).toLocaleDateString("en-CA", {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-          timeZone: "UTC",
-        })
-      : null;
-  const venueName = (id: string | null) => (venues ?? []).find((v) => v.id === id)?.name ?? null;
-  const tablesRoom = venueName(tablesVenueId);
-  const talksRoom = venueName(talksVenueId);
-
-  // Whatever is served in the presentation room that day.
-  const { data: sharedRefs } =
-    talksVenueId && dayId
-      ? await db
-          .from("conference_entity_refs")
-          .select("from_entity_id, role, to_entity_id")
-          .eq("conference_id", conference.id)
-          .in("to_entity_id", [talksVenueId, dayId])
-          .in("role", ["where", "when"])
-      : { data: [] };
-  const inRoom = new Set((sharedRefs ?? []).filter((r) => r.to_entity_id === talksVenueId).map((r) => r.from_entity_id));
-  const sameDayInRoom = (sharedRefs ?? [])
-    .filter((r) => r.to_entity_id === dayId && inRoom.has(r.from_entity_id))
-    .map((r) => r.from_entity_id);
-  const { data: mealRows } = sameDayInRoom.length
-    ? await db.from("conference_entities").select("name, attributes").eq("kind", "meal").in("id", sameDayInRoom)
-    : { data: [] };
-  const meals = (mealRows ?? [])
-    .map((m) => ({ name: m.name, a: (m.attributes as Record<string, unknown> | null) ?? {} }))
-    .filter((m): m is { name: string; a: { start_time: string; end_time: string } } =>
-      typeof m.a.start_time === "string" && typeof m.a.end_time === "string"
-    )
-    // "Lunch - Thursday" is named for the build workspace; the day is already
-    // in the heading here.
-    .map((m) => ({ label: m.name.split(" - ")[0].trim(), start: m.a.start_time, end: m.a.end_time }));
-  const talkWindows =
-    talksRoom && typeof attrs.start_time === "string" && typeof attrs.end_time === "string"
-      ? openWindows({ start: attrs.start_time, end: attrs.end_time }, meals)
-      : [];
+  // Which day, which rooms, when presentations run: one reader, shared with
+  // the staff panel that places pitches into these same windows.
+  const day = await loadBigIdeasDay(db, conference.id);
+  if (!day) notFound();
+  const session = { id: day.sessionId };
+  const { purpose, dayLabel, dayStart, dayEnd, tablesRoom, talksRoom, meals, talkWindows } = day;
 
   // The presentation room's day in order: what is served, and the stretches
   // between where presentations run.
-  const dayStart = typeof attrs.start_time === "string" ? attrs.start_time : null;
-  const dayEnd = typeof attrs.end_time === "string" ? attrs.end_time : null;
   const glance = [
     ...meals.map((m) => ({ start: toMinutes(m.start), end: toMinutes(m.end), label: m.label, talks: false })),
     ...talkWindows.map((w) => ({ ...w, label: "Presentations", talks: true })),
@@ -282,7 +163,8 @@ export default async function BigIdeasDayPage({
 
   // The board is public: what has been pitched is half of "what is this day".
   // Picking and proposing still need a sign-in, which loadTopicBoard decides.
-  const board = await loadTopicBoard(conference.id, buyerOrgId);
+  // ?fixtures=1 is honoured for staff only, inside loadTopicBoard.
+  const board = await loadTopicBoard(conference.id, buyerOrgId, { fixtures: query.fixtures === "1" });
 
   const signInHref = `/login?next=${encodeURIComponent("/big-ideas-day")}`;
 

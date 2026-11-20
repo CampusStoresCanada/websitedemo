@@ -52,8 +52,11 @@ export default function TopicBoard({
    */
   signedOut: boolean;
 }) {
-  const presentations = topics.filter((t) => t.orgType === "Vendor Partner");
-  const tables = topics.filter((t) => t.orgType !== "Vendor Partner");
+  // Running pitches lead each list, presentations in the order they run.
+  const runningFirst = (a: TopicChip, z: TopicChip) =>
+    Number(z.running) - Number(a.running) || (a.startsAt ?? "").localeCompare(z.startsAt ?? "", undefined, { numeric: true });
+  const presentations = topics.filter((t) => t.orgType === "Vendor Partner").sort(runningFirst);
+  const tables = topics.filter((t) => t.orgType !== "Vendor Partner").sort(runningFirst);
   const groups = [
     {
       key: "presentations",
@@ -196,6 +199,14 @@ export default function TopicBoard({
                         <p className="mt-1 text-sm leading-relaxed text-gray-600">{topic.body}</p>
                       ) : null}
                       <p className="mt-2 text-xs text-gray-400">Proposed by {topic.orgName}</p>
+                      {/* Staff have placed it: say when and where. */}
+                      {topic.running ? (
+                        <p className="mt-2 inline-block rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                          {["Running", topic.startsAt ? `at ${topic.startsAt}` : null, topic.tableLabel ? `at table ${topic.tableLabel}` : null]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </p>
+                      ) : null}
                     </div>
                     {/*
                       ⛔ No count rendered, deliberately. "No count shown, no
