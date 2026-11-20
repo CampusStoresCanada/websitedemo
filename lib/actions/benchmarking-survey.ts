@@ -353,12 +353,18 @@ interface AuthCheck {
 async function verifyBenchmarkingAccess(
   benchmarkingId: string,
   requireDraft: boolean = true
-): Promise<AuthCheck & { row?: { id: string; organization_id: string; status: string | null } }> {
+): Promise<AuthCheck & { row?: {
+    id: string;
+    organization_id: string;
+    status: string | null;
+    respondent_delegate_profile_id: string | null;
+  };
+}> {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
     return { authorized: false, error: auth.error };
   }
-  const { supabase, userId } = auth.ctx;
+  const { userId } = auth.ctx;
 
   // 2. Rate limit check
   maybeCleanupBuckets();
@@ -366,12 +372,16 @@ async function verifyBenchmarkingAccess(
     return { authorized: false, userId, error: "Too many requests. Please slow down." };
   }
 
-  // 3. Fetch the benchmarking row
-  const { data: row, error: fetchError } = await supabase
+  // 3. Fetch the benchmarking row.
+  // Service-role read, as in the sibling guards (profile, financials,
+  // locations, categories, competitors): the permission decision is made
+  // below from the row itself, so it must not depend on whether RLS happens
+  // to show the row to this viewer.
+  const { data: row, error: fetchError } = await createAdminClient()
     .from("benchmarking")
-    .select("id, organization_id, status")
+    .select("id, organization_id, status, respondent_delegate_profile_id")
     .eq("id", benchmarkingId)
-    .single();
+    .maybeSingle();
 
   if (fetchError || !row) {
     return { authorized: false, userId, error: "Benchmarking record not found" };
@@ -382,13 +392,31 @@ async function verifyBenchmarkingAccess(
     return { authorized: false, userId, error: "Cannot edit a submitted survey" };
   }
 
-  // Permission: org_admin for this org, OR global admin
-  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
-  if (!canManageOrganization(auth.ctx, row.organization_id) && !isAdmin) {
+  // Permission: the same three ways in as the rest of the survey — CSC staff,
+  // the store's own org_admin, or the colleague the admin delegated this
+  // submission to. This guard used to stop at the first two, so a delegate
+  // could build their lists (sibling actions) but every plain answer, and the
+  // submit itself, failed with nothing in the logs.
+  if (!mayEditBenchmarking(auth.ctx, row)) {
+    console.warn(
+      `[benchmarking] write refused: user ${userId} is not admin or delegate for ${benchmarkingId}`,
+    );
     return { authorized: false, userId, error: "You don't have permission to edit this survey" };
   }
 
   return { authorized: true, userId, row };
+}
+
+/** CSC staff, the store's org_admin, or the delegated respondent. */
+function mayEditBenchmarking(
+  ctx: Parameters<typeof canManageOrganization>[0],
+  row: { organization_id: string; respondent_delegate_profile_id: string | null },
+): boolean {
+  return (
+    isGlobalAdmin(ctx.globalRole) ||
+    canManageOrganization(ctx, row.organization_id) ||
+    row.respondent_delegate_profile_id === ctx.userId
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -720,9 +748,9 @@ export async function amendBenchmarkingSurvey(
 
     const { data: row, error: fetchError } = await supabase
       .from("benchmarking")
-      .select("id, organization_id, status, fiscal_year")
+      .select("id, organization_id, status, fiscal_year, respondent_delegate_profile_id")
       .eq("id", benchmarkingId)
-      .single();
+      .maybeSingle();
 
     if (fetchError || !row) {
       return { success: false, error: "Benchmarking record not found" };
@@ -743,7 +771,8 @@ export async function amendBenchmarkingSurvey(
       return { success: false, error: "The survey period has closed" };
     }
 
-    if (!canManageOrganization(auth.ctx, row.organization_id)) {
+    // A delegate who submitted must be able to take it back.
+    if (!mayEditBenchmarking(auth.ctx, row)) {
       return { success: false, error: "You don't have permission" };
     }
 
