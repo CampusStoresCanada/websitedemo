@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { proposeTopic, saveTopicBallot, type TopicChip } from "@/lib/actions/conference-topics";
+import GreyBlur from "@/components/ui/GreyBlur";
 
 /**
  * The Big Ideas Day topic board: everything proposed, and what this member
@@ -29,6 +30,7 @@ export default function TopicBoard({
   tablesRoom,
   talksRoom,
   presentationMinutes,
+  signedOut,
 }: {
   conferenceId: string;
   organizationId: string | null;
@@ -43,6 +45,12 @@ export default function TopicBoard({
   tablesRoom: string | null;
   talksRoom: string | null;
   presentationMinutes: number;
+  /**
+   * A signed-out reader sees each list, then that list's own way in, greyed
+   * out behind a sign-in. The site's one greyed-out pattern (GreyBlur), over
+   * the real form rather than a drawing of one.
+   */
+  signedOut: boolean;
 }) {
   const presentations = topics.filter((t) => t.orgType === "Vendor Partner");
   const tables = topics.filter((t) => t.orgType !== "Vendor Partner");
@@ -52,6 +60,7 @@ export default function TopicBoard({
       heading: "Presentations",
       where: [`${presentationMinutes} minutes each`, talksRoom].filter(Boolean).join(", "),
       empty: "No presentations pitched yet.",
+      signInMessage: "Sign in to pitch a presentation.",
       topics: presentations,
     },
     {
@@ -59,6 +68,7 @@ export default function TopicBoard({
       heading: "Table conversations",
       where: tablesRoom ?? "",
       empty: "No table conversations put forward yet.",
+      signInMessage: "Sign in to put a topic forward for discussion.",
       topics: tables,
     },
   ];
@@ -213,6 +223,18 @@ export default function TopicBoard({
             );
           })}
         </ul>
+          {signedOut ? (
+            <div className="mt-3 overflow-hidden rounded-xl">
+              <GreyBlur
+                requiredPermission="partner"
+                unauthorizedMessage={group.signInMessage}
+                ctaText="Sign In"
+                ctaLink="/login"
+              >
+                <ProposeTopicForm conferenceId={conferenceId} organizationId={null} deadlineLabel={null} preview />
+              </GreyBlur>
+            </div>
+          ) : null}
         </div>
         ))
       )}
@@ -262,7 +284,7 @@ export default function TopicBoard({
       {canPropose ? (
         <ProposeTopicForm
           conferenceId={conferenceId}
-          organizationId={organizationId!}
+          organizationId={organizationId}
           deadlineLabel={deadlineLabel}
         />
       ) : proposeBlockedReason ? (
@@ -278,12 +300,16 @@ function ProposeTopicForm({
   conferenceId,
   organizationId,
   deadlineLabel,
+  preview = false,
 }: {
   conferenceId: string;
-  organizationId: string;
+  /** Null only in preview, where nothing can be submitted. */
+  organizationId: string | null;
   deadlineLabel: string | null;
+  /** The form as a signed-out reader sees it behind GreyBlur: open, and inert. */
+  preview?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(preview);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +344,7 @@ function ProposeTopicForm({
       className="mt-6 space-y-3 rounded-xl border border-gray-200 bg-white p-5"
       onSubmit={(e) => {
         e.preventDefault();
+        if (preview || !organizationId) return;
         setError(null);
         startTransition(async () => {
           const result = await proposeTopic({ conferenceId, organizationId, title, body });
@@ -328,22 +355,22 @@ function ProposeTopicForm({
     >
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Topic</span>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} required className={inputClass} />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} required disabled={preview} className={inputClass} />
       </label>
       <label className="block">
         <span className="text-sm font-medium text-gray-700">What would you want to get into?</span>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} className={inputClass} />
+        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} disabled={preview} className={inputClass} />
       </label>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || preview}
           className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
         >
           {isPending ? "Adding…" : "Add this topic"}
         </button>
-        <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500 hover:underline">
+        <button type="button" disabled={preview} onClick={() => setOpen(false)} className="text-sm text-gray-500 hover:underline">
           Cancel
         </button>
         {deadlineLabel ? (

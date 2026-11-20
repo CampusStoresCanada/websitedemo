@@ -500,6 +500,7 @@ export default async function BigIdeasDayPage({
           tablesRoom={tablesRoom}
           talksRoom={talksRoom}
           presentationMinutes={PRESENTATION_MINUTES}
+          signedOut={!auth}
         />
       ) : null}
     </div>
