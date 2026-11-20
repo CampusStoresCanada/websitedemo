@@ -58,7 +58,13 @@ export default function TopicBoard({
     {
       key: "presentations",
       heading: "Presentations",
-      where: [`${presentationMinutes} minutes each`, talksRoom].filter(Boolean).join(", "),
+      // The whole difference, said where the choice is made (Steve approved
+      // this wording 2026-11-20). Formal vs informal, who proposes, what it
+      // costs, and what choosing one does.
+      about:
+        `A partner presents for ${presentationMinutes} minutes${talksRoom ? ` in ${talksRoom}` : ""}, ` +
+        `then stays in the room for questions. Partners pitch these with a $250 deposit` +
+        `${deadlineLabel ? ` by ${deadlineLabel}` : ""}. Members vote on which ones run.`,
       empty: "No presentations pitched yet.",
       signInMessage: "Sign in to pitch a presentation or vote on one.",
       topics: presentations,
@@ -66,7 +72,10 @@ export default function TopicBoard({
     {
       key: "tables",
       heading: "Table conversations",
-      where: tablesRoom ?? "",
+      about:
+        `An informal conversation around a table${tablesRoom ? ` in ${tablesRoom}` : ""}. ` +
+        `No slides and no presenter. Any member can put one forward, and it costs nothing. ` +
+        `Pick the ones you'd sit at.`,
       empty: "No table conversations put forward yet.",
       signInMessage: "Sign in to put a topic forward for discussion.",
       topics: tables,
@@ -182,10 +191,8 @@ export default function TopicBoard({
       ) : (
         groups.map((group) => (
         <div key={group.key} className="mt-6">
-          <h3 className="text-sm font-semibold text-gray-900">
-            {group.heading}
-            {group.where ? <span className="ml-2 font-normal text-gray-500">{group.where}</span> : null}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900">{group.heading}</h3>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-gray-600">{group.about}</p>
           {group.topics.length === 0 ? (
             <p className="mt-2 text-sm text-gray-500">{group.empty}</p>
           ) : null}
@@ -278,7 +285,7 @@ export default function TopicBoard({
       */}
       {deadlineLabel ? (
         <p className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
-          Pitch a session with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
+          Pitch a presentation with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
           stores vote the following week, we announce what is running straight after, and
           any deposit on a presentation that is not chosen comes back then.
         </p>
