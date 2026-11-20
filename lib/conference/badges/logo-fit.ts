@@ -6,6 +6,42 @@ const FETCH_TIMEOUT_MS = 8000;
 const SCAN_PX = 256;
 /** How far a pixel's colour must be from the background to count as logo. */
 const COLOUR_DISTANCE = 40;
+/**
+ * How many distinct tones it takes to cover 90% of a picture before it counts
+ * as a photograph. Measured on CSC 2027's uploads: every logo needed 2 to 6,
+ * the one real photo (a storefront) needed 17.
+ */
+const PHOTO_MIN_TONES = 10;
+
+/**
+ * Tones needed to cover 90% of the visible pixels, at 4 bits a channel.
+ *
+ * ⛔ What separates a photo from a logo cropped tight. Both run to every edge
+ * of the file, so the content box cannot tell them apart, and treating a tight
+ * wordmark as a photo fills the circle with it and cuts its lettering off:
+ * "KPU", "Lakeland" and "Patrick King" all printed clipped. A logo is a few
+ * flat colours; a photo is not.
+ */
+function toneCount(data: Buffer, pixels: number): number {
+  const counts = new Map<number, number>();
+  let visible = 0;
+  for (let p = 0; p < pixels; p++) {
+    const i = p * 4;
+    if (data[i + 3] < 24) continue;
+    visible += 1;
+    const key = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  if (visible === 0) return 0;
+  let covered = 0;
+  let tones = 0;
+  for (const n of [...counts.values()].sort((x, y) => y - x)) {
+    covered += n;
+    tones += 1;
+    if (covered >= visible * 0.9) break;
+  }
+  return tones;
+}
 
 /**
  * Measure where a logo's pixels actually are.
@@ -76,13 +112,15 @@ export async function measureLogoContent(url: string): Promise<LogoContentBox | 
 
     const boxW = maxX - minX + 1;
     const boxH = maxY - minY + 1;
-    // A picture that runs to every edge with no background around it is a
-    // photo, not a logo on a ground. Shrinking a photo until its corners clear
-    // the circle leaves a postage stamp; it fills the circle instead.
+    // A photograph that runs to every edge is not a logo on a ground.
+    // Shrinking a photo until its corners clear the circle leaves a postage
+    // stamp; it fills the circle instead.
     // "Every edge" by the box, not the corners: a photo with rounded,
     // transparent corners is still a photo.
+    // ⛔ Running to every edge is not enough on its own: see toneCount.
     const fullBleed = boxW >= w * 0.95 && boxH >= h * 0.95;
     const squareish = boxW / boxH > 0.8 && boxW / boxH < 1.25;
+    const photographic = toneCount(data, w * h) >= PHOTO_MIN_TONES;
 
     return {
       left: minX / w,
@@ -92,7 +130,7 @@ export async function measureLogoContent(url: string): Promise<LogoContentBox | 
       aspect: boxW / boxH,
       imageAspect: w / h,
       reach: reach / w,
-      photo: fullBleed && squareish,
+      photo: fullBleed && squareish && photographic,
     };
   } catch {
     return null;
