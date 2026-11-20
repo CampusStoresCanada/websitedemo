@@ -7,7 +7,7 @@ import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import { loadTopicBoard } from "@/lib/actions/conference-topics";
 import OfferCard from "@/components/conference/OfferCard";
 import TopicBoard from "@/components/conference/TopicBoard";
-import { PRESENTATION_MINUTES, clock, loadBigIdeasDay, toMinutes } from "@/lib/conference/big-ideas-day";
+import { PRESENTATION_MINUTES, clock, loadBigIdeasDay, loadPartnersInRoom, toMinutes } from "@/lib/conference/big-ideas-day";
 import { getNamedProspectOffers } from "@/lib/actions/prospective-booth-checkout";
 import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
@@ -149,28 +149,12 @@ export default async function BigIdeasDayPage({
     Which partners are coming, for everyone including a signed-out reader.
 
     Kari, via Sean, 2026-11-19: "the description doesn't give much and I think
-    having a way to see who is signed up would help." Same source and the same
-    chips as "Who you'll meet" on /attend: real purchases in entity_balances,
-    not the catalogue. Asked of the graph (`admitting`), never of an offer
-    name, for the reason spelled out above.
-
-    Partners only. A member store's registration is not something it agreed to
-    have advertised, and "who is signed up" in that thread meant the partners.
+    having a way to see who is signed up would help." The rule for who counts
+    lives in loadPartnersInRoom, and the "already in the room" line below reads
+    the same answer.
   */
-  const { data: holderRows } = admitting.size
-    ? await db
-        .from("entity_balances")
-        .select("organizations(id, name, type, is_test, logo_url)")
-        .eq("conference_id", conference.id)
-        .in("entity_id", [...admitting])
-    : { data: [] };
-  const partnersById = new Map<string, { id: string; name: string; logoUrl: string | null }>();
-  for (const row of holderRows ?? []) {
-    const o = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
-    if (!o || o.is_test || o.type !== "Vendor Partner") continue;
-    partnersById.set(o.id, { id: o.id, name: o.name, logoUrl: o.logo_url });
-  }
-  const partnersInRoom = [...partnersById.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const partnersInRoom = await loadPartnersInRoom(db, conference.id, session.id);
+  const inRoomAsPartner = Boolean(buyerOrgId && partnersInRoom.some((p) => p.id === buyerOrgId));
 
   // The board is public: what has been pitched is half of "what is this day".
   // Picking and proposing still need a sign-in, which loadTopicBoard decides.
@@ -264,7 +248,7 @@ export default async function BigIdeasDayPage({
       {auth && org ? (
         <section className="mt-10">
           <h2 className="text-lg font-semibold text-gray-900">Taking part</h2>
-          {alreadyIn ? (
+          {alreadyIn || inRoomAsPartner ? (
             <p className="mt-1 text-sm text-gray-700">
               <strong>You&apos;re already in the room.</strong> Big Ideas Day is included with
               what {org.name} already holds — there is nothing more to buy.

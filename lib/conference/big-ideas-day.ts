@@ -1,4 +1,5 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { parseOrgCategories } from "@/lib/publication/categories";
 
 /**
  * The shape of Big Ideas Day, read off the schedule: which day, which two
@@ -194,4 +195,80 @@ export async function loadBigIdeasDay(db: Db, conferenceId: string): Promise<Big
     meals,
     talkWindows: talksRoom && dayStart && dayEnd ? openWindows({ start: dayStart, end: dayEnd }, meals) : [],
   };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Which partners are in the room
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * A course materials partner, by the taxonomy's own parser, so "Digital
+ * Course Materials" and the other stored spellings resolve to the same class.
+ */
+export function isCourseMaterialsPartner(primaryCategory: string | null | undefined): boolean {
+  return parseOrgCategories(primaryCategory).classes.includes("Course Materials");
+}
+
+export type PartnerInRoom = { id: string; name: string; logoUrl: string | null };
+
+/**
+ * The partners taking part in Big Ideas Day. Two ways in:
+ *
+ *   1. They hold something the schedule says admits to the session: the Big
+ *      Ideas Day rates, sold to partners who are not exhibiting.
+ *   2. They are exhibiting AND are a course materials partner (Steve,
+ *      2026-11-20). Exhibitors were never offered a rate, because the day is
+ *      theirs already, but nothing said so: VitalSource and Kivuto held booths
+ *      and were told that places were "by invitation".
+ *
+ * ⛔ Not every exhibitor. The floor is mostly apparel and gifts, and listing
+ * forty of them under "Partners in the room" would bury the ones the day is for.
+ *
+ * ⛔ ONE answer. The public list and the page's "you're already in the room"
+ * both read this, so a partner is never listed as coming and then told to ask
+ * for an invitation.
+ *
+ * Partners only: a member store's registration is not something it agreed to
+ * have advertised. Test organisations never appear.
+ */
+export async function loadPartnersInRoom(db: Db, conferenceId: string, sessionId: string): Promise<PartnerInRoom[]> {
+  const { data: admittingRefs } = await db
+    .from("conference_entity_refs")
+    .select("from_entity_id")
+    .eq("conference_id", conferenceId)
+    .eq("role", "involved_in")
+    .eq("to_entity_id", sessionId);
+  const admitting = (admittingRefs ?? []).map((r) => r.from_entity_id);
+
+  const orgFields = "organizations(id, name, type, is_test, logo_url, primary_category)";
+  const [{ data: rateHolders }, { data: boothHolders }] = await Promise.all([
+    admitting.length
+      ? db.from("entity_balances").select(orgFields).eq("conference_id", conferenceId).in("entity_id", admitting)
+      : Promise.resolve({ data: [] as never[] }),
+    db
+      .from("entity_balances")
+      .select(`${orgFields}, entity:conference_entities!entity_balances_entity_id_fkey!inner(kind)`)
+      .eq("conference_id", conferenceId)
+      .eq("entity.kind", "booth"),
+  ]);
+
+  const byId = new Map<string, PartnerInRoom>();
+  const consider = (rows: Array<{ organizations: unknown }> | null, exhibitorRule: boolean) => {
+    for (const row of rows ?? []) {
+      const o = (Array.isArray(row.organizations) ? row.organizations[0] : row.organizations) as {
+        id: string;
+        name: string;
+        type: string | null;
+        is_test: boolean | null;
+        logo_url: string | null;
+        primary_category: string | null;
+      } | null;
+      if (!o || o.is_test || o.type !== "Vendor Partner") continue;
+      if (exhibitorRule && !isCourseMaterialsPartner(o.primary_category)) continue;
+      byId.set(o.id, { id: o.id, name: o.name, logoUrl: o.logo_url });
+    }
+  };
+  consider(rateHolders, false);
+  consider(boothHolders, true);
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
