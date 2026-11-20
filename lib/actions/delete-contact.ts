@@ -9,6 +9,10 @@ import { archivePersonContact } from "@/lib/identity/lifecycle";
 import { enqueueContactCircleDeprovisioning } from "@/lib/circle/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { releaseSeatsForContact } from "@/lib/conference/release-seat";
+import {
+  endOrgLinkForRemovedContact,
+  type RemovedContactLogin,
+} from "@/lib/org/org-link-lifecycle";
 
 interface DeleteContactParams {
   contactId: string;
@@ -18,6 +22,8 @@ interface DeleteContactResult {
   success: boolean;
   error?: string;
   deletedName?: string;
+  /** What happened to their login. Absent when nothing was removed this time. */
+  login?: RemovedContactLogin;
 }
 
 /**
@@ -44,7 +50,7 @@ export async function deleteContact({
     // 3. Get the contact to verify ownership
     const { data: contact } = await supabase
       .from("contacts")
-      .select("id, name, organization_id, archived_at")
+      .select("id, name, organization_id, archived_at, profile_id")
       .eq("id", contactId)
       .single();
 
@@ -89,12 +95,22 @@ export async function deleteContact({
       console.error("[delete-contact] could not release their conference seats:", error);
     }
 
+    // ⛔ And no login: they used to keep it, and could still sign in as a
+    // member of the store they had left (org-link-lifecycle.ts).
+    const login = await endOrgLinkForRemovedContact({
+      db: supabase,
+      contactId,
+      profileId: contact.profile_id,
+      orgId: contact.organization_id!,
+      actorId: auth.ctx.userId ?? null,
+    });
+
     // Queue Circle de-provisioning (fire-and-forget)
     void enqueueContactCircleDeprovisioning(contactId);
 
     revalidateTag("org-profile", "max");
 
-    return { success: true, deletedName: contact.name };
+    return { success: true, deletedName: contact.name, login };
   } catch (err) {
     console.error("Error deleting contact:", err);
     return { success: false, error: "An unexpected error occurred" };

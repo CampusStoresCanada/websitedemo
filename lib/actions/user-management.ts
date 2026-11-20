@@ -17,7 +17,7 @@ import {
   type ProvisionOrgLoginResult,
 } from "@/lib/identity/org-login";
 import { findUserByEmail } from "../supabase/user-lookup";
-import { deactivateOrgLink } from "@/lib/org/org-link-lifecycle";
+import { deactivateOrgLink, isLastOrgAdmin } from "@/lib/org/org-link-lifecycle";
 
 // ─────────────────────────────────────────────────────────────────
 // Invite a new user to an organization
@@ -97,22 +97,11 @@ export async function deactivateOrgUser(
       return { success: false, error: "User is not an active member of this organization" };
     }
 
-    if (membership.role === "org_admin") {
-      // Count other active org_admins
-      const { count } = await adminClient
-        .from("user_organizations")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", orgId)
-        .eq("role", "org_admin")
-        .eq("status", "active")
-        .neq("user_id", userId);
-
-      if ((count ?? 0) < 1) {
-        return {
-          success: false,
-          error: "Cannot deactivate the last org admin. Transfer admin rights first.",
-        };
-      }
+    if (await isLastOrgAdmin(adminClient, orgId, userId, membership.role)) {
+      return {
+        success: false,
+        error: "Cannot deactivate the last org admin. Transfer admin rights first.",
+      };
     }
 
     const off = await deactivateOrgLink({
