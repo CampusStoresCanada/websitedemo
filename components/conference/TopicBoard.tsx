@@ -60,7 +60,7 @@ export default function TopicBoard({
       heading: "Presentations",
       where: [`${presentationMinutes} minutes each`, talksRoom].filter(Boolean).join(", "),
       empty: "No presentations pitched yet.",
-      signInMessage: "Sign in to pitch a presentation.",
+      signInMessage: "Sign in to pitch a presentation or vote on one.",
       topics: presentations,
     },
     {
@@ -131,24 +131,27 @@ export default function TopicBoard({
         wording go through there, so the page and the five invitation emails
         stay in step.
 
-        ⛔ "Vote" is avoided as a NOUN throughout. It promises a count that
-        wins, which is exactly what this is not — a topic can take every pick
-        and still not run. "Pick" and "choose" instead.
+        ⛔ Two verbs, one per list (Steve, 2026-11-20: "Vote on
+        presentations"). A presentation carries a deposit that comes back if
+        it is not chosen, so members VOTE on those. A table conversation is
+        still a PICK: a signal, not a count that wins, and a table can take
+        every pick and still not run. Do not let "vote" leak onto the tables.
       */}
       <h2 className="text-lg font-semibold text-gray-900">What gets talked about is up to you</h2>
       {canVote ? (
         <div className="mt-2 max-w-2xl space-y-3 text-sm leading-relaxed text-gray-600">
           <p>
             The topics below come from members and from partners. Partners pitch
-            presentations and members put forward table conversations. Pick the ones
-            you&apos;d want to be in the room for. Pick all of them. If none of it appeals, say so,
+            presentations and members put forward table conversations. Vote for the
+            presentations you want to see, and pick the table conversations you&apos;d
+            want to sit at. Choose as many as you like. If none of it appeals, say so,
             because that tells us something silence doesn&apos;t. Either way come back
             later, since people keep adding and the list in December won&apos;t be the list
             today.
           </p>
           <p>If something&apos;s missing, add it. That&apos;s rather the point.</p>
           <p>
-            Picking a topic isn&apos;t a ballot and it isn&apos;t binding on us. We
+            Picking a table conversation isn&apos;t a ballot and it isn&apos;t binding on us. We
             aren&apos;t choosing on votes alone, we might fold two topics together when
             they&apos;re really the same conversation, and we&apos;ll place things so the
             day holds together. What your picks do is tell us what people actually want to
@@ -167,8 +170,8 @@ export default function TopicBoard({
       ) : (
         <p className="mt-1 max-w-2xl text-sm text-gray-600">
           The topics below come from members and from partners. Partners pitch
-          presentations and members put forward table conversations. Member stores pick
-          the ones they want to be in the room for.
+          presentations and members put forward table conversations. Member stores vote
+          on the presentations and pick the table conversations they want to sit at.
         </p>
       )}
 
@@ -276,8 +279,8 @@ export default function TopicBoard({
       {deadlineLabel ? (
         <p className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
           Pitch a session with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
-          stores pick the following week, we announce what is running straight after, and
-          any deposit on a topic that is not picked comes back then.
+          stores vote the following week, we announce what is running straight after, and
+          any deposit on a presentation that is not chosen comes back then.
         </p>
       ) : null}
 
