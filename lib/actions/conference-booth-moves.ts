@@ -16,6 +16,12 @@
 // Checkout Session for just the difference; if they cost the same or less,
 // it's minted immediately since the refund already covers it.
 //
+// A CANCELLATION is the same tool with no new booth: the org gives the booth
+// back and takes nothing in exchange. It is not a second system — the release
+// is this file's release, and the only thing a cancellation adds is the one
+// number a move derives and a cancellation cannot: how much to refund. Policy
+// may say half and the board may say all of it, so a person supplies it.
+//
 // The DB-only portion (release + grant + audit row) runs as one atomic
 // Postgres function, execute_booth_move (see the migration). Stripe calls
 // can't run inside that transaction, so they happen here in the app layer,
@@ -58,13 +64,14 @@ export async function previewBoothMove(
   organizationId: string,
   conferenceId: string,
   oldBoothEntityIds: string[],
-  newBoothEntityIds: string[]
+  newBoothEntityIds: string[],
+  opts?: { cancel?: boolean }
 ): Promise<Result<BoothMovePreview>> {
   const auth = await requireAdmin();
   if (!auth.ok || !isSuperAdmin(auth.ctx.globalRole)) {
     return { success: false, error: "Admin access required" };
   }
-  return previewBoothMoveCore(organizationId, conferenceId, oldBoothEntityIds, newBoothEntityIds);
+  return previewBoothMoveCore(organizationId, conferenceId, oldBoothEntityIds, newBoothEntityIds, opts);
 }
 
 /**
@@ -77,9 +84,16 @@ export async function previewBoothMoveCore(
   organizationId: string,
   conferenceId: string,
   oldBoothEntityIds: string[],
-  newBoothEntityIds: string[]
+  newBoothEntityIds: string[],
+  opts?: { cancel?: boolean }
 ): Promise<Result<BoothMovePreview>> {
-  if (oldBoothEntityIds.length === 0 || newBoothEntityIds.length === 0) {
+  const isCancel = opts?.cancel === true;
+  if (isCancel && newBoothEntityIds.length > 0) {
+    return { success: false, error: "A cancellation takes no new booth. Use a move instead." };
+  }
+  // An empty new list only ever means a cancellation when the caller SAID so.
+  // Nothing-selected must never quietly turn a move into giving the booth up.
+  if (oldBoothEntityIds.length === 0 || (!isCancel && newBoothEntityIds.length === 0)) {
     return { success: false, error: "Select at least one old and one new booth." };
   }
 
@@ -156,13 +170,32 @@ export async function previewBoothMoveCore(
   };
 }
 
+/**
+ * Present only on a cancellation. `refundCents` is tax-inclusive and is the
+ * one value here a person decides: anything from nothing to what the booths
+ * cost.
+ */
+export interface BoothCancellation {
+  refundCents: number;
+}
+
+export interface BoothMoveOutcome {
+  /** Null on a cancellation: nothing was granted, so there is no new order. */
+  newOrderId: string | null;
+  minted: boolean;
+  checkoutUrl: string | null;
+  /** What went back to the card, tax-inclusive. */
+  refundedCents: number;
+}
+
 export async function moveBooths(params: {
   organizationId: string;
   conferenceId: string;
   oldBoothEntityIds: string[];
   newBoothEntityIds: string[];
   reason: string;
-}): Promise<Result<{ newOrderId: string; minted: boolean; checkoutUrl: string | null }>> {
+  cancel?: BoothCancellation;
+}): Promise<Result<BoothMoveOutcome>> {
   const auth = await requireAdmin();
   if (!auth.ok || !isSuperAdmin(auth.ctx.globalRole)) {
     return { success: false, error: "Admin access required" };
@@ -183,17 +216,34 @@ export async function moveBoothsCore(
     oldBoothEntityIds: string[];
     newBoothEntityIds: string[];
     reason: string;
+    cancel?: BoothCancellation;
   },
   actorId: string
-): Promise<Result<{ newOrderId: string; minted: boolean; checkoutUrl: string | null }>> {
+): Promise<Result<BoothMoveOutcome>> {
+  const isCancel = params.cancel != null;
   const preview = await previewBoothMoveCore(
     params.organizationId,
     params.conferenceId,
     params.oldBoothEntityIds,
-    params.newBoothEntityIds
+    params.newBoothEntityIds,
+    { cancel: isCancel }
   );
   if (!preview.success) return preview;
   const { oldTotalCents, newTotalCents, deltaCents, oldSubtotalCents, newSubtotalCents, newTaxCents } = preview.data;
+
+  if (params.cancel) {
+    const { refundCents } = params.cancel;
+    if (!Number.isInteger(refundCents) || refundCents < 0 || refundCents > oldTotalCents) {
+      return {
+        success: false,
+        error: `Refund must be between $0 and what the booth(s) cost ($${(oldTotalCents / 100).toFixed(2)}, tax included).`,
+      };
+    }
+    // The refund is a decision here, not arithmetic, so the record has to say whose.
+    if (!params.reason.trim()) {
+      return { success: false, error: "A cancellation needs a reason." };
+    }
+  }
 
   const db = createAdminClient();
 
@@ -226,7 +276,7 @@ export async function moveBoothsCore(
   // single number driving both sides: negative means we owe the org a
   // partial refund of the shortfall; positive is handled entirely by the
   // Checkout Session below, not here.
-  const netRefundCents = deltaCents < 0 ? -deltaCents : 0;
+  const netRefundCents = params.cancel ? params.cancel.refundCents : deltaCents < 0 ? -deltaCents : 0;
 
   const refundUpdates: Array<{ order_id: string; cumulative_refund_cents: number }> = [];
   const refundIds: string[] = [];
@@ -261,7 +311,11 @@ export async function moveBoothsCore(
           payment_intent: order.stripe_payment_intent_id,
           amount: orderRefundCents,
           reason: "requested_by_customer",
-          metadata: { checkout_kind: "conference", conference_order_id: order.id, reason: "booth_move" },
+          metadata: {
+            checkout_kind: "conference",
+            conference_order_id: order.id,
+            reason: isCancel ? "booth_cancel" : "booth_move",
+          },
         });
         refundIds.push(stripeRefund.id);
         refundUpdates.push({ order_id: order.id, cumulative_refund_cents: cumulativeRefund });
@@ -286,11 +340,12 @@ export async function moveBoothsCore(
   // never drift apart.
   const newOrderTotalCents = newTotalCents;
 
-  const shouldMintImmediately = deltaCents <= 0;
+  // A cancellation grants nothing, so there is nothing to mint and nothing to bill.
+  const shouldMintImmediately = !isCancel && deltaCents <= 0;
   const sessionMarker = `admin_booth_move_${crypto.randomUUID()}`;
 
   let checkoutUrl: string | null = null;
-  if (!shouldMintImmediately) {
+  if (!isCancel && !shouldMintImmediately) {
     const checkoutSession = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
@@ -349,9 +404,19 @@ export async function moveBoothsCore(
     };
   }
 
-  const result = rpcResult as { new_order_id: string; minted: boolean };
+  const result = rpcResult as { new_order_id: string | null; minted: boolean };
 
-  if (result.minted) {
+  if (isCancel) {
+    // The same release a move does below, without the grant that follows it there.
+    for (const oldBoothId of params.oldBoothEntityIds) {
+      await removeBoothFromSponsorAgreements({
+        organizationId: params.organizationId,
+        boothEntityId: oldBoothId,
+      });
+    }
+  }
+
+  if (result.minted && result.new_order_id) {
     await enqueueQBConferenceReceipt(result.new_order_id);
 
     /**
@@ -405,6 +470,8 @@ export async function moveBoothsCore(
     actorType: "user",
     details: {
       success: true,
+      cancelled: isCancel,
+      refundedCents: netRefundCents,
       oldBoothEntityIds: params.oldBoothEntityIds,
       newBoothEntityIds: params.newBoothEntityIds,
       oldTotalCents,
@@ -417,5 +484,8 @@ export async function moveBoothsCore(
     },
   });
 
-  return { success: true, data: { newOrderId: result.new_order_id, minted: result.minted, checkoutUrl } };
+  return {
+    success: true,
+    data: { newOrderId: result.new_order_id, minted: result.minted, checkoutUrl, refundedCents: netRefundCents },
+  };
 }

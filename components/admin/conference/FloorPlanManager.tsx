@@ -796,13 +796,13 @@ export default function FloorPlanManager({
             {/* booth move — offered when every selected booth is sold and shares one org */}
             {moveEligible ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2">
-                <h2 className="font-semibold text-gray-700">Booth move</h2>
+                <h2 className="font-semibold text-gray-700">Booth move or cancellation</h2>
                 <p className="text-[10px] text-gray-400">
                   {selArray.length} booth{selArray.length > 1 ? "s" : ""} held by <strong>{selArray[0].soldOrg!.name}</strong>
                 </p>
                 <button type="button" onClick={() => setMoveModalOpen(true)}
                   className="w-full rounded border border-[#EE2A2E] bg-[#fff1f1] py-1.5 text-[11px] font-medium text-[#EE2A2E] hover:bg-[#ffe4e4]">
-                  Move to different booth(s)…
+                  Move or cancel booth(s)…
                 </button>
               </div>
             ) : null}
