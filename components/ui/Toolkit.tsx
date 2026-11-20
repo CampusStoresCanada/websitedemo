@@ -1753,6 +1753,9 @@ function FieldEditPopover({
 /**
  * Delete Contact Popover - Confirmation for deleting a contact row
  */
+/** Tailwind `w-64`: the width of the delete and add-colour popovers. */
+const SMALL_POPOVER_WIDTH = 256;
+
 function DeleteContactPopover({
   selectedElement,
   onClose,
@@ -1788,10 +1791,12 @@ function DeleteContactPopover({
     }
   };
 
-  // Position near the selected element
+  // Position near the selected element. ⛔ Clamped on the right as well as the
+  // left: the trash icon is the last column of a wide table, so a popover that
+  // starts at its left edge hung off the screen with Delete cut off.
   const popoverStyle = {
     top: selectedElement.rect.bottom + 8,
-    left: Math.max(16, selectedElement.rect.left),
+    left: Math.max(16, Math.min(selectedElement.rect.left, window.innerWidth - SMALL_POPOVER_WIDTH - 16)),
   };
 
   if (popoverStyle.top + 80 > window.innerHeight) {
@@ -1824,7 +1829,7 @@ function DeleteContactPopover({
       {/* Delete confirmation popover */}
       <div
         data-edit-overlay
-        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4"
+        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4 w-64"
         style={popoverStyle}
       >
         {deleted ? (
@@ -1947,10 +1952,10 @@ function AddBrandColorPopover({
     }
   };
 
-  // Position near the selected element
+  // Position near the selected element, clamped on both sides (see DeleteContactPopover).
   const popoverStyle = {
     top: selectedElement.rect.bottom + 8,
-    left: Math.max(16, selectedElement.rect.left),
+    left: Math.max(16, Math.min(selectedElement.rect.left, window.innerWidth - SMALL_POPOVER_WIDTH - 16)),
   };
 
   if (popoverStyle.top + 150 > window.innerHeight) {
@@ -2084,10 +2089,10 @@ function DeleteBrandColorPopover({
     }
   };
 
-  // Position near the selected element
+  // Position near the selected element, clamped on both sides (see DeleteContactPopover).
   const popoverStyle = {
     top: selectedElement.rect.bottom + 8,
-    left: Math.max(16, selectedElement.rect.left),
+    left: Math.max(16, Math.min(selectedElement.rect.left, window.innerWidth - SMALL_POPOVER_WIDTH - 16)),
   };
 
   if (popoverStyle.top + 80 > window.innerHeight) {
@@ -2120,7 +2125,7 @@ function DeleteBrandColorPopover({
       {/* Delete confirmation popover */}
       <div
         data-edit-overlay
-        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4"
+        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4 w-64"
         style={popoverStyle}
       >
         {deleted ? (
