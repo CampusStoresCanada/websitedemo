@@ -1,5 +1,5 @@
 import type { BuildEntity, ConferenceOffer, NonMemberDayPass } from "../actions/conference-entities";
-import { effectiveIncludes, effectiveRefs } from "./entity-graph";
+import { effectiveAttributes, effectiveIncludes, effectiveRefs, instanceTypeId } from "./entity-graph";
 import { ACCESS_ROLES } from "./inclusion";
 
 /**
@@ -49,6 +49,62 @@ export function offerGrants(offerId: string, byId: Map<string, BuildEntity>, qua
     if (e) grants.push({ entityId, name: e.name, kind: e.kind, quantity: qty });
   }
   return grants.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** One kind of booth as an exhibitor needs to know it: its size and what comes with it. */
+export type BoothType = {
+  /** The type entity: the booth others are `instance_of`, or a booth that has no type. */
+  id: string;
+  priceCents: number;
+  size: string | null;
+  pitch: string | null;
+  /**
+   * Every booth number of this type, in number order. Sold or held booths
+   * included: a booth taken off sale is still somebody's booth, and they are
+   * who reads this to find out what theirs comes with.
+   */
+  boothNumbers: string[];
+  /**
+   * What one booth comes with, ONE level deep: the table, the chairs, the staff
+   * registrations, a suite. Not {@link offerGrants}, which follows every edge
+   * down and would list each meal those registrations reach, four times over.
+   */
+  includes: { entityId: string; name: string; kind: string; quantity: number }[];
+};
+
+/**
+ * The booth types at a conference, cheapest first, read from the same graph
+ * the storefront sells from. A booth belongs to the type it is `instance_of`;
+ * a booth with no type is its own.
+ */
+export function boothTypes(byId: Map<string, BuildEntity>): BoothType[] {
+  const numbersByType = new Map<string, string[]>();
+  for (const e of byId.values()) {
+    if (e.kind !== "booth") continue;
+    const typeId = instanceTypeId(e) ?? e.id;
+    numbersByType.set(typeId, [...(numbersByType.get(typeId) ?? []), e.name]);
+  }
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const types: BoothType[] = [];
+  for (const [typeId, numbers] of numbersByType) {
+    const type = byId.get(typeId);
+    if (!type) continue;
+    const attrs = effectiveAttributes(type, byId);
+    types.push({
+      id: typeId,
+      priceCents: type.priceCents ?? 0,
+      size: text(attrs.size),
+      pitch: text(attrs.pitch),
+      boothNumbers: numbers.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      includes: effectiveIncludes(type, byId).map((r) => ({
+        entityId: r.toEntityId,
+        name: r.toName,
+        kind: r.toKind,
+        quantity: r.quantity ?? 1,
+      })),
+    });
+  }
+  return types.sort((a, b) => a.priceCents - b.priceCents);
 }
 
 /**

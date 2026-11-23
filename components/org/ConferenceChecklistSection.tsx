@@ -48,7 +48,7 @@ export default async function ConferenceChecklistSection({
   if (!auth.ok || !canManageOrganization(auth.ctx, orgId)) return null;
 
   const db = createAdminClient();
-  const [allOrgTasks, payments, legalStatus, exhibitor, shipments] = await Promise.all([
+  const [allOrgTasks, payments, legalStatus, exhibitor, shipments, { data: conference }] = await Promise.all([
     loadOrgTasks(db, conferenceId, orgId),
     loadOrgPayments(db, conferenceId, orgId),
     loadOrgLegalStatus(db, conferenceId, orgId, auth.ctx.userId),
@@ -58,6 +58,8 @@ export default async function ConferenceChecklistSection({
     // Boxes shipped home from the conference: what was booked, by whom, and
     // the estimate the invoice will follow. ⚠️ A failure costs the card only.
     loadDeskShipments(conferenceId, { organizationId: orgId }).catch(() => []),
+    // Only to address the Exhibitor Manual, which is keyed by year and edition.
+    db.from("conference_instances").select("year, edition_code").eq("id", conferenceId).maybeSingle(),
   ]);
   const boothNumbers = exhibitor?.boothNumbers ?? [];
 
@@ -141,7 +143,18 @@ export default async function ConferenceChecklistSection({
 
   return (
     <section id="conference_checklist" className="max-w-6xl mx-auto px-4 pb-10 space-y-4 scroll-mt-20">
-      <h2 className="text-lg font-semibold text-gray-900">Conference checklist</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-lg font-semibold text-gray-900">Conference checklist</h2>
+        {/* The how-it-works companion to the what's-left list, for a company with a booth. */}
+        {boothNumbers.length > 0 && conference && (
+          <a
+            href={`/conference/${conference.year}/${conference.edition_code}/exhibitor-manual`}
+            className="text-sm font-medium text-[#163D6D] hover:underline"
+          >
+            Exhibitor Manual
+          </a>
+        )}
+      </div>
 
       {orgTasks.length > 0 && (
         <div className="rounded-xl border border-gray-200 bg-white p-4">

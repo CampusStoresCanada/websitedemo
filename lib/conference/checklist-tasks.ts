@@ -27,7 +27,7 @@ import {
 } from "./checklist-checks";
 import { isStaffCheckType, type CheckType } from "./checklist-check-types";
 import { ORG_TYPE } from "@/lib/constants/org-types";
-import { parseServiceDetails, type ServiceDetails } from "./service-details";
+import { loadServiceDetails, type ServiceDetails } from "./service-details";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "../constants/conference";
 import { loadSeatHoldings, type SeatHolding } from "./seats";
 import { loadBursaryDesignatedSeatIds } from "./bursary-access";
@@ -459,46 +459,9 @@ export async function loadOrgTasks(
   if (rows.length === 0) return [];
 
   // Supplier facts live on a `service`-kind entity the task points at.
-  const serviceIds = [...new Set(rows.map((r) => r.task.check_entity_id).filter((id): id is string => !!id))];
-  const serviceByEntity = new Map<string, ServiceDetails>();
-  if (serviceIds.length > 0) {
-    const { data: entities } = await db
-      .from("conference_entities")
-      .select("id, name, kind, attributes")
-      .in("id", serviceIds)
-      /*
-        ⛔ Not only `service`-kind.
-
-        "Go and do a thing somewhere else, here are the facts you need" is the
-        shape, not "a show contractor". Conference in a Box is kind `item` and
-        fits it exactly: a date that costs you if missed, an address, rules
-        about what to send, and a page to go and read. Restricting to
-        `service` meant the one task where the facts matter most rendered as a
-        bare line of text, and I was about to bolt a second links mechanism
-        onto the email instead of using this one.
-
-        Safe to widen: parseServiceDetails returns null unless the entity
-        actually carries these attributes, so an item with none is unchanged.
-      */
-      .in("kind", ["service", "item"]);
-    const { getServiceDocumentUrl } = await import("@/lib/actions/get-conference-document-url");
-    for (const e of entities ?? []) {
-      const parsed = parseServiceDetails(e.name, e.attributes);
-      if (!parsed) continue;
-      // Signed here, on the server. ServiceFacts is reached through the client
-      // TaskChecklist, so it cannot be async and cannot sign for itself.
-      const documents: { label: string; href: string }[] = [];
-      for (const src of parsed.documentSources) {
-        if (src.url) { documents.push({ label: src.label, href: src.url }); continue; }
-        if (!src.storagePath) continue;
-        const signed = await getServiceDocumentUrl(src.storagePath);
-        // A file we cannot sign is not shown — better a visible gap than a
-        // button that 404s at the moment someone needs the form.
-        if (signed.success) documents.push({ label: src.label, href: signed.url });
-      }
-      serviceByEntity.set(e.id, { ...parsed, documents });
-    }
-  }
+  const serviceByEntity = await loadServiceDetails(db, {
+    entityIds: [...new Set(rows.map((r) => r.task.check_entity_id).filter((id): id is string => !!id))],
+  });
 
   const { data: acks } = await db
     .from("conference_task_acknowledgements")

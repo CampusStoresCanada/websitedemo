@@ -27,7 +27,7 @@ import HotelInfo from "@/components/conference/HotelInfo";
 import { parseHotelRates } from "@/lib/conference/hotel";
 import { loadViewerTaskState } from "@/lib/conference/checklist-status";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
-import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
+import ScheduleAtAGlance, { boothTrack } from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
 import MemberValueProps from "@/components/conference/MemberValueProps";
 import DayPassOfferCard from "@/components/conference/DayPassOfferCard";
@@ -140,8 +140,7 @@ export default async function ConferenceEditionHubPage({
     heldBooths = boothBalance.data
       .map((b) => (Array.isArray(b.entity) ? b.entity[0] : b.entity))
       .filter((e): e is { name: string; kind: string; price_cents: number | null } => e?.kind === "booth")
-      // Connected/Featured/Celebrated booths are priced at $6,000+; plain Exhibitor at $4,000.
-      .map((e) => ({ name: e.name, track: (e.price_cents ?? 0) >= 600000 ? ("bronze" as const) : ("exhibitor" as const) }));
+      .map((e) => ({ name: e.name, track: boothTrack(e.price_cents) }));
   }
   // If any held booth is Connected-tier (bronze) or above, that's the fuller
   // track — it's a superset of what plain Exhibitor unlocks.
@@ -324,7 +323,13 @@ export default async function ConferenceEditionHubPage({
                   <span className="font-medium text-[#1A1A1A]">
                     Booth{heldBooths.length > 1 ? "s" : ""} {heldBooths.map((b) => b.name).join(", ")}
                   </span>
-                  .
+                  .{" "}
+                  <Link
+                    href={`/conference/${year}/${edition}/exhibitor-manual`}
+                    className="font-medium text-[#163D6D] underline hover:no-underline"
+                  >
+                    Read the Exhibitor Manual
+                  </Link>
                 </p>
               ) : null}
               {offers.success ? (

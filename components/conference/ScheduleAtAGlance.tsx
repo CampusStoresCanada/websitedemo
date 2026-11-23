@@ -40,14 +40,23 @@ const EXHIBITOR_ONLY_IDS = new Set([
 
 // Same navy/red used on the floor plan (floor-plan-viewer.tsx TYPE_STROKE)
 // and the tier cards (SponsorshipLadder.tsx) — one colour vocabulary site-wide.
-const TRACK_COLOR: Record<"exhibitor" | "bronze", string> = {
+export const TRACK_COLOR: Record<"exhibitor" | "bronze", string> = {
   exhibitor: "#163D6D",
   bronze: "#EE2A2E",
 };
-const TRACK_LABEL: Record<"exhibitor" | "bronze", string> = {
+export const TRACK_LABEL: Record<"exhibitor" | "bronze", string> = {
   exhibitor: "Exhibitor",
   bronze: "Connected+",
 };
+
+/**
+ * Which track a booth puts its exhibitor on. Connected booths are priced at
+ * $6,000 and up; plain Exhibitor at $4,000. The hub page and the exhibitor
+ * manual both ask, so there is one answer.
+ */
+export function boothTrack(priceCents: number | null): "exhibitor" | "bronze" {
+  return (priceCents ?? 0) >= 600000 ? "bronze" : "exhibitor";
+}
 
 // Every item visible in this combined view already reaches the Partner
 // audience one way or another — the question is just whether it's
