@@ -16,16 +16,9 @@ import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
 export default function ServiceFacts({
   service,
   boothNumbers,
-  signInHref,
 }: {
   service: ServiceDetails;
   boothNumbers: string[];
-  /**
-   * Where a signed-out reader goes to get a form we hold but will not link
-   * for them. Only a page anyone can open passes it; on the to-do list the
-   * reader is always signed in.
-   */
-  signInHref?: string;
 }) {
   const facts: { label: string; value: string }[] = [];
   if (service.showCode) facts.push({ label: "Show code", value: service.showCode });
@@ -50,18 +43,6 @@ export default function ServiceFacts({
             {d.label}
           </a>
         ))}
-        {signInHref && service.withheldDocuments.map((label) => (
-          <a
-            key={label}
-            href={signInHref}
-            className="rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
-          >
-            {label}
-          </a>
-        ))}
-        {signInHref && service.withheldDocuments.length > 0 && (
-          <span className="text-sm text-gray-600">Sign in first. The form is for exhibitors.</span>
-        )}
         {service.actionUrl && (
           <a
             href={service.actionUrl}
