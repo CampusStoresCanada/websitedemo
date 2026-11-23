@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { triggerAutomation } from "./automation";
-import { formatConferenceDates } from "./format";
+import { countWithNoun, formatConferenceDates } from "./format";
 import { formatCents } from "@/lib/utils";
 import { escapeHtml, orderLinesAfterChanges, receiptLinesHtml } from "@/lib/conference/order-receipt-lines";
 import { loadRegistrationChanges } from "@/lib/conference/registration-changes";
@@ -419,6 +419,16 @@ export async function scheduleReadyVariables(params: {
      */
     meeting_count: String(meetingCount),
     day_count: String(dayCount),
+    /**
+     * The count WITH its noun, so the sentence agrees with the number. The
+     * template used to write "{{day_count}} days" itself, and every meeting in
+     * 2027 is on one day: all of it would have gone out as "across 1 days".
+     * Counted per person from the run, so a conference that spreads meetings
+     * over two days says "2 days" to the people who have both and "1 day" to
+     * the people who have one.
+     */
+    meetings_phrase: countWithNoun(meetingCount, "meeting", "meetings"),
+    days_phrase: countWithNoun(dayCount, "day", "days"),
     schedule_url: `${appUrl}/me#my_schedule`,
     attendance_terms: params.seatId ? await supportedDelegateTerms(db, conferenceId, params.seatId, orgName) : "",
   };

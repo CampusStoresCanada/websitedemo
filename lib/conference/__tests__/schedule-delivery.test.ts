@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { countWithNoun } from "@/lib/comms/format";
 
 /**
  * ⛔ THE TRIGGER IS MOCKED, AND THAT IS NOT A CONVENIENCE.
@@ -245,6 +246,16 @@ describe("the schedule email passes the variables the template reads", () => {
     for (const key of ["schedule_url:", "meeting_count:", "day_count:"]) {
       expect(scheduleReady, `template reads ${key}`).toContain(key);
     }
+  });
+
+  it("passes the counts with their nouns, which is what the template prints", () => {
+    for (const key of ["meetings_phrase:", "days_phrase:"]) {
+      expect(scheduleReady, `template reads ${key}`).toContain(key);
+    }
+    expect(countWithNoun(1, "day", "days")).toBe("1 day");
+    expect(countWithNoun(2, "day", "days")).toBe("2 days");
+    expect(countWithNoun(1, "meeting", "meetings")).toBe("1 meeting");
+    expect(countWithNoun(0, "meeting", "meetings")).toBe("0 meetings");
   });
 
   it("no longer passes my_conference_url, which the template never read", () => {

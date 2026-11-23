@@ -63,3 +63,8 @@ export function deriveRecipientNameVariables(
     email,
   };
 }
+
+/** "1 meeting", "15 meetings": a count that agrees with its noun. */
+export function countWithNoun(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
