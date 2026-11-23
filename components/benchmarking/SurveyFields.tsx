@@ -154,8 +154,20 @@ export function CurrencyField({
     a store that checked every line. So `carried` gates the save in handleBlur,
     and the field says "carried from FY…" until it is confirmed.
   */
+  /*
+    ⛔ Never prefilled in a read-only view.
+
+    Prefilling is for somebody who is about to answer: the number starts in the
+    box so confirming it costs one keystroke. A read-only render has nobody to
+    confirm anything, so last year's figure in the box is just last year's
+    figure presented as this year's answer. Karin Stonehouse reported exactly
+    that on 2026-11-23, reading McMaster's submitted survey: $10,735,607 of
+    in-store sales, which was FY2025's number, on a field FY2026 never asked.
+    The grey "FY2025: $…" reference to the right still shows, because that one
+    says whose year it is.
+  */
   const carriedFrom =
-    currentValue == null && priorValue != null ? String(priorValue) : null;
+    !isReadOnly && currentValue == null && priorValue != null ? String(priorValue) : null;
   const [carried, setCarried] = useState(carriedFrom != null);
   const [localValue, setLocalValue] = useState(
     currentValue != null ? String(currentValue) : (carriedFrom ?? "")
@@ -356,10 +368,10 @@ export function NumberField({
   const currentValue = formData[field];
   const priorValue = priorYearData?.[field];
 
-  // Same carried-value rule as CurrencyField: last year's number starts in the
-  // box, focus selects it, and it is not saved until a person has been here.
+  // Same carried-value rule as CurrencyField, and the same read-only bar: see
+  // the note there for why a read-only render never prefills.
   const carriedFrom =
-    currentValue == null && priorValue != null ? String(priorValue) : null;
+    !isReadOnly && currentValue == null && priorValue != null ? String(priorValue) : null;
   const [carried, setCarried] = useState(carriedFrom != null);
   const [touched, setTouched] = useState(false);
   const [localValue, setLocalValue] = useState(

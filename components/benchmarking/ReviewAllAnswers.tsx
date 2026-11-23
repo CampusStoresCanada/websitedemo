@@ -64,22 +64,26 @@ function ListBlock({
   empty,
   rows,
   onJump,
+  readOnly,
 }: {
   title: string;
   empty: string;
   rows: { key: string; left: string; right?: string }[];
   onJump: () => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
       <div className="flex items-baseline justify-between gap-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
-        <button
-          onClick={onJump}
-          className="text-xs text-[#163D6D] underline underline-offset-4"
-        >
-          Change
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onJump}
+            className="text-xs text-[#163D6D] underline underline-offset-4"
+          >
+            Change
+          </button>
+        )}
       </div>
       {rows.length === 0 ? (
         <p className="mt-1 text-sm italic text-gray-400">{empty}</p>
@@ -105,6 +109,7 @@ export default function ReviewAllAnswers({
   onJumpToField,
   onJumpToSection,
   onClose,
+  readOnly,
 }: {
   config: SurveyFieldConfig;
   formData: Record<string, unknown>;
@@ -136,6 +141,17 @@ export default function ReviewAllAnswers({
   onJumpToField: (sectionId: string, fieldName: string) => void;
   onJumpToSection: (sectionId: string) => void;
   onClose: () => void;
+  /**
+   * Somebody reading a submission rather than their own draft.
+   *
+   * ⛔ A different CONTROL, not a different screen. The committee needs exactly
+   * what this already shows — every answer, from the same config the store was
+   * asked, with "Not answered" where a store said nothing. What it does not
+   * need is the way back into a form it is not filling in. Building a second
+   * read-only renderer is how the old sections/SurveySection1-8 came to be
+   * showing FY2025 figures on FY2026 submissions for a year.
+   */
+  readOnly?: boolean;
 }) {
   const sections = useMemo(
     () =>
@@ -172,6 +188,7 @@ export default function ReviewAllAnswers({
         title={title}
         empty="None added."
         onJump={jump}
+        readOnly={readOnly}
         rows={list.map((c) => ({
           key: c.id,
           left: c.department,
@@ -190,6 +207,7 @@ export default function ReviewAllAnswers({
               title="Locations"
               empty="None added."
               onJump={jump}
+              readOnly={readOnly}
               rows={lists.locations.map((l) => ({
                 key: l.id,
                 left: l.name || "Unnamed location",
@@ -206,6 +224,7 @@ export default function ReviewAllAnswers({
               title={`Your key dates in FY${fiscalYear}`}
               empty="No dates added."
               onJump={jump}
+              readOnly={readOnly}
               rows={lists.keyDates
                 .filter(
                   (d) => keyDateYear(d.academicYear, fiscalYear) === "reported",
@@ -220,6 +239,7 @@ export default function ReviewAllAnswers({
               title={`And the year ahead, FY${fiscalYear + 1}`}
               empty="None given."
               onJump={jump}
+              readOnly={readOnly}
               rows={lists.keyDates
                 .filter((d) => keyDateYear(d.academicYear, fiscalYear) === "ahead")
                 .map((d) => ({
@@ -232,6 +252,7 @@ export default function ReviewAllAnswers({
               title="Who competes with you"
               empty="None added."
               onJump={jump}
+              readOnly={readOnly}
               rows={lists.competitors.map((c) => ({
                 key: c.id,
                 left: c.name,
@@ -250,6 +271,7 @@ export default function ReviewAllAnswers({
             title="Income lines"
             empty="None added."
             onJump={jump}
+            readOnly={readOnly}
             rows={lists.otherIncome.map((r) => ({
               key: r.id,
               left: r.countsAsIncome ? r.label : `${r.label} (not counted as income)`,
@@ -263,6 +285,7 @@ export default function ReviewAllAnswers({
             title="Your team"
             empty="Nobody added."
             onJump={jump}
+            readOnly={readOnly}
             rows={lists.staff.map((p) => ({
               key: p.id,
               left: p.name,
@@ -279,6 +302,7 @@ export default function ReviewAllAnswers({
             title="Expenses you named yourself"
             empty="None added."
             onJump={jump}
+            readOnly={readOnly}
             rows={lists.otherExpenses.map((r) => ({
               key: r.id,
               left: r.label,
@@ -304,19 +328,22 @@ export default function ReviewAllAnswers({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-gray-900">
-            Everything you have answered
+            {readOnly ? "Everything this store answered" : "Everything you have answered"}
           </h3>
           <p className="mt-1 max-w-2xl text-sm text-gray-600">
-            Read it through before you submit. Click any answer to go and change it. You
-            will land on that question, and a button will bring you straight back here.
+            {readOnly
+              ? "Exactly what was submitted, from the same questions the store was asked. A blank here is a blank in the submission."
+              : "Read it through before you submit. Click any answer to go and change it. You will land on that question, and a button will bring you straight back here."}
           </p>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Back to the form
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Back to the form
+          </button>
+        )}
       </div>
 
       {missing.length > 0 && (
@@ -329,12 +356,18 @@ export default function ReviewAllAnswers({
           <ul className="mt-1.5 space-y-0.5">
             {missing.map(({ section, field }) => (
               <li key={field.name}>
-                <button
-                  onClick={() => onJumpToField(section.id, field.name)}
-                  className="text-sm text-amber-900 underline underline-offset-4"
-                >
-                  {section.order}. {section.title} — {field.label}
-                </button>
+                {readOnly ? (
+                  <span className="text-sm text-amber-900">
+                    {section.order}. {section.title} — {field.label}
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => onJumpToField(section.id, field.name)}
+                    className="text-sm text-amber-900 underline underline-offset-4"
+                  >
+                    {section.order}. {section.title} — {field.label}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -353,17 +386,23 @@ export default function ReviewAllAnswers({
       {gaps.length > 0 && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
           <p className="text-sm font-semibold text-gray-900">
-            You can file without these, but here is what each one costs you
+            {readOnly
+              ? "Filed without these, and what each one costs the store"
+              : "You can file without these, but here is what each one costs you"}
           </p>
           <ul className="mt-2 space-y-2">
             {gaps.map((gap) => (
               <li key={gap.key}>
-                <button
-                  onClick={() => onJumpToField(gap.section, gap.key)}
-                  className="text-left text-sm font-medium text-[#163D6D] underline underline-offset-4"
-                >
-                  {gap.label}
-                </button>
+                {readOnly ? (
+                  <span className="text-sm font-medium text-[#163D6D]">{gap.label}</span>
+                ) : (
+                  <button
+                    onClick={() => onJumpToField(gap.section, gap.key)}
+                    className="text-left text-sm font-medium text-[#163D6D] underline underline-offset-4"
+                  >
+                    {gap.label}
+                  </button>
+                )}
                 <p className="text-xs text-gray-600">{gap.cost}</p>
               </li>
             ))}
@@ -393,14 +432,24 @@ export default function ReviewAllAnswers({
                       )}
                     </dt>
                     <dd className="text-right">
-                      <button
-                        onClick={() => onJumpToField(section.id, field.name)}
-                        className={`text-sm underline decoration-dotted underline-offset-4 hover:decoration-solid ${
-                          answered ? "text-gray-900" : "text-gray-400 italic"
-                        }`}
-                      >
-                        {text}
-                      </button>
+                      {readOnly ? (
+                        <span
+                          className={`text-sm ${
+                            answered ? "text-gray-900" : "text-gray-400 italic"
+                          }`}
+                        >
+                          {text}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => onJumpToField(section.id, field.name)}
+                          className={`text-sm underline decoration-dotted underline-offset-4 hover:decoration-solid ${
+                            answered ? "text-gray-900" : "text-gray-400 italic"
+                          }`}
+                        >
+                          {text}
+                        </button>
+                      )}
                     </dd>
                   </div>
                 );

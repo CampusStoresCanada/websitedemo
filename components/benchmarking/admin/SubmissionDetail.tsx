@@ -5,48 +5,70 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Benchmarking, DeltaFlag } from "@/lib/types/db";
 import { verifySubmission, unverifySubmission } from "@/lib/actions/benchmarking-admin";
-import SurveySection1 from "@/components/benchmarking/sections/SurveySection1";
-import SurveySection2 from "@/components/benchmarking/sections/SurveySection2";
-import SurveySection3 from "@/components/benchmarking/sections/SurveySection3";
-import SurveySection4 from "@/components/benchmarking/sections/SurveySection4";
-import SurveySection5 from "@/components/benchmarking/sections/SurveySection5";
-import SurveySection6 from "@/components/benchmarking/sections/SurveySection6";
-import SurveySection7 from "@/components/benchmarking/sections/SurveySection7";
-import SurveySection8 from "@/components/benchmarking/sections/SurveySection8";
+import ReviewAllAnswers from "@/components/benchmarking/ReviewAllAnswers";
+import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
+import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
+import type {
+  OtherIncomeRow,
+  OtherExpenseRow,
+  StaffRow,
+} from "@/lib/actions/benchmarking-financials";
+import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
+import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
+import type { KeyDate } from "@/lib/actions/benchmarking-profile";
 
-const SECTIONS = [
-  { id: 1, title: "Institution Profile" },
-  { id: 2, title: "Sales Revenue" },
-  { id: 3, title: "Financial Metrics" },
-  { id: 4, title: "Staffing" },
-  { id: 5, title: "Course Materials" },
-  { id: 6, title: "General Merchandise" },
-  { id: 7, title: "Technology & Systems" },
-  { id: 8, title: "Store Operations" },
-] as const;
+/**
+ * One store's submission, as the committee reads it.
+ *
+ * ⛔ Renders ReviewAllAnswers, the same screen the store saw before it filed.
+ * Not a second renderer.
+ *
+ * It used to drive its own SurveySection1-8, written before the category
+ * rebuild and never retired. Those sections asked for the flat `sales_*`,
+ * `total_gross_sales_instore`, `total_cogs` and `net_profit` columns, which the
+ * rebuild deliberately stopped writing — so on every FY2026 submission they
+ * were empty, and CurrencyField helpfully prefilled last year's figure the way
+ * it does for a store that is about to answer. The result, on all 13 submitted
+ * stores: FY2025 revenue displayed as this year's, and this year's real
+ * category sales shown nowhere, because that page never loaded them. Karin
+ * Stonehouse reported it on 2026-11-23 against McMaster, where the screen was
+ * showing $10,735,607 of in-store sales that belonged to FY2025.
+ *
+ * Reading the store's own config is what makes that class of drift impossible:
+ * a question the store was never asked cannot appear here, and a figure it
+ * never gave reads "Not answered".
+ */
 
 interface SubmissionDetailProps {
   submission: Benchmarking;
   organizationName: string;
-  organizationProvince: string;
   deltaFlags: DeltaFlag[];
-  priorYearData: Benchmarking | null;
+  /** The config this store was actually asked, same source as the form. */
+  config: SurveyFieldConfig;
+  lists: {
+    gmCategories: SurveyCategory[];
+    cmCategories: SurveyCategory[];
+    otherIncome: OtherIncomeRow[];
+    otherExpenses: OtherExpenseRow[];
+    staff: StaffRow[];
+    competitors: CompetitorRow[];
+    locations: SurveyLocation[];
+    keyDates: KeyDate[];
+  };
 }
 
 export default function SubmissionDetail({
   submission,
   organizationName,
-  organizationProvince,
   deltaFlags,
-  priorYearData,
+  config,
+  lists,
 }: SubmissionDetailProps) {
   const router = useRouter();
-  const [activeSection, setActiveSection] = useState(1);
   const [verifying, setVerifying] = useState(false);
 
   const isVerified = !!submission.verified_by;
   const formData = submission as unknown as Record<string, unknown>;
-  const priorData = priorYearData as unknown as Record<string, unknown> | null;
 
   const handleVerify = async () => {
     setVerifying(true);
@@ -59,33 +81,11 @@ export default function SubmissionDetail({
     setVerifying(false);
   };
 
-  // No-op handlers for read-only sections
-  const noopFieldChange = () => {};
-  const noopDeltaFlag = async () => {};
-
-  const sectionProps = {
-    formData,
-    priorYearData: priorData,
-    onFieldChange: noopFieldChange,
-    onDeltaFlag: noopDeltaFlag,
-    deltaFlags,
-    isReadOnly: true,
-    organizationName,
-    organizationProvince,
-  };
-
-  const SectionComponent = [
-    SurveySection1,
-    SurveySection2,
-    SurveySection3,
-    SurveySection4,
-    SurveySection5,
-    SurveySection6,
-    SurveySection7,
-    SurveySection8,
-  ][activeSection - 1];
-
   const pendingFlags = deltaFlags.filter((f) => f.committee_status === "pending").length;
+
+  // Nobody is filling this in, so there is nowhere to jump to. readOnly hides
+  // the controls that would call these.
+  const noop = () => {};
 
   return (
     <div>
@@ -140,26 +140,18 @@ export default function SubmissionDetail({
         )}
       </div>
 
-      {/* Section nav */}
-      <div className="flex gap-1 mb-6 overflow-x-auto pb-1">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setActiveSection(s.id)}
-            className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-              activeSection === s.id
-                ? "bg-[#EE2A2E] text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            {s.id}. {s.title}
-          </button>
-        ))}
-      </div>
-
-      {/* Section content */}
+      {/* The submission */}
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-        <SectionComponent {...sectionProps} />
+        <ReviewAllAnswers
+          config={config}
+          formData={formData}
+          fiscalYear={submission.fiscal_year}
+          lists={lists}
+          onJumpToField={noop}
+          onJumpToSection={noop}
+          onClose={noop}
+          readOnly
+        />
       </div>
 
       {/* Delta flags summary */}
