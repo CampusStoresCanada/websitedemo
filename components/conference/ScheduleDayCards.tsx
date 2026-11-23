@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { kindLabel } from "@/lib/conference/entity-kinds";
 
 /**
  * Pure rendering block for a day-grouped schedule — extracted out of
@@ -85,7 +86,7 @@ export function kindLabelFor(item: { id: string; kind: string }): string {
   if (MEETING_BLOCK_IDS.has(item.id)) return "Curated partner meetings";
   if (item.id === BIG_IDEAS_DAY_ID) return "Big Ideas track";
   if (SESSION_LABEL_OVERRIDES[item.id]) return SESSION_LABEL_OVERRIDES[item.id];
-  return KIND_LABEL[item.kind] ?? item.kind;
+  return KIND_LABEL[item.kind] ?? kindLabel(item.kind);
 }
 
 export function formatDayHeading(dayKey: string): string {
