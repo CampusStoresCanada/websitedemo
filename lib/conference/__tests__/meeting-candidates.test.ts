@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { siblingSeatIds } from "../meeting-candidates";
+import { oneSeatPerPerson, siblingSeatIds } from "../meeting-candidates";
 import type { SeatHolding } from "../seats";
 
 function seat(partial: Partial<SeatHolding> & { seatId: string }): SeatHolding {
@@ -54,5 +54,30 @@ describe("siblingSeatIds", () => {
 
   it("returns nothing for a seat that is not in the list", () => {
     expect(siblingSeatIds("missing", seats)).toEqual([]);
+  });
+});
+
+/**
+ * The solver checks "two rooms at once" per seat, so a person on two seats was
+ * double-booked 14 times in the 2027 rehearsal. One person is one delegate.
+ */
+describe("oneSeatPerPerson", () => {
+  const rows = [
+    { seat: "a", person: "person-1" },
+    { seat: "b", person: "person-2" },
+    { seat: "c", person: "person-1" },
+  ];
+
+  it("keeps the first seat a person holds and reports the rest", () => {
+    const { kept, dropped } = oneSeatPerPerson(rows, (r) => r.person);
+    expect(kept.map((r) => r.seat)).toEqual(["a", "b"]);
+    expect(dropped.map((r) => r.seat)).toEqual(["c"]);
+  });
+
+  it("never treats two seats with nobody known as the same person", () => {
+    const unknown = [{ seat: "x" }, { seat: "y" }];
+    const { kept, dropped } = oneSeatPerPerson(unknown, () => null);
+    expect(kept).toHaveLength(2);
+    expect(dropped).toHaveLength(0);
   });
 });

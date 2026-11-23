@@ -248,6 +248,11 @@ async function main() {
     `loaded in ${loadedMs}ms — ${candidates.delegates.length} delegates, ` +
       `${exhibitors.length} schedulable exhibitors, ${suites.length} suites, ${meetingSlots.length} slots`
   );
+  if (candidates.secondSeats.length > 0) {
+    console.log(
+      `${candidates.secondSeats.length} seat(s) left out: the holder is already a delegate on another seat`
+    );
+  }
   if (exhibitors.length === 0 || candidates.delegates.length === 0) {
     /**
      * ⚠️ This fires BEFORE the late-add block, so a late add on a conference

@@ -24,6 +24,11 @@ export type MeetingCandidates = {
   exhibitors: ExhibitorProfile[];
   /** Named seats on neither side — reported, never swept onto one of them. */
   notMatchable: string[];
+  /**
+   * Delegate seats left out because their holder is already a delegate on
+   * another seat. Reported, never silently dropped.
+   */
+  secondSeats: string[];
   /** Seat → holder's `contacts` id, for person-grain match reads. */
   contactBySeatId: Map<string, string>;
   /** Every named registration seat, by seat id — for name/org/auth lookups. */
@@ -453,8 +458,13 @@ export async function loadMeetingCandidates(
     }
   }
 
+  // One person, one day of meetings, however many seats carry their name.
+  const personBySeatId = new Map(seats.map((s) => [s.seatId, s.holderPersonId] as const));
+  const onePerPerson = oneSeatPerPerson(delegates, (d) => personBySeatId.get(d.registrationId) ?? null);
+
   return {
-    delegates,
+    delegates: onePerPerson.kept,
+    secondSeats: onePerPerson.dropped.map((d) => d.registrationId),
     exhibitors,
     notMatchable,
     /**
@@ -491,4 +501,35 @@ export function siblingSeatIds(seatId: string, seats: Iterable<SeatHolding>): st
   return all
     .filter((s) => s.seatId !== seatId && s.holderPersonId === self.holderPersonId)
     .map((s) => s.seatId);
+}
+
+/**
+ * A person named to two delegate seats is ONE delegate.
+ *
+ * ⛔ The solver's "nobody is in two rooms at once" rule is kept per SEAT. In the
+ * 2027 rehearsal (2026-11-20) one person held two registrations at the same
+ * school, so the solver gave her 34 meetings and put her in two suites at the
+ * same time on 14 occasions, and every check passed. Swaps already knew two
+ * seats can be one person (`siblingSeatIds`); the solver was never told.
+ *
+ * The first seat stands for the person. The other stays a seat, with its badge
+ * and its place on the list; it just does not get a second day of meetings.
+ */
+export function oneSeatPerPerson<T>(
+  rows: readonly T[],
+  personOf: (row: T) => string | null
+): { kept: T[]; dropped: T[] } {
+  const seen = new Set<string>();
+  const kept: T[] = [];
+  const dropped: T[] = [];
+  for (const row of rows) {
+    const person = personOf(row);
+    if (person && seen.has(person)) {
+      dropped.push(row);
+      continue;
+    }
+    if (person) seen.add(person);
+    kept.push(row);
+  }
+  return { kept, dropped };
 }
