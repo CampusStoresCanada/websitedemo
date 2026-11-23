@@ -70,6 +70,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "benchmarking_no_committee_lead",
   "match_run_stale",
   "new_partner_announcement_unapproved",
+  "conference_topics_awaiting_review",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = [
   "job_consecutive_failures:",
@@ -1869,6 +1870,51 @@ export async function evaluateNewPartnerAnnouncementsWaiting(): Promise<Candidat
 }
 
 /**
+ * Big Ideas Day pitches waiting for a look.
+ *
+ * A pitch is held off the public board until staff approve it (Steve,
+ * 2026-11-23). The hold is only fair to the person who submitted it if somebody
+ * is told it is there: without this, a member's topic sits invisible until
+ * staff happen to open the Schedule page. The sibling of the new-partner
+ * announcement rule above, with no grace period, because a suggestion that
+ * vanishes for a week reads as "they ignored me".
+ *
+ * ⚠️ No count in the message, for the same reason as above: it is frozen at
+ * creation. The alert clears itself on the next pass once nothing is waiting.
+ * Test organisations' pitches never raise it.
+ */
+export async function evaluateConferenceTopicsAwaitingReview(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("conference_topics")
+    .select("id, conference_id, title, created_at, organizations!inner(is_test)")
+    .eq("status", "submitted")
+    .eq("organizations.is_test", false)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to evaluate conference topics awaiting review: ${error.message}`);
+  }
+
+  const waiting = data ?? [];
+  if (waiting.length === 0) return null;
+
+  return {
+    ruleKey: "conference_topics_awaiting_review",
+    severity: "warning",
+    message:
+      "Big Ideas Day pitches are waiting for review on the conference's admin Schedule page. " +
+      "They stay off the public page until somebody approves or declines them.",
+    details: {
+      // Frozen at creation, like the message. The screen is what to trust.
+      countAtDetection: waiting.length,
+      reviewPath: `/admin/conference/${waiting[0].conference_id}/schedule`,
+      titles: waiting.map((r) => r.title as string),
+    },
+  };
+}
+
+/**
  * A checklist that can never reach anyone in time.
  *
  * Reminders fire at CHECKPOINTS, and a checkpoint is expressed as days before
@@ -1980,6 +2026,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBoardRosterSize(),
     evaluateMatchRunStale(),
     evaluateNewPartnerAnnouncementsWaiting(),
+    evaluateConferenceTopicsAwaitingReview(),
   ]);
 
   // Flattened separately: every other check yields at most one candidate, but

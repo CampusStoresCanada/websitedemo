@@ -36,7 +36,10 @@ export default function BigIdeasPitchesPanel({ board, fixtures }: { board: Staff
     startTransition(() => router.refresh());
   }
 
-  const live = board.topics.filter((t) => t.status !== "withdrawn");
+  // Waiting for a look: not on the public board, and not in the lists below
+  // until somebody says yes.
+  const awaiting = board.topics.filter((t) => t.status === "submitted");
+  const live = board.topics.filter((t) => t.status !== "withdrawn" && t.status !== "submitted");
   const presentations = live.filter((t) => t.presentation);
   const tables = live.filter((t) => !t.presentation);
   const taken = new Map(
@@ -58,6 +61,51 @@ export default function BigIdeasPitchesPanel({ board, fixtures }: { board: Staff
         <p className="mx-4 mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Showing test pitches only. Nothing here reaches the public page.
         </p>
+      ) : null}
+
+      {awaiting.length > 0 ? (
+        <div className="border-b border-gray-200 bg-amber-50/60 px-4 py-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+            Awaiting review ({awaiting.length})
+          </h3>
+          <p className="mt-1 text-xs text-gray-600">
+            Only the organisation that submitted each of these can see it. Approve to put it on the
+            public page, where members can choose it.
+          </p>
+          <ul className="mt-2 divide-y divide-amber-100">
+            {awaiting.map((topic) => (
+              <li key={topic.id} className="flex flex-wrap items-start gap-x-4 gap-y-2 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900">{topic.title}</p>
+                  {/* The whole text: this is the one place it is read before it is public. */}
+                  {topic.body ? <p className="mt-0.5 text-sm text-gray-700">{topic.body}</p> : null}
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {topic.orgName} · {topic.presentation ? "presentation" : "table conversation"}
+                    {topic.presentation ? (topic.hasDeposit ? " · deposit on record" : " · no deposit on record") : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded bg-gray-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-40"
+                    disabled={busyId === topic.id}
+                    onClick={() => place(topic.id, { decision: "approve" })}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className={quietButton}
+                    disabled={busyId === topic.id}
+                    onClick={() => place(topic.id, { decision: "decline" })}
+                  >
+                    Decline
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       {error ? (

@@ -186,16 +186,20 @@ export default function TopicBoard({
         <ul className="mt-2 space-y-2">
           {group.topics.map((topic) => {
             const picked = chosen.includes(topic.id);
-            const Chip = canVote ? "button" : "div";
+            // Your own pitch, waiting for staff: shown to you, not yet choosable.
+            const votable = canVote && !topic.awaitingReview;
+            const Chip = votable ? "button" : "div";
             return (
               <li key={topic.id}>
                 <Chip
-                  {...(canVote ? { type: "button" as const, onClick: () => toggle(topic.id) } : {})}
-                  aria-pressed={canVote ? picked : undefined}
+                  {...(votable ? { type: "button" as const, onClick: () => toggle(topic.id) } : {})}
+                  aria-pressed={votable ? picked : undefined}
                   className={`block w-full rounded-xl border p-4 text-left transition ${
                     picked
                       ? "border-[#EE2A2E] bg-[#fff1f1]"
-                      : "border-gray-200 bg-white" + (canVote ? " hover:border-gray-400" : "")
+                      : topic.awaitingReview
+                        ? "border-dashed border-gray-300 bg-gray-50"
+                        : "border-gray-200 bg-white" + (votable ? " hover:border-gray-400" : "")
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
@@ -205,6 +209,11 @@ export default function TopicBoard({
                         <p className="mt-1 text-sm leading-relaxed text-gray-600">{topic.body}</p>
                       ) : null}
                       <p className="mt-2 text-xs text-gray-400">Proposed by {topic.orgName}</p>
+                      {topic.awaitingReview ? (
+                        <p className="mt-2 inline-block rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                          Waiting for review. Only your organisation can see this until it is approved.
+                        </p>
+                      ) : null}
                       {/* Staff have placed it: say when and where. */}
                       {topic.running ? (
                         <p className="mt-2 inline-block rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-800">
@@ -337,7 +346,8 @@ function ProposeTopicForm({
   if (done) {
     return (
       <p className="mt-6 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-        Topic added. It's in the list above for members to choose from.
+        Thanks, we have it. We take a quick look at each one before it goes on the list, and
+        yours will appear there once that is done.
       </p>
     );
   }

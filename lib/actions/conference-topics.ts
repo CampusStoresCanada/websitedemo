@@ -44,6 +44,11 @@ export type TopicChip = {
   startsAt: string | null;
   /** The table staff gave a running table conversation. */
   tableLabel: string | null;
+  /**
+   * Submitted and not yet looked at by staff. Only ever true for the viewer's
+   * OWN organisation's pitches: nobody else is shown one until it is approved.
+   */
+  awaitingReview: boolean;
 };
 
 /** The viewer's standing with the topic area, so the page can render one state. */
@@ -89,7 +94,9 @@ export async function loadTopicBoard(
     .from("conference_topics")
     .select("id, title, body, status, scheduled_at, table_label, organization_id, organizations!inner(name, type, is_test)")
     .eq("conference_id", conferenceId)
-    .in("status", ["proposed", "scheduled"])
+    // 'submitted' rows come back so the proposer can see theirs is waiting;
+    // everyone else's are dropped just below.
+    .in("status", ["submitted", "proposed", "scheduled"])
     // ⛔ Test orgs do not put topics in front of real members. Caught by
     // testing: a seeded persona's topic rendered on the board as "Proposed by
     // Test Org (BI Member)", which is what every other audience query in this
@@ -99,7 +106,15 @@ export async function loadTopicBoard(
     .order("id", { ascending: true });
   if (error) return { success: false, error: error.message };
 
-  const topicIds = (topicRows ?? []).map((t) => t.id);
+  /*
+    ⛔ THE MODERATION GATE. A pitch nobody on staff has approved is shown to the
+    organisation that submitted it and to no one else. Filtered here, on the
+    server, so an unapproved pitch never reaches another reader's browser.
+  */
+  const visibleRows = (topicRows ?? []).filter(
+    (t) => t.status !== "submitted" || (organizationId !== null && t.organization_id === organizationId)
+  );
+  const topicIds = visibleRows.map((t) => t.id);
   const timeZone = await conferenceTimeZone(db, conferenceId);
 
   // Counts for every topic in one pass, rather than a query per chip.
@@ -158,7 +173,7 @@ export async function loadTopicBoard(
   return {
     success: true,
     data: {
-      topics: (topicRows ?? []).map((t) => {
+      topics: visibleRows.map((t) => {
         const o = Array.isArray(t.organizations) ? t.organizations[0] : t.organizations;
         return {
           id: t.id,
@@ -171,6 +186,7 @@ export async function loadTopicBoard(
           running: t.status === "scheduled",
           startsAt: t.scheduled_at ? clock(wallMinutesInZone(t.scheduled_at, timeZone)) : null,
           tableLabel: t.table_label,
+          awaitingReview: t.status === "submitted",
         };
       }),
       hasBallot: Boolean(myBallot),
@@ -238,6 +254,10 @@ export async function proposeTopic(params: {
       title,
       body: params.body.trim() || null,
       deposit_purchase_id: depositPurchaseId,
+      // Not on the board until staff approve it (the panel on the admin
+      // Schedule page). The column default is still 'proposed'; this is the
+      // one writer of 'submitted'.
+      status: "submitted",
     })
     .select("id")
     .single();
@@ -309,6 +329,16 @@ export async function saveTopicBallot(params: {
   if (clearError) return { success: false, error: clearError.message };
 
   if (params.topicIds.length > 0) {
+    // Only what is on the board can be chosen. A hidden form is not a gate.
+    const { data: choosable } = await db
+      .from("conference_topics")
+      .select("id")
+      .eq("conference_id", params.conferenceId)
+      .in("status", ["proposed", "scheduled"])
+      .in("id", params.topicIds);
+    if ((choosable ?? []).length !== params.topicIds.length) {
+      return { success: false, error: "One of those topics is no longer on the list. Reload and try again." };
+    }
     const { error: insertError } = await db
       .from("conference_topic_ballot_selections")
       .insert(params.topicIds.map((topic_id) => ({ ballot_id: ballot.id, topic_id })));
@@ -330,7 +360,8 @@ export type StaffTopic = {
   orgName: string;
   /** Presentation (a partner's, in the presentation room) or table conversation. */
   presentation: boolean;
-  status: "proposed" | "scheduled" | "declined" | "withdrawn";
+  /** 'submitted' = awaiting review: not on the public board yet. */
+  status: "submitted" | "proposed" | "scheduled" | "declined" | "withdrawn";
   /** How many members chose it. */
   votes: number;
   /** "09:20" when placed, the same form the slot picker offers. */
@@ -437,12 +468,18 @@ export async function listTopicsForStaff(
  * a table. There is no "approve" that leaves either without a place, because
  * the public page would then announce something with nowhere to be.
  *
+ * Moderation rides the same verb: a new pitch waits as 'submitted', and
+ * approving it is the move to 'proposed', where members can see and choose it.
+ * Giving a waiting pitch a time or a table approves it too; there is no state
+ * in which something is running but was never approved.
+ *
  * ⛔ Declining moves no money. A partner's deposit is refunded from the order
  * screen, by a person, not as a side effect of this button.
  */
 export async function placeTopic(params: {
   topicId: string;
-  decision: "run" | "decline" | "undecide";
+  /** "approve" puts an awaiting-review pitch on the board; "undecide" returns any pitch to it. */
+  decision: "approve" | "run" | "decline" | "undecide";
   /** "09:20". Required to run a presentation; optional for a table. */
   startTime?: string | null;
   /** Required to run a table conversation. */
