@@ -18,11 +18,11 @@ import { formatCents } from "@/lib/utils";
 
 const PAGE = 25;
 
-/** The badge overlay colours, across the whole row: delegate red, exhibitor blue, staff white. */
+/** The badge overlay colours as a light wash across the whole row, with a full-colour edge: delegate red, exhibitor blue, staff white. */
 const ROW: Record<BadgeColour, { row: string; muted: string; tile: string }> = {
-  delegate: { row: "bg-[#e72a28] text-white", muted: "text-white/70", tile: "border-[#e72a28] bg-[#e72a28] text-white" },
-  exhibitor: { row: "bg-[#16345a] text-white", muted: "text-white/70", tile: "border-[#16345a] bg-[#16345a] text-white" },
-  staff: { row: "bg-white text-gray-900", muted: "text-gray-400", tile: "border-gray-400 bg-white text-gray-900" },
+  delegate: { row: "bg-[#e72a28]/10 text-gray-900 shadow-[inset_4px_0_0_#e72a28]", muted: "text-gray-500", tile: "border-[#e72a28] bg-[#e72a28] text-white" },
+  exhibitor: { row: "bg-[#16345a]/10 text-gray-900 shadow-[inset_4px_0_0_#16345a]", muted: "text-gray-500", tile: "border-[#16345a] bg-[#16345a] text-white" },
+  staff: { row: "bg-white text-gray-900 shadow-[inset_4px_0_0_#d1d5db]", muted: "text-gray-500", tile: "border-gray-400 bg-white text-gray-900" },
 };
 
 /** Hand a file to the browser to save. */
@@ -294,7 +294,7 @@ export default function RegistrationsList({
                   const colour = ROW[seat.badge];
                   const none = <span className={colour.muted}>None given</span>;
                   return (
-                    <tr key={seat.seatId} className={`border-t border-white/40 ${colour.row}`} title={BADGE_LABEL[seat.badge]}>
+                    <tr key={seat.seatId} className={`border-t border-gray-200 ${colour.row}`} title={BADGE_LABEL[seat.badge]}>
                       <td className="px-4 py-2 text-sm font-semibold">
                         {seat.holderPersonId ? (
                           seat.holderName ?? "Unnamed person"
