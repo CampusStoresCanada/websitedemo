@@ -41,6 +41,8 @@ export type AssigneeLegalStatus = {
   /** No account yet, so they cannot have accepted anything. */
   hasAccount: boolean;
   outstanding: number;
+  /** This row is the person looking at the page. */
+  isViewer: boolean;
 };
 
 export type OrgLegalStatus = {
@@ -49,6 +51,18 @@ export type OrgLegalStatus = {
   /** Titles each attendee accepts for themselves. */
   theirsTitles: string[];
   people: AssigneeLegalStatus[];
+  /**
+   * Where an attendee accepts their own agreements: the conference welcome
+   * page, the one surface for assignee documents.
+   *
+   * ⛔ The org admin is very often an attendee too. NBCC, 2026-11-24: the only
+   * person registered was the admin, so the roster showed "Steve Thompson,
+   * 2 outstanding" with nothing to press, under "Nothing for you to sign". The
+   * reminder email links here, so this page has to lead to the documents.
+   */
+  acceptOwnHref: string | null;
+  /** The viewer's own attendee agreements still open, minus any already in `mine`. */
+  ownOutstanding: number;
 };
 
 const TITLES: Record<string, string> = {
@@ -97,7 +111,9 @@ export async function loadOrgLegalStatus(
   for (const v of (versions ?? []) as VersionRow[]) {
     if (!latestByType.has(v.document_type)) latestByType.set(v.document_type, v);
   }
-  if (latestByType.size === 0) return { mine: [], theirsTitles: [], people: [] };
+  if (latestByType.size === 0) {
+    return { mine: [], theirsTitles: [], people: [], acceptOwnHref: null, ownOutstanding: 0 };
+  }
 
   const { data: org } = await db
     .from("organizations")
@@ -231,6 +247,13 @@ export async function loadOrgLegalStatus(
     }
   }
 
+  // A "both" document (Terms & Conditions) is in `mine` AND on the viewer's
+  // own attendee list. One acceptance clears it in both places, so the header
+  // must not count it twice: measured on the test partner, "5 for you to read
+  // and accept" when there were four documents.
+  const mineIds = new Set(mine.map((d) => d.versionId));
+  let ownOutstanding = 0;
+
   const people: AssigneeLegalStatus[] = (peopleRows ?? [])
     .filter((p) => p.assignment_status !== "canceled")
     .map((p) => {
@@ -238,14 +261,27 @@ export async function loadOrgLegalStatus(
         ...(p.user_id ? acceptedByUser.get(p.user_id) ?? [] : []),
         ...(p.canonical_person_id ? acceptedByContact.get(p.canonical_person_id as string) ?? [] : []),
       ]);
+      const outstandingIds = assigneeVersionIds.filter((id) => !accepted.has(id));
+      const isViewer = !!p.user_id && p.user_id === viewerUserId;
+      if (isViewer) ownOutstanding = outstandingIds.filter((id) => !mineIds.has(id)).length;
       return {
         personId: p.id,
         name: p.display_name ?? p.contact_email ?? "Unnamed",
         hasAccount: !!p.user_id,
-        outstanding: assigneeVersionIds.filter((id) => !accepted.has(id)).length,
+        outstanding: outstandingIds.length,
+        isViewer,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { mine, theirsTitles, people };
+  const { data: instance } = await db
+    .from("conference_instances")
+    .select("year, edition_code")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  const acceptOwnHref = instance
+    ? `/conference/${instance.year}/${instance.edition_code}/welcome`
+    : null;
+
+  return { mine, theirsTitles, people, acceptOwnHref, ownOutstanding };
 }

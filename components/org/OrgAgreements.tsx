@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { acceptLegalDocument } from "@/lib/actions/conference-legal";
 import type { OrgLegalStatus } from "@/lib/conference/org-legal";
@@ -18,10 +19,13 @@ import type { OrgLegalStatus } from "@/lib/conference/org-legal";
  * against the signed-in user and rejects any other.
  */
 export default function OrgAgreements({ status }: { status: OrgLegalStatus }) {
-  const { mine, theirsTitles, people } = status;
+  const { mine, theirsTitles, people, acceptOwnHref, ownOutstanding } = status;
   if (mine.length === 0 && theirsTitles.length === 0) return null;
 
-  const outstandingMine = mine.filter((d) => !d.acceptedByViewer).length;
+  // The viewer's own attendee agreements count as theirs to sign. Leaving them
+  // out made the header say "Nothing for you to sign" above a roster row, with
+  // the viewer's own name on it, saying "2 outstanding".
+  const outstandingMine = mine.filter((d) => !d.acceptedByViewer).length + ownOutstanding;
   const peopleOutstanding = people.filter((p) => p.outstanding > 0).length;
 
   return (
@@ -52,8 +56,8 @@ export default function OrgAgreements({ status }: { status: OrgLegalStatus }) {
             {theirsTitles.join(" · ")}
           </p>
           <p className="mt-1 text-xs text-gray-500">
-            You can&rsquo;t accept these for someone else — each person does it when they
-            sign in. Chase anyone still outstanding.
+            You can&rsquo;t accept these for someone else. Each person accepts their own,
+            signed in to their own account. Chase anyone still outstanding.
           </p>
 
           {people.length === 0 ? (
@@ -73,6 +77,18 @@ export default function OrgAgreements({ status }: { status: OrgLegalStatus }) {
                     </span>
                   ) : p.outstanding === 0 ? (
                     <span className="text-xs font-medium text-green-700">All accepted</span>
+                  ) : p.isViewer && acceptOwnHref ? (
+                    // The one row the viewer CAN clear: their own. Sent to the
+                    // welcome page, where attendee agreements are accepted.
+                    <span className="text-xs text-gray-600">
+                      {p.outstanding} for you to accept{" "}
+                      <Link
+                        href={acceptOwnHref}
+                        className="ml-1 font-medium text-[#163D6D] hover:underline"
+                      >
+                        Read and accept &rarr;
+                      </Link>
+                    </span>
                   ) : (
                     <span className="text-xs text-gray-600">
                       {p.outstanding} outstanding

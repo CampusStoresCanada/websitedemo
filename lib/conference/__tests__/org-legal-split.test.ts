@@ -48,6 +48,20 @@ describe("the roster tells you who can actually act", () => {
     expect(view).toContain("Hasn&rsquo;t activated their account yet");
   });
 
+  it("leads the viewer to their OWN attendee agreements", () => {
+    // NBCC, 2026-11-24: the admin was the only attendee. The reminder linked
+    // here, and the page showed their own name with "2 outstanding" and
+    // nothing to press. Their row has to go to the welcome page, and their
+    // own count has to reach the header.
+    expect(loader).toContain("isViewer = !!p.user_id && p.user_id === viewerUserId");
+    expect(loader).toContain("/welcome`");
+    expect(view).toContain("p.isViewer && acceptOwnHref");
+    expect(view).toContain("href={acceptOwnHref}");
+    expect(view).toContain("+ ownOutstanding");
+    // Terms & Conditions is in both lists; one acceptance clears both.
+    expect(loader).toContain("outstandingIds.filter((id) => !mineIds.has(id))");
+  });
+
   it("never offers the admin a button for someone else's document", () => {
     expect(view).toContain("You can&rsquo;t accept these for someone else");
     // The only accept call takes a version id and records for the signed-in
