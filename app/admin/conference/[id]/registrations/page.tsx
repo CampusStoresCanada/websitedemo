@@ -5,7 +5,7 @@ import { getCancollBillingSummary } from "@/lib/actions/cancoll-billing";
 import { getRegistrationChangeRows } from "@/lib/actions/conference-registration-change";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadRegistrationList, summarizeSide } from "@/lib/conference/registration-list";
+import { loadRegistrationList } from "@/lib/conference/registration-list";
 
 export const metadata = { title: "Conference Registrations | Admin" };
 
@@ -28,12 +28,7 @@ export default async function ConferenceRegistrationsPage({
   ]);
   return (
     <>
-      <RegistrationsList
-        conferenceId={id}
-        delegates={summarizeSide(seats, "delegate")}
-        exhibitors={summarizeSide(seats, "exhibitor")}
-        changeRows={changes.success ? changes.data : []}
-      />
+      <RegistrationsList conferenceId={id} seats={seats} changeRows={changes.success ? changes.data : []} />
       {board.success && board.data && <FundedConversionPanel conferenceId={id} board={board.data} billing={billing.success ? billing.data : null} />}
       <p className="text-sm text-gray-600">
         Exports of the people attending are in the{" "}

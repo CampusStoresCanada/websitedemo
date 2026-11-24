@@ -1,58 +1,92 @@
 import { describe, expect, it } from "vitest";
-import { summarizeSide, type RegistrationListSeat } from "../registration-list";
+import {
+  DEFAULT_FILTERS,
+  countRegistrations,
+  registrationsCsv,
+  viewRegistrations,
+  type RegistrationListSeat,
+} from "../registration-list-view";
 
+let n = 0;
 const seat = (over: Partial<RegistrationListSeat>): RegistrationListSeat => ({
-  seatId: Math.random().toString(36),
+  seatId: `seat-${(n += 1)}`,
   organizationId: "org-a",
   organizationName: "Acorn College",
-  isTestOrg: false,
-  side: "delegate",
   badge: "delegate",
+  registrationName: "Full Conference Registration",
+  holderPersonId: null,
+  holderName: null,
   email: null,
   emergencyContactName: null,
   emergencyContactPhone: null,
-  registrationName: "Full Conference Registration",
-  funded: false,
-  holderPersonId: null,
-  holderName: null,
-  declined: false,
-  seatedAt: null,
   ...over,
 });
 
-describe("summarizeSide", () => {
-  const seats = [
-    seat({ holderPersonId: "p1", holderName: "Zed Young" }),
-    seat({ holderPersonId: "p2", holderName: "Amy Auld" }),
-    seat({}),
-    seat({ declined: true }),
-    seat({ organizationId: "org-b", organizationName: "Birch U", registrationName: "Wednesday Day Pass", holderPersonId: "p3", holderName: "Bo Birch" }),
-    seat({ organizationId: "org-t", organizationName: "Desk Test", isTestOrg: true, holderPersonId: "p4", holderName: "Test Person" }),
-    seat({ side: "exhibitor", organizationId: "org-x", organizationName: "Xylo Inc", registrationName: "Exhibitor Staff Registration" }),
-  ];
+const seats = [
+  seat({ holderPersonId: "p1", holderName: "Zed Young", email: "zed@acorn.example" }),
+  seat({ holderPersonId: "p2", holderName: "Amy Auld", emergencyContactName: "Pat Auld", emergencyContactPhone: "555-0100" }),
+  seat({}),
+  seat({ organizationId: "org-x", organizationName: "Xylo Inc", badge: "exhibitor", registrationName: "Exhibitor Staff Registration", holderPersonId: "p3", holderName: "Bo Birch" }),
+  seat({ organizationId: "org-x", organizationName: "Xylo Inc", badge: "exhibitor", registrationName: "Exhibitor Staff Registration" }),
+  seat({ organizationId: "org-c", organizationName: "CSC", badge: "staff", registrationName: "Staff Registration", holderPersonId: "p4", holderName: "Cy Staff" }),
+];
+const byOrg = { key: "organization" as const, descending: false };
+const names = (rows: RegistrationListSeat[]) => rows.map((r) => r.holderName);
 
-  it("lists one side's named people by organization then name", () => {
-    const d = summarizeSide(seats, "delegate");
-    expect(d.people.map((p) => p.holderName)).toEqual(["Amy Auld", "Zed Young", "Bo Birch", "Test Person"]);
+describe("viewRegistrations", () => {
+  it("shows named people by default, by organization then name", () => {
+    expect(names(viewRegistrations(seats, { query: "", filters: DEFAULT_FILTERS, sort: byOrg }))).toEqual([
+      "Amy Auld",
+      "Zed Young",
+      "Cy Staff",
+      "Bo Birch",
+    ]);
   });
 
-  it("leaves a declined seat out of the unnamed seats and the organization's total", () => {
-    const d = summarizeSide(seats, "delegate");
-    expect(d.unnamed).toHaveLength(1);
-    const acorn = d.organizations.find((o) => o.organizationId === "org-a");
-    expect(acorn).toMatchObject({ seats: 3, named: 2, people: ["Amy Auld", "Zed Young"] });
-    expect(acorn?.registrations).toEqual([{ name: "Full Conference Registration", seats: 3 }]);
+  it("filters by badge, registration type and named or not", () => {
+    const view = (filters: Partial<typeof DEFAULT_FILTERS>) =>
+      viewRegistrations(seats, { query: "", filters: { ...DEFAULT_FILTERS, ...filters }, sort: byOrg });
+    expect(names(view({ badge: "exhibitor" }))).toEqual(["Bo Birch"]);
+    expect(view({ badge: "exhibitor", named: "all" })).toHaveLength(2);
+    expect(names(view({ registration: "Staff Registration" }))).toEqual(["Cy Staff"]);
+    expect(view({ named: "unnamed" })).toHaveLength(2);
   });
 
-  it("lists a test organization and keeps it out of the counts", () => {
-    const d = summarizeSide(seats, "delegate");
-    expect(d.organizations.map((o) => o.organizationName)).toContain("Desk Test");
-    expect(d.counts).toEqual({ people: 3, unnamed: 1, organizations: 2, testSeats: 1 });
+  it("sorts Z to A, and keeps unnamed seats last when sorting by name", () => {
+    const all = { ...DEFAULT_FILTERS, named: "all" as const };
+    expect(names(viewRegistrations(seats, { query: "", filters: all, sort: { key: "name", descending: true } }))).toEqual([
+      "Zed Young",
+      "Cy Staff",
+      "Bo Birch",
+      "Amy Auld",
+      null,
+      null,
+    ]);
   });
 
-  it("an organization with nobody named is still an exhibiting organization", () => {
-    const x = summarizeSide(seats, "exhibitor");
-    expect(x.counts).toMatchObject({ people: 0, unnamed: 1, organizations: 1 });
-    expect(x.organizations[0]).toMatchObject({ organizationName: "Xylo Inc", named: 0, seats: 1 });
+  it("a search looks through every registration, whatever the filters say", () => {
+    const hidden = { badge: "staff" as const, registration: "Staff Registration", named: "unnamed" as const };
+    expect(names(viewRegistrations(seats, { query: "zed@", filters: hidden, sort: byOrg }))).toEqual(["Zed Young"]);
+    expect(names(viewRegistrations(seats, { query: "pat auld", filters: hidden, sort: byOrg }))).toEqual(["Amy Auld"]);
+    expect(viewRegistrations(seats, { query: "xylo", filters: hidden, sort: byOrg })).toHaveLength(2);
+  });
+});
+
+describe("countRegistrations", () => {
+  it("counts named people, organizations and unnamed seats per badge", () => {
+    const counts = countRegistrations(seats);
+    expect(counts.all).toEqual({ people: 4, organizations: 3, unnamed: 2 });
+    expect(counts.delegate).toEqual({ people: 2, organizations: 1, unnamed: 1 });
+    expect(counts.exhibitor).toEqual({ people: 1, organizations: 1, unnamed: 1 });
+    expect(counts.staff).toEqual({ people: 1, organizations: 1, unnamed: 0 });
+  });
+});
+
+describe("registrationsCsv", () => {
+  it("writes one line per seat under the header, quoting and defusing formulas", () => {
+    const csv = registrationsCsv([seat({ holderPersonId: "p9", holderName: '=Sam "S" Lee', organizationName: "A, B" })]);
+    const [header, line] = csv.split("\n");
+    expect(header).toBe('"Name","Organization","Registration type","Badge","Email","Emergency contact","Emergency contact phone"');
+    expect(line).toBe('"\'=Sam ""S"" Lee","A, B","Full Conference Registration","Delegate","","",""');
   });
 });

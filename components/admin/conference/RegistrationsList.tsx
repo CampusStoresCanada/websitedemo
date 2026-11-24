@@ -3,27 +3,44 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { changeRegistration, type RegistrationChangeRow } from "@/lib/actions/conference-registration-change";
-import type { RegistrationListSeat, RegistrationSideSummary } from "@/lib/conference/registration-list";
+import {
+  BADGE_LABEL,
+  DEFAULT_FILTERS,
+  countRegistrations,
+  registrationsCsv,
+  viewRegistrations,
+  type BadgeColour,
+  type RegistrationFilters,
+  type RegistrationListSeat,
+  type SortKey,
+} from "@/lib/conference/registration-list-view";
 import { formatCents } from "@/lib/utils";
 
-type View = "delegates" | "delegateOrgs" | "exhibitors" | "exhibitorOrgs";
-type SortKey = "name" | "organization" | "registration";
+const PAGE = 25;
 
-/** The badge overlay colours: delegate red, exhibitor blue, staff white. */
-const BADGE: Record<RegistrationListSeat["badge"], { label: string; className: string }> = {
-  delegate: { label: "Delegate", className: "border-[#e72a28] bg-[#e72a28] text-white" },
-  exhibitor: { label: "Exhibitor", className: "border-[#16345a] bg-[#16345a] text-white" },
-  staff: { label: "Staff", className: "border-gray-400 bg-white text-gray-800" },
+/** The badge overlay colours, across the whole row: delegate red, exhibitor blue, staff white. */
+const ROW: Record<BadgeColour, { row: string; muted: string; tile: string }> = {
+  delegate: { row: "bg-[#e72a28] text-white", muted: "text-white/70", tile: "border-[#e72a28] bg-[#e72a28] text-white" },
+  exhibitor: { row: "bg-[#16345a] text-white", muted: "text-white/70", tile: "border-[#16345a] bg-[#16345a] text-white" },
+  staff: { row: "bg-white text-gray-900", muted: "text-gray-400", tile: "border-gray-400 bg-white text-gray-900" },
 };
-const SORT_VALUE: Record<SortKey, (seat: RegistrationListSeat) => string> = {
-  name: (s) => s.holderName ?? "",
-  organization: (s) => s.organizationName,
-  registration: (s) => s.registrationName,
-};
+
+/** Hand a file to the browser to save. */
+function saveFile(filename: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8;" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 /**
- * Who is registered: delegates, the organizations they come from, exhibitors,
- * and the exhibiting organizations. One list, four ways to read it.
+ * Who is registered: one list of every registration, coloured like the badge
+ * the person wears, with filters, a search that looks through all of it, and
+ * CSV files of the whole list or of what is on screen.
  *
  * Changing a registration (a ticket bought for the wrong day or type) is done
  * on the person's own row: a row offers it only when there is something that
@@ -31,69 +48,38 @@ const SORT_VALUE: Record<SortKey, (seat: RegistrationListSeat) => string> = {
  */
 export default function RegistrationsList({
   conferenceId,
-  delegates,
-  exhibitors,
+  seats,
   changeRows,
 }: {
   conferenceId: string;
-  delegates: RegistrationSideSummary;
-  exhibitors: RegistrationSideSummary;
+  seats: RegistrationListSeat[];
   changeRows: RegistrationChangeRow[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [view, setView] = useState<View>("delegates");
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<RegistrationFilters>(DEFAULT_FILTERS);
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: "organization", descending: false });
+  const [showAll, setShowAll] = useState(false);
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   const changeBySeat = useMemo(() => new Map(changeRows.map((r) => [r.seatId, r])), [changeRows]);
-  const side = view === "delegates" || view === "delegateOrgs" ? delegates : exhibitors;
-  const showingOrgs = view === "delegateOrgs" || view === "exhibitorOrgs";
-  const q = query.trim().toLowerCase();
-  const has = (...parts: Array<string | null>) => !q || parts.some((p) => (p ?? "").toLowerCase().includes(q));
+  const counts = useMemo(() => countRegistrations(seats), [seats]);
+  const registrationNames = useMemo(
+    () => [...new Set(seats.map((s) => s.registrationName))].sort((a, b) => a.localeCompare(b)),
+    [seats]
+  );
+  const searching = query.trim().length > 0;
+  const view = viewRegistrations(seats, { query, filters, sort });
+  const shown = showAll ? view : view.slice(0, PAGE);
+  const anyChange = shown.some((s) => changeBySeat.has(s.seatId));
 
-  const th = "px-4 py-2 text-left text-xs font-medium uppercase text-gray-500";
-  const compare = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
-  const people = side.people
-    .filter((s) => has(s.holderName, s.organizationName, s.registrationName, s.email))
-    .sort((a, b) => {
-      const order =
-        compare(SORT_VALUE[sort.key](a), SORT_VALUE[sort.key](b)) ||
-        compare(a.organizationName, b.organizationName) ||
-        compare(a.holderName ?? "", b.holderName ?? "");
-      return sort.descending ? -order : order;
-    });
-  const anyChange = people.some((s) => changeBySeat.has(s.seatId));
-  const sortHeader = (key: SortKey, label: string) => {
-    const active = sort.key === key;
-    return (
-      <th className={th} aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}>
-        <button
-          type="button"
-          onClick={() => setSort({ key, descending: active ? !sort.descending : false })}
-          className="inline-flex items-center gap-1 uppercase hover:text-gray-900"
-          title={`Sort by ${label.toLowerCase()}, ${active && !sort.descending ? "Z to A" : "A to Z"}`}
-        >
-          {label}
-          <span aria-hidden className={active ? "text-gray-900" : "text-gray-300"}>
-            {active && sort.descending ? "▼" : "▲"}
-          </span>
-        </button>
-      </th>
-    );
+  const setFilter = (patch: Partial<RegistrationFilters>) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setShowAll(false);
   };
-  const unnamed = side.unnamed.filter((s) => has(s.organizationName, s.registrationName));
-  const organizations = side.organizations.filter((o) => has(o.organizationName, ...o.people));
-
-  // Unnamed seats read as one line per organization and registration.
-  const groups = new Map<string, RegistrationListSeat[]>();
-  for (const seat of unnamed) {
-    const key = `${seat.organizationId}|${seat.registrationName}`;
-    groups.set(key, [...(groups.get(key) ?? []), seat]);
-  }
-  const unnamedGroups = [...groups.values()];
+  const today = new Date().toISOString().slice(0, 10);
 
   const change = (row: RegistrationChangeRow) => {
     const toId = choice[row.seatId] ?? row.targets[0]?.id;
@@ -123,8 +109,8 @@ export default function RegistrationsList({
     });
   };
 
-  const changeControl = (seatId: string | undefined) => {
-    const row = seatId ? changeBySeat.get(seatId) : undefined;
+  const changeControl = (seatId: string) => {
+    const row = changeBySeat.get(seatId);
     if (!row) return null;
     return (
       <span className="flex items-center justify-end gap-2">
@@ -135,7 +121,7 @@ export default function RegistrationsList({
           id={`change-${row.seatId}`}
           value={choice[row.seatId] ?? row.targets[0]?.id}
           onChange={(e) => setChoice((c) => ({ ...c, [row.seatId]: e.target.value }))}
-          className="max-w-[14rem] rounded-md border border-gray-300 px-2 py-1 text-xs"
+          className="max-w-[14rem] rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900"
         >
           {row.targets.map((t) => (
             <option key={t.id} value={t.id}>
@@ -147,7 +133,7 @@ export default function RegistrationsList({
           type="button"
           onClick={() => change(row)}
           disabled={isPending}
-          className="rounded-md border border-[#163D6D] px-3 py-1 text-xs font-semibold text-[#163D6D] hover:bg-[#163D6D] hover:text-white disabled:opacity-40"
+          className="rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-semibold text-gray-900 hover:bg-gray-100 disabled:opacity-40"
         >
           Change
         </button>
@@ -155,183 +141,211 @@ export default function RegistrationsList({
     );
   };
 
-  const tabs: Array<{ id: View; label: string; count: number }> = [
-    { id: "delegates", label: "Delegates", count: delegates.counts.people },
-    { id: "delegateOrgs", label: "Delegate organizations", count: delegates.counts.organizations },
-    { id: "exhibitors", label: "Exhibitors", count: exhibitors.counts.people },
-    { id: "exhibitorOrgs", label: "Exhibitor organizations", count: exhibitors.counts.organizations },
+  const th = "px-4 py-2 text-left text-xs font-medium uppercase text-gray-500";
+  const sortHeader = (key: SortKey, label: string) => {
+    const active = sort.key === key;
+    return (
+      <th className={th} aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}>
+        <button
+          type="button"
+          onClick={() => setSort({ key, descending: active ? !sort.descending : false })}
+          className="inline-flex items-center gap-1 uppercase hover:text-gray-900"
+          title={`Sort by ${label.toLowerCase()}, ${active && !sort.descending ? "Z to A" : "A to Z"}`}
+        >
+          {label}
+          <span aria-hidden className={active ? "text-gray-900" : "text-gray-300"}>
+            {active && sort.descending ? "▼" : "▲"}
+          </span>
+        </button>
+      </th>
+    );
+  };
+
+  const tiles: Array<{ id: BadgeColour | "all"; label: string; className: string }> = [
+    { id: "all", label: "Everyone", className: "border-gray-300 bg-gray-100 text-gray-900" },
+    { id: "delegate", label: "Delegates", className: ROW.delegate.tile },
+    { id: "exhibitor", label: "Exhibitors", className: ROW.exhibitor.tile },
+    { id: "staff", label: "Staff", className: ROW.staff.tile },
   ];
-  const testTag = <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">Test</span>;
+  const selectClass = "rounded-md border border-gray-300 px-2 py-1.5 text-sm";
+  const exportButton =
+    "rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40";
 
   return (
     <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
-      <h2 className="text-base font-semibold text-gray-900">Who is registered</h2>
-
-      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4" role="tablist" aria-label="Registrations">
-        {tabs.map((tab) => (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-gray-900">Who is registered</h2>
+        <div className="flex gap-2">
           <button
-            key={tab.id}
             type="button"
-            role="tab"
-            aria-selected={view === tab.id}
-            onClick={() => setView(tab.id)}
-            className={`rounded-lg border px-3 py-2 text-left ${
-              view === tab.id ? "border-[#163D6D] bg-[#163D6D] text-white" : "border-gray-200 bg-white text-gray-900 hover:bg-gray-50"
-            }`}
+            className={exportButton}
+            disabled={view.length === 0}
+            title="A CSV of the rows below, every one of them, in this order"
+            onClick={() => saveFile(`registrations-view-${today}.csv`, registrationsCsv(view))}
           >
-            <span className="block text-2xl font-semibold tabular-nums">{tab.count}</span>
-            <span className={`block text-xs ${view === tab.id ? "text-white/80" : "text-gray-500"}`}>{tab.label}</span>
+            Export view ({view.length})
           </button>
-        ))}
+          <button
+            type="button"
+            className={exportButton}
+            title="A CSV of every registration, named or not"
+            onClick={() =>
+              saveFile(
+                `registrations-all-${today}.csv`,
+                registrationsCsv(
+                  viewRegistrations(seats, { query: "", filters: { badge: "all", registration: "all", named: "all" }, sort })
+                )
+              )
+            }
+          >
+            Export all ({seats.length})
+          </button>
+        </div>
       </div>
 
-      <p className="mt-3 text-sm text-gray-600">
-        {side.counts.unnamed > 0
-          ? `${side.counts.unnamed} more ${side.counts.unnamed === 1 ? "registration is" : "registrations are"} bought with nobody named yet.`
-          : "Every registration bought has somebody named to it."}
-        {side.counts.testSeats > 0 && ` Test organizations are listed and marked, and are not counted.`}
-      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {tiles.map((tile) => {
+          const on = !searching && filters.badge === tile.id;
+          const c = counts[tile.id];
+          return (
+            <button
+              key={tile.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setFilter({ badge: tile.id })}
+              className={`rounded-lg border px-3 py-2 text-left ${tile.className} ${
+                on ? "ring-2 ring-gray-900 ring-offset-2" : "opacity-80 hover:opacity-100"
+              }`}
+            >
+              <span className="block text-2xl font-semibold tabular-nums">{c.people}</span>
+              <span className="block text-xs">
+                {tile.label}, from {c.organizations} {c.organizations === 1 ? "organization" : "organizations"}
+              </span>
+              <span className="block text-xs opacity-80">{c.unnamed} not named yet</span>
+            </button>
+          );
+        })}
+      </div>
 
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search a person, organization or registration"
-        aria-label="Search a person, organization or registration"
-        className="mt-3 w-full max-w-md rounded-md border border-gray-300 px-3 py-1.5 text-sm"
-      />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setShowAll(false);
+          }}
+          placeholder="Search every registration"
+          aria-label="Search every registration"
+          className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+        />
+        <select
+          aria-label="Registration type"
+          value={filters.registration}
+          onChange={(e) => setFilter({ registration: e.target.value })}
+          disabled={searching}
+          className={selectClass}
+        >
+          <option value="all">All registration types</option>
+          {registrationNames.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Named or not"
+          value={filters.named}
+          onChange={(e) => setFilter({ named: e.target.value as RegistrationFilters["named"] })}
+          disabled={searching}
+          className={selectClass}
+        >
+          <option value="named">Named people</option>
+          <option value="unnamed">Not named yet</option>
+          <option value="all">Named and not named</option>
+        </select>
+      </div>
+      {searching && (
+        <p className="mt-2 text-sm text-gray-600">Searching every registration. The filters are set aside while you search.</p>
+      )}
 
       {message && (
         <p className={`mt-3 text-sm ${message.tone === "ok" ? "text-green-700" : "text-red-700"}`}>{message.text}</p>
       )}
 
-      {showingOrgs ? (
-        organizations.length === 0 ? (
-          <p className="mt-4 text-sm text-gray-500">No organization matches.</p>
-        ) : (
-          <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className={th}>Organization</th>
-                  <th className={th}>Registrations</th>
-                  <th className={th}>Named</th>
-                  <th className={th}>People</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {organizations.map((org) => (
-                  <tr key={org.organizationId} className="align-top">
-                    <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                      {org.organizationName}
-                      {org.isTestOrg && testTag}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-700">
-                      {org.registrations.map((r) => (
-                        <span key={r.name} className="block">
-                          {r.name}
-                          {r.seats > 1 ? ` ×${r.seats}` : ""}
-                        </span>
-                      ))}
-                    </td>
-                    <td className="px-4 py-2 text-sm tabular-nums text-gray-700">
-                      {org.named} of {org.seats}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-700">
-                      {org.people.length > 0 ? org.people.join(", ") : <span className="text-gray-400">Nobody named yet</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
+      {view.length === 0 ? (
+        <p className="mt-4 text-sm text-gray-500">{searching ? "Nothing matches." : "No registration fits these filters."}</p>
       ) : (
         <>
-          {people.length === 0 ? (
-            <p className="mt-4 text-sm text-gray-500">{q ? "Nobody matches." : "Nobody is named to a registration yet."}</p>
-          ) : (
-            <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {sortHeader("name", "Name")}
-                    {sortHeader("organization", "Organization")}
-                    {sortHeader("registration", "Registration type")}
-                    <th className={th}>Email</th>
-                    <th className={th}>Emergency contact</th>
-                    {anyChange && <th className={`${th} text-right`}>Change to</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {people.map((seat) => (
-                    <tr key={seat.seatId}>
-                      <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={`inline-block w-[4.5rem] shrink-0 rounded border px-1.5 py-0.5 text-center text-[11px] font-semibold ${BADGE[seat.badge].className}`}
-                          >
-                            {BADGE[seat.badge].label}
-                          </span>
-                          {seat.holderName ?? "Unnamed person"}
-                        </span>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200">
+            <table className="min-w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  {sortHeader("name", "Name")}
+                  {sortHeader("organization", "Organization")}
+                  {sortHeader("registration", "Registration type")}
+                  <th className={th}>Email</th>
+                  <th className={th}>Emergency contact</th>
+                  {anyChange && <th className={`${th} text-right`}>Change to</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((seat) => {
+                  const colour = ROW[seat.badge];
+                  const none = <span className={colour.muted}>None given</span>;
+                  return (
+                    <tr key={seat.seatId} className={`border-t border-white/40 ${colour.row}`} title={BADGE_LABEL[seat.badge]}>
+                      <td className="px-4 py-2 text-sm font-semibold">
+                        {seat.holderPersonId ? (
+                          seat.holderName ?? "Unnamed person"
+                        ) : (
+                          <span className={`font-normal italic ${colour.muted}`}>Not named yet</span>
+                        )}
+                        <span className="sr-only">, {BADGE_LABEL[seat.badge]} badge</span>
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
-                        {seat.organizationName}
-                        {seat.isTestOrg && testTag}
-                      </td>
-                      <td className="px-4 py-2 text-sm text-gray-700">{seat.registrationName}</td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
+                      <td className="px-4 py-2 text-sm">{seat.organizationName}</td>
+                      <td className="px-4 py-2 text-sm">{seat.registrationName}</td>
+                      <td className="px-4 py-2 text-sm">
                         {seat.email ? (
-                          <a href={`mailto:${seat.email}`} className="hover:underline">
+                          <a href={`mailto:${seat.email}`} className="underline decoration-current/40 hover:decoration-current">
                             {seat.email}
                           </a>
-                        ) : (
-                          <span className="text-gray-400">None given</span>
-                        )}
+                        ) : seat.holderPersonId ? (
+                          none
+                        ) : null}
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-700">
+                      <td className="px-4 py-2 text-sm">
                         {seat.emergencyContactName || seat.emergencyContactPhone ? (
                           <>
                             {seat.emergencyContactName}
                             {seat.emergencyContactName && seat.emergencyContactPhone ? ", " : ""}
                             {seat.emergencyContactPhone}
                           </>
-                        ) : (
-                          <span className="text-gray-400">None given</span>
-                        )}
+                        ) : seat.holderPersonId ? (
+                          none
+                        ) : null}
                       </td>
                       {anyChange && <td className="px-4 py-2 text-right">{changeControl(seat.seatId)}</td>}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {unnamedGroups.length > 0 && (
-            <>
-              <h3 className="mt-6 text-sm font-semibold text-gray-900">Bought, nobody named yet</h3>
-              <ul className="mt-2 divide-y divide-gray-100 rounded-lg border border-gray-200">
-                {unnamedGroups.map((group) => {
-                  const first = group[0];
-                  return (
-                    <li key={`${first.organizationId}|${first.registrationName}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
-                      <span className="text-gray-700">
-                        <span className="font-medium text-gray-900">{first.organizationName}</span>
-                        {first.isTestOrg && testTag}
-                        <span className="ml-2 text-gray-500">
-                          {first.registrationName}
-                          {group.length > 1 ? ` ×${group.length}` : ""}
-                        </span>
-                      </span>
-                      {changeControl(group.find((s) => changeBySeat.has(s.seatId))?.seatId)}
-                    </li>
                   );
                 })}
-              </ul>
-            </>
-          )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+            <span>
+              Showing {shown.length} of {view.length}
+            </span>
+            {view.length > PAGE && (
+              <button
+                type="button"
+                onClick={() => setShowAll((v) => !v)}
+                className="rounded-md border border-gray-300 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {showAll ? `Show the first ${PAGE}` : `Show all ${view.length}`}
+              </button>
+            )}
+          </div>
         </>
       )}
     </section>
