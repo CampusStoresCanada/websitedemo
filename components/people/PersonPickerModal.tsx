@@ -18,7 +18,6 @@ export default function PersonPickerModal({
   people,
   organizationId,
   onSelect,
-  onDeferLater,
   onClose,
 }: {
   title?: string;
@@ -29,8 +28,6 @@ export default function PersonPickerModal({
    * them by email: two people can share info@store.ca.
    */
   onSelect: (person: { name: string; email: string | null; contactId: string }) => void;
-  /** Omit to hide the "assign later" option entirely (e.g. org/slug's roster, where there's always a specific contact already in hand). */
-  onDeferLater?: () => void;
   onClose: () => void;
 }) {
   const [addingNew, setAddingNew] = useState(false);
@@ -104,18 +101,6 @@ export default function PersonPickerModal({
               Add a new person
             </button>
 
-            {onDeferLater ? (
-              <button
-                onClick={onDeferLater}
-                className="w-full flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-gray-500 hover:bg-gray-50 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
-                  <circle cx="12" cy="12" r="9" strokeWidth={2} />
-                </svg>
-                Add Attendee Details Later
-              </button>
-            ) : null}
           </div>
         </div>
       </div>

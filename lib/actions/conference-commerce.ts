@@ -405,6 +405,18 @@ function parseAttendees(metadata: unknown, quantity: number): (AttendeeRef | nul
 }
 
 /** The buyer facts fundedRegistrationAllowed reads, loaded once from the org row. */
+/** How many registrations in a cart nobody has been named to yet. */
+function unnamedRegistrationSlots(
+  rows: ReadonlyArray<{ cartQuantity: number; offer: { kind: string }; attendees: ReadonlyArray<AttendeeRef | null> }>
+): number {
+  let unnamed = 0;
+  for (const row of rows) {
+    if (row.offer.kind !== "registration") continue;
+    for (let i = 0; i < row.cartQuantity; i += 1) if (!row.attendees[i]) unnamed += 1;
+  }
+  return unnamed;
+}
+
 async function loadFundedRegistrationBuyer(
   db: ReturnType<typeof createAdminClient>,
   organizationId: string
@@ -1630,6 +1642,35 @@ export async function createConferenceCheckout(
 
     if (offerCart.rows.length === 0) {
       return { success: false, code: "EMPTY_CART", error: "Cart is empty." };
+    }
+
+    /**
+     * ⛔ EVERY REGISTRATION IS FOR SOMEBODY BEFORE IT IS PAID FOR.
+     *
+     * The cart used to let a registration through with nobody named ("Add
+     * Attendee Details Later"), and about half of buyers took it: 22 of 40
+     * slots on CSC 2027 by 2026-11-24, six of them still unnamed weeks later
+     * with nobody at the organization registered at all. A registration with
+     * no person has no badge, no schedule and nobody to email (Steve,
+     * 2026-11-24).
+     *
+     * Checked here as well as in the cart, because a server action's arguments
+     * are not the cart's to vouch for. Before the order is made, so a refusal
+     * strands nothing.
+     *
+     * ⚠️ The desk is exempt: it sells a seat "for a colleague" who is not at
+     * the counter and names them when they arrive.
+     */
+    const unnamedSlots = unnamedRegistrationSlots(offerCart.rows);
+    if (unnamedSlots > 0 && !(await requireConferenceDeskAccess(input.conferenceId)).ok) {
+      return {
+        success: false,
+        code: "ATTENDEE_REQUIRED",
+        error:
+          unnamedSlots === 1
+            ? "Name who the registration is for before checking out."
+            : `Name who each registration is for before checking out. ${unnamedSlots} still need a name.`,
+      };
     }
 
     const { data: conference, error: conferenceError } = await adminClient

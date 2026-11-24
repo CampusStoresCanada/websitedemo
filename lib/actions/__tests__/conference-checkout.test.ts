@@ -27,7 +27,9 @@ const {
   findExistingUserByEmailMock,
   resolveConferenceOrderTaxRatesMock,
   fulfilConferenceOrderMock,
+  requireConferenceDeskAccessMock,
 } = vi.hoisted(() => ({
+  requireConferenceDeskAccessMock: vi.fn(),
   requireAuthenticatedMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
   createAdminClientMock: vi.fn(),
@@ -58,6 +60,7 @@ const {
 vi.mock("@/lib/auth/guards", () => ({
   requireAuthenticated: requireAuthenticatedMock,
   isGlobalAdmin: isGlobalAdminMock,
+  requireConferenceDeskAccess: requireConferenceDeskAccessMock,
   // Mirrors the real rule over this file's mocks: global admin, member of the
   // org, or conference ops.
   requireOrgCommerceAccess: async (organizationId: string) => {
@@ -207,6 +210,7 @@ beforeEach(() => {
     },
   });
   isGlobalAdminMock.mockReturnValue(false);
+  requireConferenceDeskAccessMock.mockResolvedValue({ ok: false, status: 403, error: "Desk staff only." });
   canBuyMock.mockReturnValue({ ok: true });
   priceForTierMock.mockReturnValue(50_000);
   availabilityMock.mockReturnValue({ remaining: null, soldOut: false });
@@ -381,6 +385,42 @@ describe("createConferenceCheckout — $0 lines", () => {
       success: true,
       data: { checkoutUrl: INPUT.successUrl, orderId: "order-1", checkoutSessionId: "" },
     });
+  });
+});
+
+describe("createConferenceCheckout — every registration is for somebody", () => {
+  const registrationCart = (attendees: unknown[]) => {
+    const queues = happyPathQueues();
+    queues.cart_items = [{ data: [{ ...OFFER_CART_ROW, quantity: attendees.length, metadata: { attendees } }] }];
+    queues.conference_entities = [{ data: [{ ...OFFER_ENTITY_ROW, kind: "registration", name: "Full Conference Registration" }] }];
+    return queues;
+  };
+  const SOMEBODY = { name: "Amy Auld", email: "amy@example.test", contactId: "contact-1" };
+
+  it("refuses a registration nobody is named to, before any order exists", async () => {
+    const { db, rpc } = makeFakeDb(registrationCart([SOMEBODY, null]), ORDER_RPC_RESULT);
+    createAdminClientMock.mockReturnValue(db);
+
+    const result = await createConferenceCheckout(INPUT);
+
+    expect(result).toMatchObject({ success: false, code: "ATTENDEE_REQUIRED" });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(stripeSessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("goes ahead once every registration has a name", async () => {
+    const { db } = makeFakeDb(registrationCart([SOMEBODY]), ORDER_RPC_RESULT);
+    createAdminClientMock.mockReturnValue(db);
+
+    expect(await createConferenceCheckout(INPUT)).toMatchObject({ success: true });
+  });
+
+  it("lets the desk sell a seat for a colleague who is not at the counter", async () => {
+    requireConferenceDeskAccessMock.mockResolvedValue({ ok: true });
+    const { db } = makeFakeDb(registrationCart([null]), ORDER_RPC_RESULT);
+    createAdminClientMock.mockReturnValue(db);
+
+    expect(await createConferenceCheckout(INPUT)).toMatchObject({ success: true });
   });
 });
 

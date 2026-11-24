@@ -79,7 +79,11 @@ export default function CartClient({
   const [assigningSlot, setAssigningSlot] = useState<{ cartItemId: string; index: number } | null>(null);
 
   const isEmpty = cart.offerItems.length === 0;
-  const checkoutDisabled = isPending || isEmpty;
+  // Every registration is for somebody before it is paid for (createConferenceCheckout refuses too).
+  const unnamedRegistrations = cart.offerItems
+    .filter((item) => item.kind === "registration")
+    .reduce((sum, item) => sum + Array.from({ length: item.quantity }, (_, i) => item.attendees[i]).filter((a) => !a).length, 0);
+  const checkoutDisabled = isPending || isEmpty || unnamedRegistrations > 0;
   const boothCount = cart.offerItems.filter((item) => item.kind === "booth").length;
 
   // Registration items in the cart that the org already holds an unassigned
@@ -352,10 +356,10 @@ export default function CartClient({
                                 className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                                   attendee
                                     ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-                                    : "border-dashed border-gray-300 text-gray-500 hover:border-gray-400"
+                                    : "border-dashed border-amber-400 bg-amber-50 text-amber-800 hover:border-amber-500"
                                 }`}
                               >
-                                {attendee ? attendee.name : `Assign #${index + 1}`}
+                                {attendee ? attendee.name : item.quantity > 1 ? `Who is #${index + 1} for?` : "Who is this for?"}
                               </button>
                             );
                           })}
@@ -417,6 +421,14 @@ export default function CartClient({
             <span>{formatCents(cart.totalCents)}</span>
           </div>
         </div>
+
+        {unnamedRegistrations > 0 ? (
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {unnamedRegistrations === 1
+              ? "Tell us who the registration is for before you check out. Choose the person under the registration above."
+              : `Tell us who each registration is for before you check out. ${unnamedRegistrations} still need a name; choose each person under the registration above.`}
+          </p>
+        ) : null}
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
@@ -487,7 +499,6 @@ export default function CartClient({
           people={contacts}
           organizationId={organizationId}
           onSelect={(person) => handleSetAttendee(person)}
-          onDeferLater={() => handleSetAttendee(null)}
           onClose={() => setAssigningSlot(null)}
         />
       ) : null}
