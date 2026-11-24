@@ -14,6 +14,13 @@ import { isFundedOffer } from "@/lib/conference/entity-pricing";
  */
 export type RegistrationSide = "delegate" | "exhibitor";
 
+/**
+ * Which badge the person wears, by the colour of its overlay: delegate red,
+ * exhibitor blue, CSC staff white (Steve, 2026-11-24). Staff are told apart by
+ * their organization's type, the same way resolveConferenceTier does it.
+ */
+export type BadgeColour = "delegate" | "exhibitor" | "staff";
+
 export type RegistrationListSeat = {
   seatId: string;
   organizationId: string;
@@ -21,12 +28,17 @@ export type RegistrationListSeat = {
   /** A test organization: listed and marked, left out of every count. */
   isTestOrg: boolean;
   side: RegistrationSide;
+  badge: BadgeColour;
   registrationName: string;
   /** Someone else pays for it (the CANCOLL-funded registration). */
   funded: boolean;
   /** Null: the seat is bought and nobody is named to it yet. */
   holderPersonId: string | null;
   holderName: string | null;
+  /** From the person's conference record; null when they have not given one. */
+  email: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
   /**
    * An unnamed seat the organization has said it will not fill ("using 2 of
    * 6"). Still paid for and still nameable at the desk; not somebody to expect.
@@ -46,31 +58,58 @@ export async function loadRegistrationList(db: ListDb, conferenceId: string): Pr
 
   const orgIds = [...new Set(seats.map((s) => s.organizationId).filter(Boolean))];
   const { data: orgs, error } = orgIds.length
-    ? await selectInChunks<{ id: string; name: string; is_test: boolean | null }>(orgIds, (ids) =>
+    ? await selectInChunks<{ id: string; name: string; type: string | null; is_test: boolean | null }>(orgIds, (ids) =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the seat reader's structural client
-        (db as any).from("organizations").select("id, name, is_test").in("id", ids)
+        (db as any).from("organizations").select("id, name, type, is_test").in("id", ids)
       )
     : { data: [], error: null };
   if (error) throw new Error(`Could not load organisations: ${error.message}`);
   const orgById = new Map((orgs ?? []).map((o) => [o.id, o]));
 
+  // A seat's holder IS the conference_people row (loadSeatHoldings).
+  type PersonRow = {
+    id: string;
+    contact_email: string | null;
+    emergency_contact_name: string | null;
+    emergency_contact_phone: string | null;
+  };
+  const personIds = [...new Set(seats.map((s) => s.holderPersonId).filter((id): id is string => !!id))];
+  const { data: people, error: peopleError } = personIds.length
+    ? await selectInChunks<PersonRow>(personIds, (ids) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the seat reader's structural client
+        (db as any)
+          .from("conference_people")
+          .select("id, contact_email, emergency_contact_name, emergency_contact_phone")
+          .in("id", ids)
+      )
+    : { data: [] as PersonRow[], error: null };
+  if (peopleError) throw new Error(`Could not load people: ${peopleError.message}`);
+  const personById = new Map((people ?? []).map((p) => [p.id, p]));
+  const text = (value: string | null | undefined) => (value && value.trim() ? value.trim() : null);
+
   return seats.map((seat) => {
     const entity = entitiesById.get(seat.entityId);
     const org = orgById.get(seat.organizationId);
+    const person = seat.holderPersonId ? personById.get(seat.holderPersonId) : undefined;
+    const side = deriveRegistrationTier({
+      kind: seat.entityKind,
+      name: seat.entityName,
+      attributes: (entity?.attributes as Record<string, unknown> | null | undefined) ?? null,
+    }).personKind;
     return {
       seatId: seat.seatId,
       organizationId: seat.organizationId,
       organizationName: org?.name ?? "Unknown organization",
       isTestOrg: org?.is_test === true,
-      side: deriveRegistrationTier({
-        kind: seat.entityKind,
-        name: seat.entityName,
-        attributes: (entity?.attributes as Record<string, unknown> | null | undefined) ?? null,
-      }).personKind,
+      side,
+      badge: org?.type === "Staff" ? "staff" : side,
       registrationName: seat.entityName,
       funded: isFundedOffer(entity?.attributes as Record<string, unknown> | null | undefined),
       holderPersonId: seat.holderPersonId,
       holderName: seat.holderName,
+      email: text(person?.contact_email),
+      emergencyContactName: text(person?.emergency_contact_name),
+      emergencyContactPhone: text(person?.emergency_contact_phone),
       declined: declined.has(seat.seatId),
       seatedAt: seat.seatedAt,
     };

@@ -4,9 +4,22 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { changeRegistration, type RegistrationChangeRow } from "@/lib/actions/conference-registration-change";
 import type { RegistrationListSeat, RegistrationSideSummary } from "@/lib/conference/registration-list";
-import { formatCents, parseUTC } from "@/lib/utils";
+import { formatCents } from "@/lib/utils";
 
 type View = "delegates" | "delegateOrgs" | "exhibitors" | "exhibitorOrgs";
+type SortKey = "name" | "organization" | "registration";
+
+/** The badge overlay colours: delegate red, exhibitor blue, staff white. */
+const BADGE: Record<RegistrationListSeat["badge"], { label: string; className: string }> = {
+  delegate: { label: "Delegate", className: "border-[#e72a28] bg-[#e72a28] text-white" },
+  exhibitor: { label: "Exhibitor", className: "border-[#16345a] bg-[#16345a] text-white" },
+  staff: { label: "Staff", className: "border-gray-400 bg-white text-gray-800" },
+};
+const SORT_VALUE: Record<SortKey, (seat: RegistrationListSeat) => string> = {
+  name: (s) => s.holderName ?? "",
+  organization: (s) => s.organizationName,
+  registration: (s) => s.registrationName,
+};
 
 /**
  * Who is registered: delegates, the organizations they come from, exhibitors,
@@ -31,6 +44,7 @@ export default function RegistrationsList({
   const [isPending, startTransition] = useTransition();
   const [view, setView] = useState<View>("delegates");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: "organization", descending: false });
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
@@ -40,7 +54,36 @@ export default function RegistrationsList({
   const q = query.trim().toLowerCase();
   const has = (...parts: Array<string | null>) => !q || parts.some((p) => (p ?? "").toLowerCase().includes(q));
 
-  const people = side.people.filter((s) => has(s.holderName, s.organizationName, s.registrationName));
+  const th = "px-4 py-2 text-left text-xs font-medium uppercase text-gray-500";
+  const compare = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+  const people = side.people
+    .filter((s) => has(s.holderName, s.organizationName, s.registrationName, s.email))
+    .sort((a, b) => {
+      const order =
+        compare(SORT_VALUE[sort.key](a), SORT_VALUE[sort.key](b)) ||
+        compare(a.organizationName, b.organizationName) ||
+        compare(a.holderName ?? "", b.holderName ?? "");
+      return sort.descending ? -order : order;
+    });
+  const anyChange = people.some((s) => changeBySeat.has(s.seatId));
+  const sortHeader = (key: SortKey, label: string) => {
+    const active = sort.key === key;
+    return (
+      <th className={th} aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}>
+        <button
+          type="button"
+          onClick={() => setSort({ key, descending: active ? !sort.descending : false })}
+          className="inline-flex items-center gap-1 uppercase hover:text-gray-900"
+          title={`Sort by ${label.toLowerCase()}, ${active && !sort.descending ? "Z to A" : "A to Z"}`}
+        >
+          {label}
+          <span aria-hidden className={active ? "text-gray-900" : "text-gray-300"}>
+            {active && sort.descending ? "▼" : "▲"}
+          </span>
+        </button>
+      </th>
+    );
+  };
   const unnamed = side.unnamed.filter((s) => has(s.organizationName, s.registrationName));
   const organizations = side.organizations.filter((o) => has(o.organizationName, ...o.people));
 
@@ -119,7 +162,6 @@ export default function RegistrationsList({
     { id: "exhibitorOrgs", label: "Exhibitor organizations", count: exhibitors.counts.organizations },
   ];
   const testTag = <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">Test</span>;
-  const th = "px-4 py-2 text-left text-xs font-medium uppercase text-gray-500";
 
   return (
     <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
@@ -213,26 +255,53 @@ export default function RegistrationsList({
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className={th}>Name</th>
-                    <th className={th}>Organization</th>
-                    <th className={th}>Registration</th>
-                    <th className={th}>Since</th>
-                    <th className={`${th} text-right`}>Change to</th>
+                    {sortHeader("name", "Name")}
+                    {sortHeader("organization", "Organization")}
+                    {sortHeader("registration", "Registration type")}
+                    <th className={th}>Email</th>
+                    <th className={th}>Emergency contact</th>
+                    {anyChange && <th className={`${th} text-right`}>Change to</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {people.map((seat) => (
                     <tr key={seat.seatId}>
-                      <td className="px-4 py-2 text-sm font-medium text-gray-900">{seat.holderName ?? "Unnamed person"}</td>
+                      <td className="px-4 py-2 text-sm font-medium text-gray-900">
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`inline-block w-[4.5rem] shrink-0 rounded border px-1.5 py-0.5 text-center text-[11px] font-semibold ${BADGE[seat.badge].className}`}
+                          >
+                            {BADGE[seat.badge].label}
+                          </span>
+                          {seat.holderName ?? "Unnamed person"}
+                        </span>
+                      </td>
                       <td className="px-4 py-2 text-sm text-gray-700">
                         {seat.organizationName}
                         {seat.isTestOrg && testTag}
                       </td>
                       <td className="px-4 py-2 text-sm text-gray-700">{seat.registrationName}</td>
-                      <td className="px-4 py-2 text-sm text-gray-500">
-                        {seat.seatedAt ? parseUTC(seat.seatedAt).toLocaleDateString("en-CA", { month: "short", day: "numeric" }) : ""}
+                      <td className="px-4 py-2 text-sm text-gray-700">
+                        {seat.email ? (
+                          <a href={`mailto:${seat.email}`} className="hover:underline">
+                            {seat.email}
+                          </a>
+                        ) : (
+                          <span className="text-gray-400">None given</span>
+                        )}
                       </td>
-                      <td className="px-4 py-2 text-right">{changeControl(seat.seatId)}</td>
+                      <td className="px-4 py-2 text-sm text-gray-700">
+                        {seat.emergencyContactName || seat.emergencyContactPhone ? (
+                          <>
+                            {seat.emergencyContactName}
+                            {seat.emergencyContactName && seat.emergencyContactPhone ? ", " : ""}
+                            {seat.emergencyContactPhone}
+                          </>
+                        ) : (
+                          <span className="text-gray-400">None given</span>
+                        )}
+                      </td>
+                      {anyChange && <td className="px-4 py-2 text-right">{changeControl(seat.seatId)}</td>}
                     </tr>
                   ))}
                 </tbody>
