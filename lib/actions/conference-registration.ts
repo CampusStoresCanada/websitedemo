@@ -27,10 +27,6 @@ import type { Database, Json } from "@/lib/database.types";
 
 type RegistrationRow = Database["public"]["Tables"]["conference_registrations"]["Row"];
 type RegistrationUpdate = Database["public"]["Tables"]["conference_registrations"]["Update"];
-export type AdminRegistrationRow = RegistrationRow & {
-  user_display_name: string | null;
-  organization_name: string | null;
-};
 
 type OppositeRegistrationType = "delegate" | "exhibitor";
 type TravelWindowExceptionStatus = "pending" | "approved" | "rejected";
@@ -1268,91 +1264,6 @@ export async function getOrgRegistrations(
 
   if (error) return { success: false, error: error.message };
   return { success: true, data: data ?? [] };
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Admin: Get all registrations with optional filters
-// ─────────────────────────────────────────────────────────────────
-
-export async function getAllRegistrations(
-  conferenceId: string,
-  filters?: {
-    status?: string;
-    registration_type?: string;
-    organization_id?: string;
-    created_at_from?: string;
-    created_at_to?: string;
-  }
-): Promise<{ success: boolean; error?: string; data?: AdminRegistrationRow[] }> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  let query = adminClient
-    .from("conference_registrations")
-    .select("*")
-    .eq("conference_id", conferenceId);
-
-  if (filters?.status) query = query.eq("status", filters.status);
-  if (filters?.registration_type) query = query.eq("registration_type", filters.registration_type);
-  if (filters?.organization_id) query = query.eq("organization_id", filters.organization_id);
-  if (filters?.created_at_from) query = query.gte("created_at", `${filters.created_at_from}T00:00:00.000Z`);
-  if (filters?.created_at_to) query = query.lte("created_at", `${filters.created_at_to}T23:59:59.999Z`);
-
-  const { data, error } = await query.order("created_at", { ascending: false });
-
-  if (error) return { success: false, error: error.message };
-
-  const registrations = data ?? [];
-  if (registrations.length === 0) {
-    return { success: true, data: [] };
-  }
-
-  const userIds = Array.from(
-    new Set(
-      registrations
-        .map((row) => row.user_id)
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-    )
-  );
-
-  let profileById = new Map<string, string | null>();
-  let organizationById = new Map<string, string | null>();
-
-  if (userIds.length > 0) {
-    const { data: profiles, error: profileError } = await adminClient
-      .from("profiles")
-      .select("id, display_name")
-      .in("id", userIds);
-
-    if (profileError) return { success: false, error: profileError.message };
-    profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name]));
-  }
-
-  const organizationIds = Array.from(
-    new Set(
-      registrations
-        .map((row) => row.organization_id)
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-    )
-  );
-  if (organizationIds.length > 0) {
-    const { data: organizations, error: organizationError } = await adminClient
-      .from("organizations")
-      .select("id, name")
-      .in("id", organizationIds);
-
-    if (organizationError) return { success: false, error: organizationError.message };
-    organizationById = new Map((organizations ?? []).map((org) => [org.id, org.name]));
-  }
-
-  const enrichedRows: AdminRegistrationRow[] = registrations.map((row) => ({
-    ...row,
-    user_display_name: profileById.get(row.user_id) ?? null,
-    organization_name: organizationById.get(row.organization_id) ?? null,
-  }));
-
-  return { success: true, data: enrichedRows };
 }
 
 // ─────────────────────────────────────────────────────────────────
