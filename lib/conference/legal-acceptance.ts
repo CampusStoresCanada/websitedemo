@@ -186,15 +186,26 @@ export async function computeMissingLegal(
  *
  * ⛔ Resolved through the configured membership programs, never a string
  * literal (`organizations.type` is "Vendor Partner", capitalised). Only
- * `partner` and `staff` diverge from `member`; `staff` must pass through or the
- * staff exemption can never fire. resolveConferenceTier also feeds pricing, so
- * the narrowing happens here, not there. One copy, for every caller.
+ * `partner`, `staff` and `non_member` diverge from `member`; `staff` must pass
+ * through or the staff exemption can never fire. resolveConferenceTier also
+ * feeds pricing, so the narrowing happens here, not there. One copy, for every
+ * caller: the check-in desk AND the signed-in agreement gate on /me
+ * (deriveAssigneeContext), which kept its own copy until 2026-11.
+ *
+ * ⚠️ resolveConferenceTier falls back to 'public' for any org type the
+ * programs config does not name. With `programs.definitions` unset, the
+ * defaults map Member and Vendor Partner; configure that policy without Vendor
+ * Partner and partners silently fall to "member" here.
  */
 export async function audienceForOrg(db: AdminClient, organizationId: string | null): Promise<string[]> {
   if (!organizationId) return ["member"];
   const { data: org } = await db.from("organizations").select("type").eq("id", organizationId).maybeSingle();
   const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-  return [tier === "partner" || tier === "staff" ? tier : "member"];
+  // ⛔ non_member too (2026-11): a day-pass buyer's school is a Non-Member
+  // organisation. Folded into "member", the desk asked them for the Member
+  // Code of Conduct, which checkout (getRequiredLegalDocumentsPublic with
+  // "non_member") never showed them. Both now ask the same question.
+  return [tier === "partner" || tier === "staff" || tier === "non_member" ? tier : "member"];
 }
 
 export type OwedAgreement = { versionId: string; documentType: string; content: string };

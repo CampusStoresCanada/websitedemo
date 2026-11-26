@@ -1,6 +1,5 @@
 "use server";
 
-import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 
 import {
   isGlobalAdmin,
@@ -26,6 +25,7 @@ import {
   computeMissingLegal,
   loadCurrentLegalVersions,
   personOwedAgreements,
+  audienceForOrg,
 } from "../conference/legal-acceptance";
 import { recordOwedAgreements } from "@/lib/conference/check-in-agreements";
 import type { Database } from "@/lib/database.types";
@@ -324,47 +324,13 @@ async function deriveAssigneeContext(
     .limit(1)
     .maybeSingle();
   if (!cp) return { isAssignee: false, audienceSourceRoles: [] };
-  let audienceSourceRoles = ["member"];
-  if (cp.organization_id) {
-    const { data: org } = await db
-      .from("organizations")
-      .select("type")
-      .eq("id", cp.organization_id)
-      .maybeSingle();
-    // ⛔ Resolve through the CONFIGURED membership programs, never a string
-    // literal. `organizations.type` is capitalised and human-readable
-    // ("Vendor Partner"), so the old `=== "vendor_partner"` matched 0 of 210
-    // rows and every partner was silently evaluated against MEMBER documents.
-    // A comparator would have fixed today's spelling and left the trap armed;
-    // `programs.definitions` owns the org-type → tier mapping, so renaming a
-    // type or adding a third program keeps working without touching this file.
-    //
-    // ⚠️⚠️ THE FALLBACK IS `public`, NOT `member`. resolveConferenceTier returns
-    // 'public' for any org type the programs list does not name. 📏 As of
-    // 2026-09-08 `policy_values` has ZERO `programs.definitions` rows, so
-    // getProgramsConfig() falls through to defaultMembershipPrograms(), which
-    // maps Member → member and Vendor Partner → partner. **The correct answer
-    // here currently depends on that policy being UNSET.** The day somebody
-    // configures it through the admin UI and omits Vendor Partner, this line
-    // silently returns 'public' and partners lose their partner documents
-    // again — with no literal anywhere to grep for. That is the policy engine's
-    // design rather than something this call introduced, but it is the kind of
-    // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
-    // had before the vendor-partner fix — that bug was partners being swept into
-    // the member audience, and correcting it must not move anybody else.
-    //
-    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
-    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
-    // "member" here silently defeats it — CSC's own officers would be asked to
-    // accept a Member Code of Conduct again, with nothing failing loudly.
-    //
-    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
-    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site.
-    const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
-  }
+  // ⛔ The ONE rule, shared with the check-in desk (audienceForOrg): partner,
+  // staff and non_member keep their tier, everyone else is held to member.
+  // This used to be its own copy, so a non-member's school was folded into
+  // member here while checkout asked them the non-member question. The
+  // warnings that lived here (programs config fallback, the staff exemption,
+  // never teaching resolveConferenceTier new answers) are on audienceForOrg.
+  const audienceSourceRoles = await audienceForOrg(db, (cp.organization_id as string | null) ?? null);
   return { isAssignee: true, audienceSourceRoles };
 }
 

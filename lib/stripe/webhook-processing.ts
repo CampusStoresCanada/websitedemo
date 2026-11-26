@@ -574,8 +574,12 @@ export async function mintProspectiveRegistration(
     .eq("id", row.id);
 
   if (contactId) {
-    await recordCheckoutAgreements(db, row, person.id);
+    // Login FIRST: an acceptance is stamped with the attendee row's login, and
+    // /me's checklist and agreement checks count acceptances by login only.
+    // Recorded before the login exists, the desk would count them and /me
+    // would ask again.
     if (mayHoldAccess) await giveDayPassLogin(db, row, { orgId, contactId, personId: person.id });
+    await recordCheckoutAgreements(db, row, person.id);
   }
 
   const { data: offer } = await db

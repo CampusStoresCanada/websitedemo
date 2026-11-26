@@ -130,6 +130,14 @@ describe("a paid non-member day pass", () => {
     expect(triggerConfirmationMock).toHaveBeenCalled();
   });
 
+  it("makes the login BEFORE recording agreements, so the acceptances carry it", async () => {
+    const fake = dbFor();
+    await mintProspectiveRegistration(fake.db as never, row);
+    const loginAt = provisionOrgLoginMock.mock.invocationCallOrder[0];
+    const agreementsAt = recordOwedAgreementsMock.mock.invocationCallOrder[0];
+    expect(loginAt).toBeLessThan(agreementsAt);
+  });
+
   it("on an address someone else at that school already uses: their own record, no login", async () => {
     peopleOnAddressMock.mockResolvedValue({ sameName: null, others: [{ contactId: "alice", name: "Alice" }] });
     createPersonOnAddressMock.mockResolvedValue({ personId: "contact-2", addressIsNew: false });
