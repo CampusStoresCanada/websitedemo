@@ -92,6 +92,25 @@ export function getAccessGroupIds(): {
   };
 }
 
+/**
+ * The access group a NEW login at this organisation joins in Circle.
+ *
+ * ⛔ A Non-Member organisation gets NONE. Before 2026-11 nobody at one could
+ * get a login, so `partner ? partner : member` never met one; a conference
+ * attendee who is not a member (the NIPSA Wednesday rate) can now, and that
+ * line would have put them in CSC Members with full member access. With no
+ * group they see Circle's open spaces, and the conference-pass rule adds them
+ * to their conference's space.
+ */
+export function circleAccessGroupForOrgType(
+  orgType: string | null | undefined,
+  groupIds: Pick<ReturnType<typeof getAccessGroupIds>, "member" | "partner">
+): number | null {
+  if (orgType === "Non-Member") return null;
+  const isPartner = orgType?.toLowerCase().includes("partner") ?? false;
+  return (isPartner ? groupIds.partner : groupIds.member) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Admin API base URLs
 // ---------------------------------------------------------------------------

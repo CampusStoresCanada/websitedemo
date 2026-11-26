@@ -30,6 +30,10 @@ import {
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createPersonOnAddress, peopleOnAddress } from "@/lib/identity/lifecycle";
+import { loginSkipReason } from "@/lib/contacts/login-policy";
+import { personOwedAgreements } from "@/lib/conference/legal-acceptance";
+import { recordOwedAgreements } from "@/lib/conference/check-in-agreements";
 
 export type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -411,14 +415,26 @@ async function processEventTicketBulkPurchase(
 }
 
 /**
+ * The contact tags a day-pass buyer's record is created with: where they came
+ * from, not a non-member tag (those refuse a login, see loginSkipReason).
+ */
+const DAY_PASS_CONTACT_TYPE = ["conference"];
+
+/**
  * A non-member Day Pass buyer has no org or person record yet — mint one
  * directly instead of routing through a review step (unlike a booth, a day
  * pass doesn't make them a CSC member, so there's nothing for the board to
  * approve). Errors are logged, not thrown: the payment already succeeded and
  * the pending row stays "paid" so an admin can reconcile manually if minting
  * fails partway.
+ *
+ * Since 2026-11 (the NIPSA Wednesday rate) the buyer also becomes a real
+ * attendee rather than a name on a seat: a contact, the agreements they ticked
+ * recorded as acceptances, a login for /me and a Circle account. Their school
+ * still does not become a member. Every step after the seat is best-effort, so
+ * a failure there never costs them the seat they paid for.
  */
-async function mintProspectiveRegistration(
+export async function mintProspectiveRegistration(
   db: AdminClient,
   row: {
     id: string;
@@ -432,29 +448,72 @@ async function mintProspectiveRegistration(
     conference_id: string;
     offer_entity_id: string;
     amount_cents: number;
+    accepted_document_types?: string[] | null;
   }
 ): Promise<void> {
+  const attendeeName = `${row.first_name} ${row.last_name}`.trim();
+
+  // ── Their school or store: what the badge prints ─────────────────────────
+  // A second buyer who types the same name joins the organisation the first
+  // one made, rather than a "-<timestamp>" copy, so two people from one school
+  // are colleagues on one record. Only ever another Non-Member organisation:
+  // borrowing a member's or partner's record would hand the buyer its access.
   const slugBase = row.organization_name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  const { data: existingSlug } = await db.from("organizations").select("id").eq("slug", slugBase).maybeSingle();
-  const slug = existingSlug ? `${slugBase}-${Date.now()}` : slugBase;
+  const { data: existingSlug } = await db.from("organizations").select("id, type").eq("slug", slugBase).maybeSingle();
 
-  const orgId = crypto.randomUUID();
-  const { error: orgError } = await db.from("organizations").insert({
-    id: orgId,
-    name: row.organization_name,
-    slug,
-    type: "Non-Member",
-    email: row.email,
-    phone: row.phone,
-    tenant_id: "29300837-1d49-45b4-bd09-1c4525c409d1",
-    updated_at: new Date().toISOString(),
-  });
-  if (orgError) {
-    console.error(`mintProspectiveRegistration: failed to create org for payment ${row.id}: ${orgError.message}`);
-    return;
+  let orgId: string;
+  if (existingSlug && existingSlug.type === "Non-Member") {
+    orgId = existingSlug.id;
+  } else {
+    const slug = existingSlug ? `${slugBase}-${Date.now()}` : slugBase;
+    orgId = crypto.randomUUID();
+    const { error: orgError } = await db.from("organizations").insert({
+      id: orgId,
+      name: row.organization_name,
+      slug,
+      type: "Non-Member",
+      email: row.email,
+      phone: row.phone,
+      tenant_id: "29300837-1d49-45b4-bd09-1c4525c409d1",
+      updated_at: new Date().toISOString(),
+    });
+    if (orgError) {
+      console.error(`mintProspectiveRegistration: failed to create org for payment ${row.id}: ${orgError.message}`);
+      return;
+    }
+  }
+
+  // ── The person: what agreements, the badge check, login and Circle hang off ─
+  // ⛔ Stephen's shared-address rules (peopleOnAddress), as at the desk and in
+  // the cart: the same name on the address is that person. Anyone else gets a
+  // record of their own and NO login or Circle account, because those belong
+  // to whoever already holds the address. createPersonOnAddress never matches
+  // by email, so two people on info@school.ca can never become one.
+  let contactId: string | null = null;
+  let mayHoldAccess = false;
+  const onAddress = await peopleOnAddress(db, orgId, row.email, attendeeName);
+  if ("error" in onAddress) {
+    console.error(`mintProspectiveRegistration: could not check the address for payment ${row.id}: ${onAddress.error}`);
+  } else if (onAddress.sameName) {
+    contactId = onAddress.sameName.contactId;
+    mayHoldAccess = true;
+  } else {
+    const created = await createPersonOnAddress({
+      organizationId: orgId,
+      name: attendeeName,
+      email: row.email,
+      title: row.job_title,
+      phone: row.phone,
+      contactType: DAY_PASS_CONTACT_TYPE,
+    });
+    if (!created.personId) {
+      console.error(`mintProspectiveRegistration: failed to create contact for payment ${row.id}: ${created.error}`);
+    }
+    contactId = created.personId;
+    mayHoldAccess = onAddress.others.length === 0 && created.addressIsNew;
   }
 
   const { data: person, error: personError } = await db
@@ -462,10 +521,14 @@ async function mintProspectiveRegistration(
     .insert({
       conference_id: row.conference_id,
       organization_id: orgId,
+      // Both point at contacts; contact_id is the one with a foreign key (see
+      // loadSeatHoldings), canonical_person_id is what agreements read.
+      contact_id: contactId,
+      canonical_person_id: contactId,
       person_kind: "delegate",
       source_type: "manual",
       source_id: crypto.randomUUID(),
-      display_name: `${row.first_name} ${row.last_name}`.trim(),
+      display_name: attendeeName,
       contact_email: row.email,
       mobile_phone: row.phone,
       role_title: row.job_title,
@@ -510,6 +573,11 @@ async function mintProspectiveRegistration(
     })
     .eq("id", row.id);
 
+  if (contactId) {
+    await recordCheckoutAgreements(db, row, person.id);
+    if (mayHoldAccess) await giveDayPassLogin(db, row, { orgId, contactId, personId: person.id });
+  }
+
   const { data: offer } = await db
     .from("conference_entities")
     .select("name")
@@ -525,6 +593,86 @@ async function mintProspectiveRegistration(
     orgName: row.organization_name,
     registrationRole: offer?.name ?? "Delegate",
   });
+}
+
+/**
+ * The agreements a day-pass buyer ticked at checkout, recorded as acceptances
+ * so the desk, /me and the reminders count them. Until 2026-11 they were only
+ * a list on the payment row: the desk asked again, then could not record the
+ * answer for someone with no contact. Only what they still owe AND ticked is
+ * recorded, through the same writer the desk and self check-in use.
+ */
+async function recordCheckoutAgreements(
+  db: AdminClient,
+  row: { id: string; conference_id: string; accepted_document_types?: string[] | null },
+  personId: string
+): Promise<void> {
+  try {
+    const ticked = new Set(row.accepted_document_types ?? []);
+    if (ticked.size === 0) return;
+    const owed = await personOwedAgreements(db, row.conference_id, personId);
+    const versionIds = owed.filter((o) => ticked.has(o.documentType)).map((o) => o.versionId);
+    if (versionIds.length === 0) return;
+    const recorded = await recordOwedAgreements({
+      conferenceId: row.conference_id,
+      personId,
+      versionIds,
+      via: "self",
+      recordedBy: null,
+    });
+    if (!recorded.success) {
+      console.error(`mintProspectiveRegistration: agreements not recorded for payment ${row.id}: ${recorded.error}`);
+    }
+  } catch (e) {
+    console.error(`mintProspectiveRegistration: agreements threw for payment ${row.id}:`, e);
+  }
+}
+
+/**
+ * A login and a Circle account for a day-pass buyer. The seat they just paid
+ * for stands in for a membership (loginSkipReason's conferenceAttendee).
+ *
+ * The account is made silently: the registration confirmation is the way in,
+ * its "View My Conference" button lands on sign-in, which emails a code. No
+ * "added to <org> as a member" email, which would tell a non-member they are
+ * one. provisionOrgLogin queues the Circle account; a Non-Member organisation
+ * joins no access group (circleAccessGroupForOrgType) and the conference-pass
+ * rule adds the conference space on its next run.
+ */
+async function giveDayPassLogin(
+  db: AdminClient,
+  row: { id: string; email: string },
+  ids: { orgId: string; contactId: string; personId: string }
+): Promise<void> {
+  try {
+    const skip = loginSkipReason({ email: row.email, contactType: DAY_PASS_CONTACT_TYPE, conferenceAttendee: true });
+    if (skip) return;
+    // Loaded here, not at the top: org-login pulls in the email client, which
+    // needs its API key the moment the module loads, and every test that
+    // imports this file would then need one too.
+    const { provisionOrgLogin } = await import("@/lib/identity/org-login");
+    const login = await provisionOrgLogin({
+      orgId: ids.orgId,
+      email: row.email,
+      role: "member",
+      syncIdentity: false,
+      personId: ids.contactId,
+      newAccount: "silent",
+      announce: false,
+    });
+    if (!login.success && login.outcome !== "already_member") {
+      console.error(`mintProspectiveRegistration: no login for payment ${row.id}: ${login.error}`);
+      return;
+    }
+    // /me finds a person's conference by the login on their attendee row.
+    const { data: contact } = await db.from("contacts").select("profile_id").eq("id", ids.contactId).maybeSingle();
+    const userId = (contact?.profile_id as string | null | undefined) ?? null;
+    if (userId) {
+      await db.from("conference_people").update({ user_id: userId }).eq("id", ids.personId);
+    }
+  } catch (e) {
+    console.error(`mintProspectiveRegistration: login threw for payment ${row.id}:`, e);
+  }
 }
 
 /**

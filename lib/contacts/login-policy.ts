@@ -32,9 +32,23 @@ export function loginSkipReason(params: {
   email?: string | null;
   contactType?: string[] | null;
   membershipStatus?: string | null;
+  /**
+   * The person has just paid for a seat at a conference: a non-member
+   * attendee, like a NIPSA member on the Wednesday rate (2026-11). The seat
+   * stands in for a membership. They need a login for /me (agreements, the
+   * badge check) and Circle for the conference space, without their school
+   * becoming a member. Their organisation is a Non-Member one, which gets no
+   * Circle access group (circleAccessGroupForOrgType), so this opens the door
+   * to their own conference and the open spaces, nothing more.
+   *
+   * Only the paid day-pass mint passes it. The tag check still applies: a
+   * person tagged non-member is a human decision this does not override.
+   */
+  conferenceAttendee?: boolean;
 }): LoginSkipReason | null {
   if (!params.email?.trim()) return "no_email";
   if (hasNonMemberTag(params.contactType)) return "non_member_tag";
+  if (params.conferenceAttendee === true) return null;
   if (!ACCESS_ACTIVE_STATUSES.has(params.membershipStatus ?? "")) return "org_inactive";
   return null;
 }

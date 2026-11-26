@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueCircleSync } from "@/lib/circle/sync";
-import { getAccessGroupIds } from "@/lib/circle/config";
+import { circleAccessGroupForOrgType, getAccessGroupIds } from "@/lib/circle/config";
 import {
   ensureKnownPerson,
   ensurePersonForUser,
@@ -48,6 +48,19 @@ export async function provisionOrgLogin(params: {
   syncIdentity: boolean;
   /** Existing person to fall back to when linking. Used when syncIdentity is false. */
   personId?: string | null;
+  /**
+   * How a brand-new account hears about it. "magic_link" (the default) is
+   * Supabase's invite. "silent" sends nothing: the caller's own email carries
+   * the way in, and the sign-in page emails a code to any address with an
+   * account. The paid day-pass mint uses it so a buyer gets one email, the
+   * registration confirmation, rather than three.
+   */
+  newAccount?: "magic_link" | "silent";
+  /**
+   * Send "You've been added to <org> as a member". False for a non-member
+   * conference attendee, whom that sentence would mislead. Default true.
+   */
+  announce?: boolean;
 }): Promise<ProvisionOrgLoginResult> {
   const { orgId, role } = params;
   const adminClient = createAdminClient();
@@ -109,7 +122,7 @@ export async function provisionOrgLogin(params: {
       email: normalizedEmail,
       role,
       contactId: knownPersonId,
-      newAccount: "magic_link",
+      newAccount: params.newAccount ?? "magic_link",
       ifAlreadyActive: "refuse",
     });
 
@@ -128,7 +141,7 @@ export async function provisionOrgLogin(params: {
     const isNewAccount = attached.isNewAccount === true;
 
     if (attached.membership === "reactivated") {
-      sendTransactional({
+      if (params.announce !== false) sendTransactional({
         templateKey: "org_user_added_to_org",
         to: normalizedEmail,
         variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
@@ -161,9 +174,7 @@ export async function provisionOrgLogin(params: {
       idempotencyKey: `invite-link:${circleEntityId}`,
     });
 
-    const groupIds = getAccessGroupIds();
-    const isPartner = orgRow.type?.toLowerCase().includes("partner") ?? false;
-    const inviteGroupId = isPartner ? groupIds.partner : groupIds.member;
+    const inviteGroupId = circleAccessGroupForOrgType(orgRow.type, getAccessGroupIds());
 
     if (inviteGroupId) {
       await enqueueCircleSync({
@@ -187,11 +198,13 @@ export async function provisionOrgLogin(params: {
       });
     }
 
-    sendTransactional({
-      templateKey: "org_user_added_to_org",
-      to: normalizedEmail,
-      variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
-    }).catch(() => {});
+    if (params.announce !== false) {
+      sendTransactional({
+        templateKey: "org_user_added_to_org",
+        to: normalizedEmail,
+        variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
+      }).catch(() => {});
+    }
 
     return {
       success: true,

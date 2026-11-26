@@ -4,7 +4,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getIntegrationConfig } from "@/lib/policy/engine";
-import { isCircleConfigured, getAccessGroupIds } from "./config";
+import { isCircleConfigured, getAccessGroupIds, circleAccessGroupForOrgType } from "./config";
 import { getCircleClient } from "./client";
 import { executeCircleSyncOperation } from "./operations";
 import type { CircleMember, CircleSyncOperation, CircleSyncQueueItem } from "./types";
@@ -656,10 +656,9 @@ export async function enqueueNewContactCircleProvisioning(
 
     if (!org || !ACCESS_ACTIVE_STATUSES.has(org.membership_status ?? "")) return;
 
-    const isPartner = org.type?.toLowerCase().includes("partner") ?? false;
     // Shared tier groups only — see enqueueOrgCircleAccessSync for why
     // org.circle_access_group_id is no longer used here.
-    const groupId = isPartner ? (groupIds.partner ?? null) : (groupIds.member ?? null);
+    const groupId = circleAccessGroupForOrgType(org.type, groupIds);
 
     const now = new Date().toISOString();
 
