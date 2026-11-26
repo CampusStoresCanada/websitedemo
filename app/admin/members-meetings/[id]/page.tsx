@@ -587,7 +587,11 @@ export default async function MembersMeetingPage({
                 zone, so it is never guessed at. The spine above shows DATES
                 only, as plain strings, so nothing else on this page would say
                 the hour at all. */}
-            <p className="mt-2 text-sm text-gray-700">
+            {/* ⛔ A div, not a p. `DateTimeRange` renders its own <p> (two of
+                them for a cross-midnight range), and a <p> inside a <p> is
+                invalid HTML — React logged a hydration error on this page for
+                it. The public events page had it right; this one did not. */}
+            <div className="mt-2 text-sm text-gray-700">
               {meeting.event.startsAt ? (
                 <DateTimeRange
                   start={meeting.event.startsAt}
@@ -598,7 +602,7 @@ export default async function MembersMeetingPage({
                   No time set yet — members cannot be told when.
                 </span>
               )}
-            </p>
+            </div>
 
             <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-gray-500">
               The same form as the Events section — its own address lookup, its
