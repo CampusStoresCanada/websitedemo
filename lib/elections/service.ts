@@ -2665,7 +2665,13 @@ export async function recordTieResolution(
  */
 export async function certifyElection(
   slug: string,
-  input: { certifiedByProfileId: string; scrutineerContactId?: string | null }
+  // ⛔ `certifiedByProfileId` is NULLABLE because the clock certifies too, and
+  // when it does, nobody certified it -- a rule fixed before the outcome was
+  // known did. Writing some person's id to satisfy a column would put a
+  // falsehood into the record of a statutory act. The column is nullable in the
+  // database for exactly this reason; `actor_type: "cron"` in the audit log is
+  // what says who acted.
+  input: { certifiedByProfileId: string | null; scrutineerContactId?: string | null }
 ): Promise<Result<{ elected: CountedResult[]; reconciled: boolean }>> {
   const db = createAdminClient();
   const election = await getScheduledElection(slug);

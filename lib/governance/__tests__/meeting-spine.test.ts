@@ -57,47 +57,87 @@ function facts(over: Partial<TimelineFacts> = {}): TimelineFacts {
 }
 
 describe("buildMeetingSpine — the spine", () => {
-  it("runs in the order things happen, not the order they were built", () => {
+  it("carries ONLY what a human must do, in the order it has to happen", () => {
+    // Steve 2026-11-26: "if someone needs to do an action, it goes into the
+    // timeline. If there's nothing for a human to do, then it isn't on the
+    // timeline."
     const t = buildMeetingSpine(facts(), "2026-10-01");
     expect(t.map((s) => s.key)).toEqual([
-      "cycle_open",
-      "call_for_nominations",
-      "close_nominations",
+      // OUTSTANDING, in the order it has to happen. This is what the page opens
+      // on, so the top of the list is the next thing somebody owes.
       "circulate_ballots",
-      "ballots_close",
-      "certify",
-      // The event page before notice: notice links to it.
-      "event_published",
       "agm_notice",
       "proxy_form",
       // The agenda before the package: the agenda goes inside it.
       "agenda",
       "agm_package",
-      "agm",
       // The candidates hear before the membership does.
       "tell_candidates",
       "announce_result",
+      // DONE, demoted. In this fixture the call has gone out and the event page
+      // is published, so both move below the live work rather than sitting at
+      // the top being already finished.
+      "call_for_nominations",
+      "event_published",
     ]);
   });
 
-  it("drops the whole ballot when the slate is acclaimed", () => {
+  it("⛔ leaves OFF the stages that were only status", () => {
+    // "Cycle opened" is a fact, and the meeting is an event that happens to you.
+    // Neither is a thing to do.
+    const keys = buildMeetingSpine(facts(), "2026-10-01").map((s) => s.key);
+    for (const k of ["cycle_open", "ballot", "agm"]) expect(keys, k).not.toContain(k);
+  });
+
+  it("⛔ leaves OFF the stages the CLOCK owns", () => {
+    // Nothing on any of these was ever a choice: the nomination and ballot
+    // windows were published to members before anyone knew the result, and an
+    // acclamation is nominees <= seats. A press here is discretion over when a
+    // legally deadlined act happens. See lib/elections/clockwork.ts.
+    const keys = buildMeetingSpine(facts(), "2026-10-01").map((s) => s.key);
+    for (const k of ["close_nominations", "ballots_close", "certify"])
+      expect(keys, k).not.toContain(k);
+  });
+
+  it("⛔ an acclaimed slate still has no ballot step, and now no certify either", () => {
+    // This used to be the defect rather than the design: `certify` was never
+    // pushed for an acclamation, so the act that writes the directors' terms
+    // appeared NOWHERE and was reachable only through a link named "Ballots &
+    // audit" — in an election where no ballot was cast. It is absent now
+    // because the clock does it, not because it was forgotten.
     const t = buildMeetingSpine(
       facts({ election: election({ outcome: "acclaimed", status: "nominations_closed" }) }),
       "2026-11-01"
     );
-    const ballot = t.find((s) => s.key === "ballot");
-    expect(ballot?.state).toBe("not_applicable");
-    expect(t.map((s) => s.key)).not.toContain("circulate_ballots");
-    expect(t.map((s) => s.key)).not.toContain("certify");
+    const keys = t.map((s) => s.key);
+    expect(keys).not.toContain("ballot");
+    expect(keys).not.toContain("circulate_ballots");
+    expect(keys).not.toContain("certify");
+  });
+
+  it("moves finished work BELOW what is still outstanding", () => {
+    // Steve: "when a timeline action is completed it gets moved away from the
+    // top of the page so that going to the timeline shows you what is next."
+    const t = buildMeetingSpine(
+      facts({ election: election({ callSentAt: "2026-09-23T12:00:00Z" }) }),
+      "2026-10-01"
+    );
+    const keys = t.map((s) => s.key);
+    const call = t.find((s) => s.key === "call_for_nominations")!;
+    expect(call.state).toBe("done");
+    // Done, so it sits after every outstanding stage rather than at the top.
+    const lastOutstanding = Math.max(
+      ...t.map((s, i) => (s.state === "done" || s.state === "not_applicable" ? -1 : i))
+    );
+    expect(keys.indexOf("call_for_nominations")).toBeGreaterThan(lastOutstanding);
   });
 });
 
 describe("buildMeetingSpine — what is stopping each stage", () => {
-  it("will not close nominations before the published date", () => {
-    const t = buildMeetingSpine(facts(), "2026-10-01");
-    const close = t.find((s) => s.key === "close_nominations")!;
-    expect(close.action?.blockedBy).toMatch(/Not until 2026-10-23/);
-  });
+  // ⛔ "will not close nominations before the published date" and "will not
+  // certify before sealing" MOVED to lib/elections/__tests__/clockwork.test.ts.
+  // Both are now the clock's business, and both are tested there against
+  // `dueStep`, which is the pure decision about what is due.
 
   it("blocks notice on an unpublished event page", () => {
     const t = buildMeetingSpine(facts({ eventPublished: false }), "2026-12-18");
@@ -132,12 +172,7 @@ describe("buildMeetingSpine — what is stopping each stage", () => {
     expect(announce.action?.blockedBy).toMatch(/Not until the meeting on 2027-01-21/);
   });
 
-  it("will not certify before sealing", () => {
-    const t = buildMeetingSpine(facts({ election: election({ status: "balloting" }) }), "2026-12-08");
-    const certify = t.find((s) => s.key === "certify")!;
-    expect(certify.state).toBe("blocked");
-    expect(certify.action?.blockedBy).toMatch(/not sealed/);
-  });
+
 });
 
 describe("buildMeetingSpine — the overdue call", () => {
@@ -190,8 +225,14 @@ describe("currentStage — the headline must be the real next act", () => {
 describe("the meeting's stages", () => {
   it("puts the event page before notice, because notice links to it", () => {
     const t = buildMeetingSpine(facts(), "2026-12-20");
-    const keys = t.map((s) => s.key);
-    expect(keys.indexOf("event_published")).toBeLessThan(keys.indexOf("agm_notice"));
+    // Among what is still OUTSTANDING: finished work is demoted below, so a
+    // completed event page legitimately sorts after an outstanding notice.
+    const outstanding = t
+      .filter((x) => x.state !== "done" && x.state !== "not_applicable")
+      .map((x) => x.key);
+    expect(outstanding.indexOf("event_published")).toBeLessThan(
+      outstanding.indexOf("agm_notice")
+    );
   });
 
   it("carries what is missing from the event page as its detail", () => {

@@ -103,6 +103,64 @@ export interface TimelineFacts {
   election: ElectionFacts | null;
 }
 
+/**
+ * Stages that are NOT a human act, and so are not on the timeline.
+ *
+ * Steve 2026-11-26: "if someone needs to do an action, it goes into the
+ * timeline. If there's nothing for a human to do, then it isn't on the
+ * timeline." And: "Things are clockwork and that's fine."
+ *
+ * Two kinds end up here.
+ *
+ * STATUS ONLY — `cycle_open`, `ballot`, `agm`. These never carried an action.
+ * "Cycle opened" is a fact, "The slate is acclaimed, so there is no ballot" is
+ * an explanation, and the meeting itself is an event that happens to you. A
+ * list of things to do is not where any of them belong.
+ *
+ * ⛔ CLOCKWORK — `close_nominations`, `ballots_close`, `certify`. These were
+ * presses, and nothing on them was ever a choice: the nomination and ballot
+ * windows were published to members before anyone knew the result, and an
+ * acclamation is nominees <= seats. A button at the end of the process is
+ * discretion over WHEN a legally deadlined act happens, which is the thing an
+ * auditor objects to. `lib/elections/clockwork.ts` runs them on the dates the
+ * election already carries.
+ *
+ * ⛔ This is also what fixes the acclamation hole rather than papering over it.
+ * `certify` was never pushed for an acclaimed slate — a test asserted its
+ * ABSENCE — so the one act that writes the directors' terms appeared nowhere on
+ * the page and was reachable only via a link named "Ballots & audit", for an
+ * election in which no ballot was cast. The fix is not a better button. The
+ * clock certifies, and there is no button to find.
+ *
+ * ⚠️ What this LOSES is the dates these stages displayed — "nominations close
+ * 23 October". That belongs in a schedule-and-ledger reading of the cycle, which
+ * is not built. It deliberately does NOT get bolted onto the timeline, because a
+ * list that mixes "you must do this" with "this will happen to you" is the thing
+ * being removed.
+ */
+const NOT_A_HUMAN_ACT = new Set([
+  "cycle_open",
+  "ballot",
+  "agm",
+  "close_nominations",
+  "ballots_close",
+  "certify",
+]);
+
+/**
+ * Finished work moves below the live work.
+ *
+ * Steve: "when a timeline action is completed it gets moved away from the top of
+ * the page so that going to the timeline shows you what is next."
+ *
+ * Stable within each half, so the order things happen in is preserved — this
+ * only lifts what is still outstanding above what is not.
+ */
+function outstandingFirst(stages: TimelineStage[]): TimelineStage[] {
+  const settled = (s: TimelineStage) => s.state === "done" || s.state === "not_applicable";
+  return [...stages.filter((s) => !settled(s)), ...stages.filter(settled)];
+}
+
 export function buildMeetingSpine(
   facts: TimelineFacts,
   today: string
@@ -518,5 +576,8 @@ export function buildMeetingSpine(
     });
   }
 
-  return stages;
+  // ⛔ The timeline is what a HUMAN must do, in the order the next thing comes
+  // first. Everything else — status, and anything the clock owns — is not a
+  // to-do and is not here. See NOT_A_HUMAN_ACT.
+  return outstandingFirst(stages.filter((stage) => !NOT_A_HUMAN_ACT.has(stage.key)));
 }
