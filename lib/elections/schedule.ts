@@ -222,3 +222,30 @@ export function canOpenBallots(
     pastByLawDeadline: onDate > deadline,
   };
 }
+
+/**
+ * May the candidates be told their own result yet?
+ *
+ * ⛔ ONE answer, called by both the screen (`buildMeetingSpine`) and the clock
+ * (`dueStep`). They disagreeing is how a page says "not yet" while an alert
+ * says "overdue", so neither decides this for itself.
+ *
+ * A BALLOTED result waits for the meeting: the members elect there, and a
+ * returned ballot is not a result until the meeting receives it.
+ *
+ * An ACCLAIMED slate does not wait. Nominees <= seats is arithmetic that was
+ * settled when nominations closed; there is no ballot and nothing pending
+ * anyone's vote. By-Law Part V S3(d) has the Chair announce the acclamation at
+ * the meeting, and that announcement is still gated on the meeting -- but
+ * telling someone who stood unopposed that they are in is not an announcement,
+ * and making them wait eight weeks for arithmetic nobody can change is how a
+ * board member hears it first as a rumour.
+ */
+export function candidatesMayBeTold(args: {
+  outcome: string | null;
+  meetingDate: string | null;
+  asOf: string;
+}): boolean {
+  if (args.outcome === "acclaimed") return true;
+  return args.meetingDate != null && args.asOf >= args.meetingDate;
+}

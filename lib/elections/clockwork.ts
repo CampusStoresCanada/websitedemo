@@ -38,6 +38,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { closeNominations, sealElection, certifyElection } from "@/lib/elections/service";
+import { candidatesMayBeTold } from "@/lib/elections/schedule";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 
@@ -66,9 +67,10 @@ export type ClockworkElection = {
   ballotsCloseAt: string | null;
   meetingId: string | null;
   /**
-   * The day the connected members' meeting sits. ⛔ Needed because telling the
-   * candidates is gated on the MEETING having happened, not merely on
-   * certification — the members elect at the meeting.
+   * The day the connected members' meeting sits. ⛔ Needed because telling a
+   * BALLOTED result is gated on the meeting having happened, not merely on
+   * certification — the members elect at the meeting. An acclaimed slate is
+   * not gated on it; see candidatesMayBeTold.
    */
   meetingDate: string | null;
   candidateResultsSentAt: string | null;
@@ -101,17 +103,17 @@ export function dueStep(e: ClockworkElection, asOf: string): ClockworkStepName |
 
   if (e.status === "sealed") return "certify";
 
-  // ⛔ Not merely "certified". `buildMeetingSpine` blocks this press until the
-  // meeting has happened — "Not until the meeting on <date>" — because the
-  // members elect AT the meeting. If the clock surfaced it earlier it would
-  // raise an obligation nobody is permitted to discharge, and for an AGM
-  // certified in November that alert would sit open until January.
+  // ⛔ Not merely "certified". A balloted result may not be told until the
+  // meeting has happened, because the members elect AT the meeting; an
+  // acclaimed slate may be told at once. Surfacing it earlier than the screen
+  // allows would raise an obligation nobody is permitted to discharge — for an
+  // AGM certified in November, an alert sitting open until January.
   //
-  // ⚠️ Mirrored from the spine rather than re-decided here. The two disagreeing
-  // about when a thing may be done is how a screen says "not yet" while an
-  // alert says "overdue".
+  // ⚠️ `candidatesMayBeTold` is the ONE answer, shared with buildMeetingSpine
+  // rather than re-decided here. The two disagreeing about when a thing may be
+  // done is how a screen says "not yet" while an alert says "overdue".
   if (e.status === "certified" && !e.candidateResultsSentAt) {
-    if (!e.meetingDate || asOf < e.meetingDate) return null;
+    if (!candidatesMayBeTold({ outcome: e.outcome, meetingDate: e.meetingDate, asOf })) return null;
     return "tell_candidates";
   }
 

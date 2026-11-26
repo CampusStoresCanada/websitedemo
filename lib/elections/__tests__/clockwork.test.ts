@@ -67,13 +67,25 @@ describe("dueStep — certification", () => {
 });
 
 describe("dueStep — where the clock stops", () => {
-  it("⛔ does NOT surface telling the candidates before the MEETING", () => {
+  it("⛔ does NOT surface telling a BALLOTED result before the MEETING", () => {
     // `buildMeetingSpine` blocks that press until the meeting has happened —
     // the members elect AT the meeting. An alert raised in November for a
     // January meeting is an obligation nobody is permitted to discharge, and it
     // would sit open for eight weeks.
+    const balloted = { status: "certified", outcome: "balloted" } as const;
+    expect(dueStep(e(balloted), "2026-12-20")).toBeNull();
+    expect(dueStep(e(balloted), "2027-01-20")).toBeNull();
+    // ⚠️ And with no outcome recorded at all, which is the cautious branch.
     expect(dueStep(e({ status: "certified" }), "2026-12-20")).toBeNull();
-    expect(dueStep(e({ status: "certified" }), "2027-01-20")).toBeNull();
+  });
+
+  it("⛔ DOES surface telling an ACCLAIMED slate before the meeting", () => {
+    // Mirrors the spine, which stopped blocking this press: nominees <= seats
+    // was settled when nominations closed, so the eight-week wait was for
+    // arithmetic nobody can change. See candidatesMayBeTold.
+    expect(dueStep(e({ status: "certified", outcome: "acclaimed" }), "2026-11-26")).toBe(
+      "tell_candidates"
+    );
   });
 
   it("⛔ stops at telling the candidates once the meeting HAS happened", () => {
@@ -82,8 +94,17 @@ describe("dueStep — where the clock stops", () => {
     expect(dueStep(e({ status: "certified" }), "2027-01-21")).toBe("tell_candidates");
   });
 
-  it("surfaces nothing when no meeting date is known", () => {
+  it("surfaces nothing when a BALLOTED result has no meeting date", () => {
     expect(dueStep(e({ status: "certified", meetingDate: null }), "2030-01-01")).toBeNull();
+  });
+
+  it("surfaces an acclaimed slate whatever the meeting date, because it does not depend on it", () => {
+    // Not an oversight: the acclaimed answer is arithmetic settled at the
+    // nomination close. An election with no meeting CONNECTED is still ignored
+    // — that is the meetingId guard below, and it is in setup, not late.
+    expect(
+      dueStep(e({ status: "certified", outcome: "acclaimed", meetingDate: null }), "2026-11-26")
+    ).toBe("tell_candidates");
   });
 
   it("has nothing left once the candidates have been told", () => {

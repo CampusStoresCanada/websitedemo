@@ -21,7 +21,10 @@
  * Pure. Callers supply the facts and the date.
  */
 
-import { BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM } from "@/lib/elections/schedule";
+import {
+  BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM,
+  candidatesMayBeTold,
+} from "@/lib/elections/schedule";
 import type { TimelineStage } from "@/lib/elections/timeline";
 
 function day(iso: string | null): string | null {
@@ -525,13 +528,19 @@ export function buildMeetingSpine(
     // 9 — The candidates, before the membership. A broadcast to every eligible
     // institution is the worst way to learn you were not elected.
     const candidatesTold = day(e.candidateResultsSentAt);
+    // ⛔ The one answer, shared with the clock. See candidatesMayBeTold.
+    const mayTell = candidatesMayBeTold({
+      outcome: e.outcome,
+      meetingDate: facts.meetingDate,
+      asOf: today,
+    });
     stages.push({
       key: "tell_candidates",
       label: "Tell the candidates",
       on: null,
       until: null,
       windowLabel: null,
-      state: candidatesTold ? "done" : e.certifiedAt && today >= facts.meetingDate ? "current" : "blocked",
+      state: candidatesTold ? "done" : e.certifiedAt && mayTell ? "current" : "blocked",
       detail: candidatesTold
         ? `Told ${candidatesTold}.`
         : "Each candidate hears their own result before the membership does — a separate message to those elected and those not. Neither carries vote counts.",
@@ -542,7 +551,7 @@ export function buildMeetingSpine(
             label: "Tell the candidates",
             blockedBy: !e.certifiedAt
               ? "The result is not certified."
-              : today < facts.meetingDate
+              : !mayTell
                 ? `Not until the meeting on ${facts.meetingDate}.`
                 : null,
           },

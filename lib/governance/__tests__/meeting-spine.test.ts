@@ -172,6 +172,64 @@ describe("buildMeetingSpine — what is stopping each stage", () => {
     expect(announce.action?.blockedBy).toMatch(/Not until the meeting on 2027-01-21/);
   });
 
+  it("⛔ tells an ACCLAIMED slate at once, while still not announcing", () => {
+    // The pairing is the whole point of two stages: "each candidate hears
+    // their own result before the membership does" is empty if both wait for
+    // the same morning. Nominees <= seats was settled when nominations closed,
+    // so there is nothing left for the members to decide about who is in —
+    // only the Chair's announcement of it, which By-Law Part V S3(d) puts at
+    // the meeting.
+    const t = buildMeetingSpine(
+      facts({
+        election: election({
+          status: "certified",
+          outcome: "acclaimed",
+          certifiedAt: "2026-11-26T16:15:00Z",
+          sealed: false,
+        }),
+      }),
+      "2026-11-26"
+    );
+    const tell = t.find((s) => s.key === "tell_candidates")!;
+    expect(tell.state).toBe("current");
+    expect(tell.action?.blockedBy).toBeNull();
+
+    const announce = t.find((s) => s.key === "announce_result")!;
+    expect(announce.state).toBe("blocked");
+    expect(announce.action?.blockedBy).toMatch(/Not until the meeting on 2027-01-21/);
+  });
+
+  it("still will not tell a BALLOTED slate before the meeting", () => {
+    // The members elect at the meeting, and a returned ballot is not a result
+    // until the meeting receives it.
+    const t = buildMeetingSpine(
+      facts({
+        election: election({
+          status: "certified",
+          outcome: "balloted",
+          certifiedAt: "2026-12-10T00:00:00Z",
+          sealed: true,
+        }),
+      }),
+      "2026-12-20"
+    );
+    const tell = t.find((s) => s.key === "tell_candidates")!;
+    expect(tell.state).toBe("blocked");
+    expect(tell.action?.blockedBy).toMatch(/Not until the meeting on 2027-01-21/);
+  });
+
+  it("will not tell an acclaimed slate that is not certified", () => {
+    // Lifting the meeting gate does not lift the certification one: the terms
+    // are written BY certifying, so there is no result to tell before it.
+    const t = buildMeetingSpine(
+      facts({ election: election({ status: "nominations_closed", outcome: "acclaimed" }) }),
+      "2026-11-26"
+    );
+    const tell = t.find((s) => s.key === "tell_candidates")!;
+    expect(tell.state).toBe("blocked");
+    expect(tell.action?.blockedBy).toMatch(/not certified/);
+  });
+
 
 });
 
