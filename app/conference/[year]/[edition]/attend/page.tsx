@@ -27,10 +27,14 @@ export const metadata = { title: "Attend as a Non-Member" };
  */
 export default async function AttendPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ year: string; edition: string }>;
+  /** `offer`: a link naming a pass kept off this page (the NIPSA Wednesday rate). See getNonMemberDayPasses. */
+  searchParams: Promise<{ offer?: string }>;
 }) {
   const { year, edition } = await params;
+  const query = await searchParams;
   const viewer = await getViewerContext();
   const canPreviewUnpublished =
     viewer.viewerLevel === "admin" ||
@@ -58,7 +62,7 @@ export default async function AttendPage({
     .join(", ");
 
   const [dayPasses, exhibitors, legalResult] = await Promise.all([
-    getNonMemberDayPasses(conference.id),
+    getNonMemberDayPasses(conference.id, { linkedOfferId: query.offer ?? null }),
     getConfirmedExhibitors(conference.id),
     getRequiredLegalDocumentsPublic(conference.id, ["non_member"]),
   ]);
@@ -144,7 +148,12 @@ export default async function AttendPage({
               />
             </div>
             <div className="mt-8">
-              <ScheduleAtAGlance conferenceId={conference.id} conferenceStartDate={conference.start_date ?? ""} track="non_member" />
+              <ScheduleAtAGlance
+                conferenceId={conference.id}
+                conferenceStartDate={conference.start_date ?? ""}
+                track="non_member"
+                linkedOfferId={query.offer ?? null}
+              />
             </div>
           </>
         )}

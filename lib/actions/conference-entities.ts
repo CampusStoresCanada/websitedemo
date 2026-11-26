@@ -6,7 +6,7 @@ import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements,
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
-import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, namesBuyer, priceForTier } from "@/lib/conference/entity-pricing";
+import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, namesBuyer, nonMemberPassPayable, priceForTier } from "@/lib/conference/entity-pricing";
 import { accessibleThings, admittedDates, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
@@ -679,12 +679,23 @@ const NON_MEMBER_AUDIENCE_ENTITY_ID = "a9581ad9-5e15-4cc8-a53c-178fcf5ce910";
  * sees what a day actually grants (floor access, meals, evening event)
  * before paying, not just a name and a price.
  */
-export async function getNonMemberDayPasses(conferenceId: string): Promise<NonMemberDayPass[]> {
+export async function getNonMemberDayPasses(
+  conferenceId: string,
+  opts?: {
+    /**
+     * From an `/attend?offer=<id>` link. When it names a pass kept off the page
+     * (nonMemberPassPayable), that pass is shown ALONE: the rate the link was
+     * sent for, not the public ones beside it. A stale or guessed id shows the
+     * ordinary page.
+     */
+    linkedOfferId?: string | null;
+  }
+): Promise<NonMemberDayPass[]> {
   const db = createAdminClient();
   const [{ data: offerRows }, { data: entityRows }, { data: refRows }] = await Promise.all([
     db
       .from("conference_entity_refs")
-      .select("from_entity:conference_entities!conference_entity_refs_from_entity_id_fkey(id, name, is_for_sale, price_cents, tier_prices)")
+      .select("from_entity:conference_entities!conference_entity_refs_from_entity_id_fkey(id, name, is_for_sale, price_cents, tier_prices, attributes)")
       .eq("conference_id", conferenceId)
       .eq("role", "who")
       .eq("to_entity_id", NON_MEMBER_AUDIENCE_ENTITY_ID),
@@ -694,9 +705,16 @@ export async function getNonMemberDayPasses(conferenceId: string): Promise<NonMe
 
   const byId = indexById(buildEntityGraph(entityRows ?? [], refRows ?? []));
 
-  return (offerRows ?? [])
+  type PassRow = { id: string; name: string; is_for_sale: boolean; price_cents: number | null; tier_prices: unknown; attributes: unknown };
+  const passes = (offerRows ?? [])
     .map((r) => (Array.isArray(r.from_entity) ? r.from_entity[0] : r.from_entity))
-    .filter((e): e is { id: string; name: string; is_for_sale: boolean; price_cents: number | null; tier_prices: unknown } => !!e?.is_for_sale)
+    .filter((e): e is PassRow => !!e);
+
+  const linked = opts?.linkedOfferId
+    ? passes.find((e) => e.id === opts.linkedOfferId && !e.is_for_sale && nonMemberPassPayable(e))
+    : undefined;
+
+  return (linked ? [linked] : passes.filter((e) => e.is_for_sale))
     .map((e) => {
       const tierPrices = (e.tier_prices as Record<string, number> | null) ?? {};
       const priceCents = typeof tierPrices.non_member === "number" ? tierPrices.non_member : e.price_cents ?? 0;

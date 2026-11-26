@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canBuy, eligibleTiers, priceForTier, priceTable, availability } from "../entity-pricing";
+import { canBuy, eligibleTiers, priceForTier, priceTable, availability, nonMemberPassPayable, directPurchaseAllowed } from "../entity-pricing";
 import { indexById } from "../entity-graph";
 import type { BuildEntity, EntityRefView } from "../../actions/conference-entities";
 
@@ -108,5 +108,26 @@ describe("inventory / availability", () => {
     expect(availability(o, 48)).toMatchObject({ remaining: 2, soldOut: false });
     expect(availability(o, 50)).toMatchObject({ remaining: 0, soldOut: true });
     expect(availability(o, 55)).toMatchObject({ remaining: 0, soldOut: true });
+  });
+});
+
+describe("a non-member pass sold only by link (the NIPSA Wednesday rate)", () => {
+  const nipsa = { is_for_sale: false, attributes: { direct_purchase_only: true, direct_purchase_org_ids: [] } };
+
+  it("is payable though it is not listed", () => {
+    expect(nonMemberPassPayable(nipsa)).toBe(true);
+    expect(nonMemberPassPayable({ is_for_sale: true, attributes: {} })).toBe(true);
+  });
+
+  it("an unlisted pass without the flag is not payable", () => {
+    expect(nonMemberPassPayable({ is_for_sale: false, attributes: {} })).toBe(false);
+    // The string "true" has been stored once; it fails closed, same as isDirectPurchaseOnly.
+    expect(nonMemberPassPayable({ is_for_sale: false, attributes: { direct_purchase_only: "true" } })).toBe(false);
+  });
+
+  it("an empty buyer list keeps it off every partner storefront; an absent list would not", () => {
+    const partner = { id: "p1", type: "Vendor Partner" };
+    expect(directPurchaseAllowed(nipsa.attributes, partner)).toBe(false);
+    expect(directPurchaseAllowed({ direct_purchase_only: true }, partner)).toBe(true);
   });
 });

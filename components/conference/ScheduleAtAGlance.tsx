@@ -88,11 +88,14 @@ export default async function ScheduleAtAGlance({
   conferenceId,
   conferenceStartDate,
   track,
+  linkedOfferId,
 }: {
   conferenceId: string;
   /** On-site days only — pre-conference items (see DeadlinesTimeline) are excluded so nothing shows twice. */
   conferenceStartDate: string;
   track: ScheduleTrack | null;
+  /** non_member only: an `/attend?offer=` link, so the schedule shows the days that link sells. */
+  linkedOfferId?: string | null;
 }) {
   const timeline = await getConferenceScheduleTimeline(conferenceId, {
     viewerRole: "observer",
@@ -113,7 +116,7 @@ export default async function ScheduleAtAGlance({
     // Meals stay excluded here for now — a Day Pass's `includes` graph isn't
     // necessarily meal-accurate the way audience-tagged meals are elsewhere,
     // revisit if/when non-member meal inclusion needs the same treatment.
-    const passes = await getNonMemberDayPasses(conferenceId);
+    const passes = await getNonMemberDayPasses(conferenceId, { linkedOfferId });
     const idSet = new Set(passes.flatMap((p) => p.entityIds));
     visible = blocks.filter(
       (item) => item.kind !== "meal" && idSet.has(item.id),

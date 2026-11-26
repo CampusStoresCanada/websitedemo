@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
 import { getRequiredLegalDocumentsPublic } from "@/lib/actions/conference-legal";
+import { nonMemberPassPayable } from "@/lib/conference/entity-pricing";
 
 /**
  * "Pay first, no application" for a non-member buying a Day Pass — there is
@@ -47,12 +48,13 @@ export async function createProspectiveRegistrationCheckout(params: {
 
   const { data: offer } = await db
     .from("conference_entities")
-    .select("id, name, kind, is_for_sale, price_cents, tier_prices")
+    .select("id, name, kind, is_for_sale, price_cents, tier_prices, attributes")
     .eq("id", params.offerEntityId)
     .eq("conference_id", params.conferenceId)
     .maybeSingle();
 
-  if (!offer || offer.kind !== "registration" || !offer.is_for_sale) {
+  // A pass kept off the page (the NIPSA rate) is payable too: only its link shows it.
+  if (!offer || offer.kind !== "registration" || !nonMemberPassPayable(offer)) {
     return { success: false, error: "That registration isn't available." };
   }
 

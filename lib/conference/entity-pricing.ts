@@ -188,6 +188,30 @@ export function isDirectPurchaseOnly(attributes: Record<string, unknown> | null 
   return (attributes ?? {}).direct_purchase_only === true;
 }
 
+/**
+ * Can a signed-out non-member pay for this day pass?
+ *
+ * A listed pass, or one kept off the page as `direct_purchase_only`, which only
+ * a link naming it ever shows (`/attend?offer=<id>`). First used for the NIPSA
+ * Wednesday rate, 2026-11: $249 for NIPSA members against $299 for every other
+ * non-member. Nothing in our data says who belongs to NIPSA and these buyers
+ * have no account, so the link is the gate, the same way a Big Ideas Day link
+ * names its prospect.
+ *
+ * ⛔ ONE implementation, for the page that shows the pass and the checkout that
+ * sells it. The caller still checks the pass is for the Non-Member audience.
+ * ⚠️ A pass sold this way needs three things in the data, each closing a door:
+ *   - `is_for_sale = false`: off the public page.
+ *   - `sales_window` NULL: otherwise the sales-open cron sets is_for_sale back
+ *     to true within a minute.
+ *   - `direct_purchase_org_ids: []`: an ABSENT list opens a direct-purchase
+ *     offer to every partner (directPurchaseAllowed), so every partner
+ *     storefront would list it, greyed out by its Non-Member audience.
+ */
+export function nonMemberPassPayable(offer: { is_for_sale: boolean; attributes: unknown }): boolean {
+  return offer.is_for_sale || isDirectPurchaseOnly(offer.attributes as Record<string, unknown> | null);
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Funded registrations (CANCOLL)
 // ─────────────────────────────────────────────────────────────────

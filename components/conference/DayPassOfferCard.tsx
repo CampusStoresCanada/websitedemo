@@ -127,7 +127,8 @@ export default function DayPassOfferCard({
         dietaryRestrictions,
         acceptedDocumentTypes: [...accepted],
         successUrl: `${baseUrl}${conferencePath}/attend/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${baseUrl}${conferencePath}`,
+        // Back to the page they came from, so a link's rate (?offer=) survives a cancelled payment.
+        cancelUrl: window.location.href,
       });
       if (!result.success) {
         setFeedback({ text: result.error, ok: false });
