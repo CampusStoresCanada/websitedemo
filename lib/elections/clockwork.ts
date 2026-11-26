@@ -65,6 +65,12 @@ export type ClockworkElection = {
   nominationsCloseAt: string | null;
   ballotsCloseAt: string | null;
   meetingId: string | null;
+  /**
+   * The day the connected members' meeting sits. ⛔ Needed because telling the
+   * candidates is gated on the MEETING having happened, not merely on
+   * certification — the members elect at the meeting.
+   */
+  meetingDate: string | null;
   candidateResultsSentAt: string | null;
 };
 
@@ -95,7 +101,19 @@ export function dueStep(e: ClockworkElection, asOf: string): ClockworkStepName |
 
   if (e.status === "sealed") return "certify";
 
-  if (e.status === "certified" && !e.candidateResultsSentAt) return "tell_candidates";
+  // ⛔ Not merely "certified". `buildMeetingSpine` blocks this press until the
+  // meeting has happened — "Not until the meeting on <date>" — because the
+  // members elect AT the meeting. If the clock surfaced it earlier it would
+  // raise an obligation nobody is permitted to discharge, and for an AGM
+  // certified in November that alert would sit open until January.
+  //
+  // ⚠️ Mirrored from the spine rather than re-decided here. The two disagreeing
+  // about when a thing may be done is how a screen says "not yet" while an
+  // alert says "overdue".
+  if (e.status === "certified" && !e.candidateResultsSentAt) {
+    if (!e.meetingDate || asOf < e.meetingDate) return null;
+    return "tell_candidates";
+  }
 
   return null;
 }
@@ -130,7 +148,9 @@ export async function runElectionClockwork(opts?: {
 
   const { data, error } = await db
     .from("elections")
-    .select("id, slug, status, outcome, nominations_close_at, ballots_close_at, meeting_id, config")
+    .select(
+      "id, slug, status, outcome, nominations_close_at, ballots_close_at, meeting_id, config, board_meetings(meeting_date)"
+    )
     .order("cycle_year", { ascending: true });
 
   if (error) {
@@ -156,6 +176,10 @@ export async function runElectionClockwork(opts?: {
       nominationsCloseAt: (row.nominations_close_at as string | null) ?? null,
       ballotsCloseAt: (row.ballots_close_at as string | null) ?? null,
       meetingId: (row.meeting_id as string | null) ?? null,
+      meetingDate:
+        ((row.board_meetings as { meeting_date?: string } | null)?.meeting_date as
+          | string
+          | undefined) ?? null,
       candidateResultsSentAt:
         ((row.config as { candidateResultsSentAt?: string } | null)?.candidateResultsSentAt as
           | string

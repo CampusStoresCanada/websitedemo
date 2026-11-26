@@ -17,6 +17,7 @@ const base: ClockworkElection = {
   nominationsCloseAt: "2026-10-23",
   ballotsCloseAt: "2026-12-07",
   meetingId: "m1",
+  meetingDate: "2027-01-21",
   candidateResultsSentAt: null,
 };
 const e = (over: Partial<ClockworkElection> = {}): ClockworkElection => ({ ...base, ...over });
@@ -66,17 +67,30 @@ describe("dueStep — certification", () => {
 });
 
 describe("dueStep — where the clock stops", () => {
-  it("⛔ stops at telling the candidates, which puts mail in front of people", () => {
+  it("⛔ does NOT surface telling the candidates before the MEETING", () => {
+    // `buildMeetingSpine` blocks that press until the meeting has happened —
+    // the members elect AT the meeting. An alert raised in November for a
+    // January meeting is an obligation nobody is permitted to discharge, and it
+    // would sit open for eight weeks.
+    expect(dueStep(e({ status: "certified" }), "2026-12-20")).toBeNull();
+    expect(dueStep(e({ status: "certified" }), "2027-01-20")).toBeNull();
+  });
+
+  it("⛔ stops at telling the candidates once the meeting HAS happened", () => {
     // The clock surfaces it; a person sends it. An unattended send that fails
     // at 2am is a notice nobody knows is missing.
-    expect(dueStep(e({ status: "certified" }), "2026-12-20")).toBe("tell_candidates");
+    expect(dueStep(e({ status: "certified" }), "2027-01-21")).toBe("tell_candidates");
+  });
+
+  it("surfaces nothing when no meeting date is known", () => {
+    expect(dueStep(e({ status: "certified", meetingDate: null }), "2030-01-01")).toBeNull();
   });
 
   it("has nothing left once the candidates have been told", () => {
     expect(
       dueStep(
-        e({ status: "certified", candidateResultsSentAt: "2026-12-20T12:00:00Z" }),
-        "2026-12-21"
+        e({ status: "certified", candidateResultsSentAt: "2027-01-21T12:00:00Z" }),
+        "2027-01-22"
       )
     ).toBeNull();
   });
