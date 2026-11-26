@@ -118,14 +118,44 @@ describe("syncing a governance group at the press", () => {
     expect(out.missing).toEqual([]);
   });
 
-  it("⛔ calls it missing when the add returned 200 and the member is still not there", async () => {
-    const { db } = stubDb(["a@uni.ca", "ghost@uni.ca"]);
-    // Both reads say the same thing: the add changed nothing.
+  it("⛔ does NOT call a just-added member missing when the read back has not caught up", async () => {
+    // ⚠️ This test asserted the opposite until 2026-11-26, and the opposite is
+    // what the FIRST real press did: Google's Directory API is eventually
+    // consistent, the read-back a second later did not list her, and the run
+    // recorded "jackie.nguyen@norquest.ca did not land" — into last_run, where
+    // somebody would read it as fact. She was on the list the whole time.
+    //
+    // The read-back verifies the state this run did not touch. A write is
+    // confirmed by its own call returning, and checked by the NEXT run.
+    const { db } = stubDb(["a@uni.ca", "new@uni.ca"]);
+    // Both reads say the same thing: Google has not listed the add yet.
     listGroupMembers.mockResolvedValue([member("a@uni.ca")]);
     addGroupMember.mockResolvedValue(undefined);
 
     const out = await run(db);
-    expect(out.added).toEqual(["ghost@uni.ca"]);
+    expect(out.added).toEqual(["new@uni.ca"]);
+    expect(out.missing).toEqual([]);
+    const { describeOutcome } = await import("../governance-group");
+    expect(describeOutcome(out)).not.toContain("did not land");
+    // And it does not claim the add was confirmed either, because it was not.
+    expect(describeOutcome(out)).toContain("the next run confirms this one");
+  });
+
+  it("⛔ DOES call it missing on a later run, when nothing was written this time", async () => {
+    // The genuine add failure, and the only run that can see it: the address is
+    // wanted, it is not on the list, and this run wrote nothing — so there is
+    // no pending write for it to be waiting on.
+    const { db } = stubDb(["a@uni.ca", "ghost@uni.ca"]);
+    listGroupMembers.mockResolvedValue([member("a@uni.ca"), member("ghost@uni.ca")]);
+    addGroupMember.mockResolvedValue(undefined);
+    // First run adds ghost; it is already on the list by the second.
+    await run(db);
+
+    listGroupMembers.mockResolvedValue([member("a@uni.ca")]);
+    addGroupMember.mockReset();
+    addGroupMember.mockRejectedValue(new Error("resource not found"));
+    const out = await run(db);
+    expect(out.added).toEqual([]);
     expect(out.missing).toEqual(["ghost@uni.ca"]);
     const { describeOutcome } = await import("../governance-group");
     expect(describeOutcome(out)).toContain("did not land");
@@ -274,17 +304,22 @@ describe("taking the outgoing directors off", () => {
     expect(describeOutcome(out)).toContain("1 taken off");
   });
 
-  it("⛔ says they are still on the list when the delete returned 200 and changed nothing", async () => {
+  it("⛔ does NOT say still-on when the delete has not propagated yet", async () => {
+    // The removal mirror of the add case above, and wrong for the same reason:
+    // the listing taken immediately after a delete still shows the member.
+    // Reporting that as "the delete did nothing" is a false record — and on
+    // the removal side it is the one that would get somebody taken off twice.
     const { db } = stubDb(["stays@uni.ca"]);
-    // Both reads say the same thing: the delete did nothing.
     listGroupMembers.mockResolvedValue([member("stays@uni.ca"), member("left@uni.ca")]);
     removeGroupMember.mockResolvedValue(undefined);
 
     const out = await run(db, { remove: ["left@uni.ca"] });
     expect(out.removed).toEqual(["left@uni.ca"]);
-    expect(out.stillThere).toEqual(["left@uni.ca"]);
+    expect(out.stillThere).toEqual([]);
+    // Nor is it counted as drift off the back of the same stale listing.
+    expect(out.stale).toEqual([]);
     const { describeOutcome } = await import("../governance-group");
-    expect(describeOutcome(out)).toContain("still on the list");
+    expect(describeOutcome(out)).not.toContain("still on the list");
   });
 
   it("⛔ refuses to remove somebody who still holds the role, whatever the caller says", async () => {
@@ -341,8 +376,10 @@ describe("taking the outgoing directors off", () => {
       { email: "a@uni.ca", reason: "insufficient permission", action: "remove" },
     ]);
     expect(out.removed).toEqual(["b@uni.ca"]);
-    // The read back still shows both, so both are reported as still on.
-    expect(out.stillThere.sort()).toEqual(["a@uni.ca", "b@uni.ca"]);
+    // Only the one that THREW. b went through, and a listing Google has not
+    // updated yet is no evidence against it; a threw, so nothing is pending
+    // for it and the listing is the whole story.
+    expect(out.stillThere).toEqual(["a@uni.ca"]);
   });
 
   it("counts the removals onto the rule's last run", async () => {

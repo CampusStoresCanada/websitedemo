@@ -46,9 +46,16 @@ export type GroupSyncOutcome = {
   failed: { email: string; reason: string; action: "add" | "remove" }[];
   /** True only when the membership was read back after the writes. */
   verified: boolean;
-  /** Wanted, and still not in the group afterwards. The add failure that matters. */
+  /**
+   * Wanted, and still not in the group afterwards. The add failure that matters.
+   *
+   * ⛔ EXCLUDES anything written by this run: the Directory API is eventually
+   * consistent, so the read-back cannot see a write made a second earlier. It
+   * verifies the state this run did not touch; the next run verifies the
+   * writes. See the read-back in syncGovernanceGroupNow.
+   */
   missing: string[];
-  /** Named for removal, and still in the group afterwards. The remove failure that matters. */
+  /** Named for removal, and still in the group afterwards — excluding this run's own writes, as `missing` does. */
   stillThere: string[];
   /**
    * Named for removal and deliberately not removed, with the reason. A refusal
@@ -130,7 +137,14 @@ export function describeOutcome(o: GroupSyncOutcome): string {
   if (o.missing.length > 0) broke.push(`${o.missing.join(", ")} did not land`);
   if (o.stillThere.length > 0) broke.push(`${o.stillThere.join(", ")} is still on the list`);
   if (broke.length > 0) line += ` — but ${broke.join("; and ")}`;
-  else if (o.verified) line += `, confirmed by reading the group back`;
+  else if (o.verified)
+    // ⛔ Say what was actually checked. Google does not list a write this
+    // soon, so claiming a just-added address was "confirmed" would be the same
+    // false record in the opposite direction.
+    line +=
+      o.added.length + o.removed.length > 0
+        ? `. The rest of the list read back clean; Google lists a change a little after it is made, so the next run confirms this one`
+        : `, confirmed by reading the group back`;
 
   if (o.leftAlone.length > 0)
     line += `. Left alone: ${o.leftAlone.map((l) => `${l.email} (${l.reason})`).join(", ")}`;
@@ -264,11 +278,27 @@ export async function syncGovernanceGroupNow(
   }
 
   const nowPresent = new Set(after.map((m) => m.email));
-  const missing = wanted.filter((e) => !nowPresent.has(e));
+
+  // ⛔ The Directory API is EVENTUALLY CONSISTENT: an address added a moment
+  // ago is usually absent from the very next listing, and one just removed is
+  // usually still in it. Measured 2026-11-26 — the first real press reported
+  // "jackie.nguyen@norquest.ca did not land" and wrote that into last_run,
+  // while Google had in fact added her. A read taken this soon cannot verify a
+  // write we just made; it can only verify the state we did NOT touch.
+  //
+  // So a write is confirmed by its own call returning, and the next run —
+  // hourly, or the next press — is what checks it stuck. Without this, EVERY
+  // successful add is recorded as a failure, which is worse than recording
+  // nothing: it puts a false statement in the record and, once this raises
+  // alerts, cries wolf on the one line a person would otherwise trust.
+  const justWritten = new Set([...added, ...removed]);
+  const missing = wanted.filter((e) => !nowPresent.has(e) && !justWritten.has(e));
   // ⚠️ Only the ones actually attempted. Somebody deliberately left alone is
   // not a failed removal, and counting them here would make every run look broken.
   const spared = new Set(leftAlone.map((l) => l.email));
-  const stillThere = askedToGo.filter((e) => nowPresent.has(e) && !spared.has(e));
+  const stillThere = askedToGo.filter(
+    (e) => nowPresent.has(e) && !spared.has(e) && !justWritten.has(e)
+  );
 
   // ⛔ Counted, never acted on. An alias is not a person, a MANAGER or OWNER
   // was made one by hand, and a retained address is on the list on purpose —
@@ -279,6 +309,8 @@ export async function syncGovernanceGroupNow(
         !wanted.includes(m.email) &&
         !retain.has(m.email) &&
         !m.email.endsWith(ALIAS_DOMAIN) &&
+        // Same stale listing: one we just took off is not drift.
+        !justWritten.has(m.email) &&
         m.role === "MEMBER"
     )
     .map((m) => m.email);

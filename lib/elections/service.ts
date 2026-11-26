@@ -4865,18 +4865,45 @@ export async function notifyCandidates(
     const bodyKey = bodyRow?.key as string | undefined;
 
     if (bodyKey) {
+      const { raiseAlertIfNotOpen } = await import("@/lib/ops/alerts");
+
       const { syncGovernanceGroupNow, groupRulesForBody, describeOutcome } = await import(
         "@/lib/google/governance-group"
       );
       for (const rule of await groupRulesForBody(db, bodyKey)) {
         const outcome = await syncGovernanceGroupNow(db, rule, rule.groupEmail, { asOf: sentOn });
         doors.push(describeOutcome(outcome));
+
+        // ⛔ The same reason the Circle branch below raises one, and it was
+        // missing here: nothing renders `doors`, so a mailing list that did not
+        // take was silent in BOTH directions — the new director simply never
+        // receives board mail, and the first anyone hears of it is them saying
+        // they are not getting anything.
+        if (
+          outcome.error ||
+          outcome.missing.length > 0 ||
+          outcome.stillThere.length > 0 ||
+          outcome.failed.length > 0
+        ) {
+          await raiseAlertIfNotOpen({
+            ruleKey: `board_group_access_incomplete:${rule.groupEmail}`,
+            severity: outcome.missing.length > 0 || outcome.failed.length > 0 ? "critical" : "warning",
+            message: `${rule.label}: ${describeOutcome(outcome)}`,
+            details: {
+              groupEmail: rule.groupEmail,
+              missing: outcome.missing,
+              stillThere: outcome.stillThere,
+              failed: outcome.failed,
+              error: outcome.error,
+              asOf: outcome.asOf,
+            },
+          });
+        }
       }
 
       const { syncGovernanceSpaceNow, spaceRulesForBody, describeSpaceOutcome } = await import(
         "@/lib/circle/governance-space"
       );
-      const { raiseAlertIfNotOpen } = await import("@/lib/ops/alerts");
       for (const rule of await spaceRulesForBody(db, bodyKey)) {
         const outcome = await syncGovernanceSpaceNow(db, rule, { asOf: sentOn });
         doors.push(describeSpaceOutcome(outcome));
