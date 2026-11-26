@@ -81,6 +81,19 @@ export function wallMinutesInZone(iso: string, timeZone: string): number {
   return get("hour") * 60 + get("minute");
 }
 
+/**
+ * A room, said the way a delegate would recognise it.
+ *
+ * Sean Bell, 2026-11-26: "we refer to 'Dundas & Cawthra' running table
+ * conversations. The name doesn't mean anything to people." The hotel's name
+ * for a room is only useful once you are standing in the corridor, so what
+ * the room is for leads and the name follows in brackets.
+ */
+export function roomPhrase(kind: "tables" | "talks", name: string | null): string {
+  const what = kind === "tables" ? "the main room" : "the second room";
+  return name ? `${what} (${name})` : what;
+}
+
 export type BigIdeasDay = {
   sessionId: string;
   purpose: string | null;

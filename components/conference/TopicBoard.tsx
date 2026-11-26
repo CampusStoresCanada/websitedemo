@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { proposeTopic, saveTopicBallot, type TopicChip } from "@/lib/actions/conference-topics";
 import GreyBlur from "@/components/ui/GreyBlur";
+import { roomPhrase } from "@/lib/conference/big-ideas-day";
 
 /**
  * The Big Ideas Day topic board: everything proposed, and what this member
@@ -26,6 +27,7 @@ export default function TopicBoard({
   canVote,
   canPropose,
   proposeBlockedReason,
+  viewerIsPartner,
   deadlineLabel,
   tablesRoom,
   talksRoom,
@@ -40,6 +42,14 @@ export default function TopicBoard({
   canVote: boolean;
   canPropose: boolean;
   proposeBlockedReason: string | null;
+  /**
+   * ⛔ The $250 deposit is shown to a signed-in PARTNER and to nobody else.
+   * It sat in the presentations description and in a box directly above the
+   * member's "Put a topic forward" button, and read as the price of having an
+   * idea (Kari and Sean, 2026-11-26: "It makes it look like people giving
+   * ideas need to pay"). A member store has no use for it anywhere.
+   */
+  viewerIsPartner: boolean;
   /** e.g. "Friday, December 4" — the date pitches have to be in by. */
   deadlineLabel: string | null;
   /** Room names off the schedule. Null until the build workspace names one. */
@@ -67,13 +77,16 @@ export default function TopicBoard({
     {
       key: "presentations",
       heading: "Presentations",
-      // The whole difference, said where the choice is made (Steve approved
-      // this wording 2026-11-20). Formal vs informal, who proposes, what it
-      // costs, and what choosing one does.
+      // What it is, then what THIS reader does about it. A member votes; a
+      // partner pitches (and only the partner hears about the deposit).
       about:
-        `A partner presents for ${presentationMinutes} minutes${talksRoom ? ` in ${talksRoom}` : ""}, ` +
-        `then stays in the room for questions. Partners pitch these with a $250 deposit` +
-        `${deadlineLabel ? ` by ${deadlineLabel}` : ""}. Members vote on which ones run.`,
+        `A partner presents for ${presentationMinutes} minutes in ${roomPhrase("talks", talksRoom)}, ` +
+        `then stays in the room for questions. ` +
+        // The deposit is not here. A partner gets it once, in the note beside
+        // their own Pitch button; nobody else gets it at all.
+        (canVote ? `Vote for the ones you want to see.` : `Member stores vote for the ones they want to see.`),
+      // Whose list this is to add to.
+      proposer: "partner" as const,
       empty: "No presentations pitched yet.",
       signInMessage: "Sign in to pitch a presentation or vote on one.",
       topics: presentations,
@@ -82,9 +95,10 @@ export default function TopicBoard({
       key: "tables",
       heading: "Table conversations",
       about:
-        `An informal conversation around a table${tablesRoom ? ` in ${tablesRoom}` : ""}. ` +
+        `An informal conversation around a table in ${roomPhrase("tables", tablesRoom)}. ` +
         `No slides and no presenter. Any member can put one forward, and it costs nothing. ` +
-        `Pick the ones you'd sit at.`,
+        (canVote ? `Pick the ones you'd sit at.` : `Member stores pick the ones they'd sit at.`),
+      proposer: "member" as const,
       empty: "No table conversations put forward yet.",
       signInMessage: "Sign in to put a topic forward for discussion.",
       topics: tables,
@@ -171,11 +185,7 @@ export default function TopicBoard({
         </p>
       )}
 
-      {topics.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-          No topics yet. {canPropose ? "Put the first one forward." : ""}
-        </p>
-      ) : (
+      {
         groups.map((group) => (
         <div key={group.key} className="mt-6">
           <h3 className="text-sm font-semibold text-gray-900">{group.heading}</h3>
@@ -249,9 +259,43 @@ export default function TopicBoard({
               </GreyBlur>
             </div>
           ) : null}
+          {/*
+            The way in sits under the list it adds to. It used to sit at the
+            foot of the whole board, under the partners' deposit note, so a
+            member reached "Put a topic forward" straight after reading about
+            $250.
+          */}
+          {!signedOut && group.proposer === (viewerIsPartner ? "partner" : "member") ? (
+            <>
+              {group.proposer === "partner" && deadlineLabel ? (
+                <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
+                  Pitch a presentation with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
+                  stores vote the following week, we announce what is running straight after, and
+                  any deposit on a presentation that is not chosen comes back then.
+                </p>
+              ) : null}
+              {canPropose ? (
+                <ProposeTopicForm
+                  conferenceId={conferenceId}
+                  organizationId={organizationId}
+                  deadlineLabel={deadlineLabel}
+                  startOpen={openPropose}
+                  kind={group.proposer}
+                />
+              ) : proposeBlockedReason ? (
+                <p
+                  // The link lands here too, so a partner without a slot sees why.
+                  ref={openPropose ? (el) => el?.scrollIntoView({ block: "center" }) : undefined}
+                  className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                >
+                  {proposeBlockedReason}
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </div>
         ))
-      )}
+      }
 
       {canVote ? (
         <div className="mt-4 flex flex-wrap items-center gap-3 text-xs">
@@ -281,35 +325,6 @@ export default function TopicBoard({
         </div>
       ) : null}
 
-      {/*
-        The whole sequence, where someone is deciding whether to pitch.
-        A partner is handing over a deposit to enter this; "refunded if not
-        selected" without dates asks them to take the timing on trust, and the
-        invitation emails carry exactly these dates.
-      */}
-      {deadlineLabel ? (
-        <p className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
-          Pitch a presentation with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
-          stores vote the following week, we announce what is running straight after, and
-          any deposit on a presentation that is not chosen comes back then.
-        </p>
-      ) : null}
-
-      {canPropose ? (
-        <ProposeTopicForm
-          conferenceId={conferenceId}
-          organizationId={organizationId}
-          deadlineLabel={deadlineLabel}
-          startOpen={openPropose}
-        />
-      ) : proposeBlockedReason ? (
-        <p
-          // The link lands here too, so a partner without a slot sees why.
-          ref={openPropose ? (el) => el?.scrollIntoView({ block: "center" }) : undefined}
-          className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          {proposeBlockedReason}
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -320,6 +335,7 @@ function ProposeTopicForm({
   deadlineLabel,
   preview = false,
   startOpen = false,
+  kind = "member",
 }: {
   conferenceId: string;
   /** Null only in preview, where nothing can be submitted. */
@@ -329,6 +345,8 @@ function ProposeTopicForm({
   preview?: boolean;
   /** Open, scrolled to and focused on arrival: the deep link's landing. */
   startOpen?: boolean;
+  /** Which list it adds to, so the button says what it does. */
+  kind?: "member" | "partner";
 }) {
   const [open, setOpen] = useState(preview || startOpen);
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -359,7 +377,7 @@ function ProposeTopicForm({
         onClick={() => setOpen(true)}
         className="mt-6 rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
       >
-        Don&apos;t see yours? Put a topic forward
+        {kind === "partner" ? "Pitch a presentation" : "Don\u2019t see yours? Put a topic forward"}
       </button>
     );
   }

@@ -7,7 +7,7 @@ import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import { loadTopicBoard } from "@/lib/actions/conference-topics";
 import OfferCard from "@/components/conference/OfferCard";
 import TopicBoard from "@/components/conference/TopicBoard";
-import { PRESENTATION_MINUTES, clock, loadBigIdeasDay, loadPartnersInRoom, toMinutes } from "@/lib/conference/big-ideas-day";
+import { PRESENTATION_MINUTES, clock, loadBigIdeasDay, loadPartnersInRoom, roomPhrase, toMinutes } from "@/lib/conference/big-ideas-day";
 import { getNamedProspectOffers } from "@/lib/actions/prospective-booth-checkout";
 import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
@@ -329,7 +329,6 @@ export default async function BigIdeasDayPage({
           {[
             dayLabel,
             dayStart && dayEnd ? `${clock(toMinutes(dayStart))} to ${clock(toMinutes(dayEnd))}` : null,
-            [tablesRoom, talksRoom].filter(Boolean).join(" and ") || null,
           ]
             .filter(Boolean)
             .join(" \u00b7 ")}
@@ -347,9 +346,9 @@ export default async function BigIdeasDayPage({
           </h2>
           {tablesRoom && dayStart && dayEnd ? (
             <p className="mt-3 text-sm leading-relaxed text-gray-700">
-              <strong>Table conversations</strong> run in {tablesRoom} from{" "}
-              {clock(toMinutes(dayStart))} to {clock(toMinutes(dayEnd))}. Alongside them, in{" "}
-              {talksRoom}:
+              <strong>Table conversations</strong> run all day, {clock(toMinutes(dayStart))} to{" "}
+              {clock(toMinutes(dayEnd))}, in {roomPhrase("tables", tablesRoom)}. Alongside them,
+              in {roomPhrase("talks", talksRoom)}:
             </p>
           ) : null}
           <ul className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
@@ -370,30 +369,15 @@ export default async function BigIdeasDayPage({
         </section>
       ) : null}
 
-      {buyFirst ? takingPart : null}
-
-      {board?.success ? (
-        <TopicBoard
-          conferenceId={conference.id}
-          organizationId={buyerOrgId}
-          topics={board.data.topics}
-          hasBallot={board.data.hasBallot}
-          canVote={board.data.canVote}
-          canPropose={board.data.canPropose}
-          proposeBlockedReason={board.data.proposeBlockedReason}
-          deadlineLabel={PITCH_DEADLINE.label}
-          tablesRoom={tablesRoom}
-          talksRoom={talksRoom}
-          presentationMinutes={PRESENTATION_MINUTES}
-          signedOut={!auth}
-          openPropose={suggest}
-        />
-      ) : null}
-
+      {/*
+        Who is coming, straight after when and where. Sean Bell, 2026-11-26:
+        "We need to list the confirmed partners." They were listed, but under
+        both lists, where nobody deciding whether to come would reach them.
+      */}
       {partnersInRoom.length > 0 ? (
         <section className="mt-8">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-            Partners in the room so far
+            Partners confirmed so far
           </h2>
           <div className="mt-3 flex flex-wrap gap-2">
             {partnersInRoom.map((partner) => (
@@ -412,6 +396,27 @@ export default async function BigIdeasDayPage({
         </section>
       ) : null}
 
+      {buyFirst ? takingPart : null}
+
+      {board?.success ? (
+        <TopicBoard
+          conferenceId={conference.id}
+          organizationId={buyerOrgId}
+          topics={board.data.topics}
+          hasBallot={board.data.hasBallot}
+          canVote={board.data.canVote}
+          canPropose={board.data.canPropose}
+          proposeBlockedReason={board.data.proposeBlockedReason}
+          viewerIsPartner={board.data.viewerIsPartner}
+          deadlineLabel={PITCH_DEADLINE.label}
+          tablesRoom={tablesRoom}
+          talksRoom={talksRoom}
+          presentationMinutes={PRESENTATION_MINUTES}
+          signedOut={!auth}
+          openPropose={suggest}
+        />
+      ) : null}
+
       {buyFirst ? null : takingPart}
 
       {/*
@@ -427,12 +432,12 @@ export default async function BigIdeasDayPage({
         </p>
         <ul className="mt-3 space-y-2 text-sm leading-relaxed text-gray-700">
           <li>
-            {tablesRoom ? <strong>{tablesRoom}</strong> : "The main room"} runs table
+            <strong>{roomPhrase("tables", tablesRoom).replace(/^t/, "T")}</strong> runs table
             conversations that members put forward in advance. Pull up a chair at whichever
             table you want, and move when the conversation stops being useful to you.
           </li>
           <li>
-            {talksRoom ? <strong>{talksRoom}</strong> : "A second room"} runs{" "}
+            <strong>{roomPhrase("talks", talksRoom).replace(/^t/, "T")}</strong> runs{" "}
             {PRESENTATION_MINUTES}-minute presentations from partners. You can drift between
             the two rooms all day.
           </li>

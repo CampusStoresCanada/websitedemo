@@ -61,6 +61,11 @@ export type TopicBoardView = {
   canPropose: boolean;
   /** Set when a partner has not bought a slot, so the page can say why. */
   proposeBlockedReason: string | null;
+  /**
+   * The viewer is signed in for a partner. The deposit, its deadline and the
+   * refund are a partner's business: nobody else is shown them.
+   */
+  viewerIsPartner: boolean;
 };
 
 /** A partner's pitch is a presentation; anyone else's is a table conversation. */
@@ -193,6 +198,7 @@ export async function loadTopicBoard(
       canVote: Boolean(userId && isMember),
       canPropose,
       proposeBlockedReason,
+      viewerIsPartner: Boolean(userId && isPartner),
     },
   };
 }
