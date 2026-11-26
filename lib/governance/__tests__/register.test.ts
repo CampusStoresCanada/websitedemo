@@ -167,16 +167,33 @@ describe("outgoing — kept on after the term ends", () => {
   });
 });
 
-describe("the mailing list asks the access question, not the seat question", () => {
-  it("the group sync filters on hasBoardAccessOn", () => {
-    const sync = readFileSync("lib/google/governance-group.ts", "utf8");
-    expect(sync).toContain("hasBoardAccessOn");
-    expect(sync).not.toContain("holdsOn(");
+describe("every door asks the access question, not the seat question", () => {
+  // ⛔ The filter MOVED to lib/governance/role-access-holders.ts when Circle
+  // spaces became a second destination for a governance_role rule. One answer,
+  // shared: a second copy is how the mailing list and the board spaces would
+  // come to disagree about who is on the board, silently, between AGMs.
+  const HOLDERS = "lib/governance/role-access-holders.ts";
+
+  it("the shared holder reader filters on hasBoardAccessOn, not holdsOn", () => {
+    const src = readFileSync(HOLDERS, "utf8");
+    expect(src).toContain("hasBoardAccessOn");
+    expect(src).not.toContain("holdsOn(");
+  });
+
+  it("⛔ neither destination asks the question for itself", () => {
+    // If either of these starts filtering on its own again, the two doors can
+    // drift apart — which is exactly what this file is here to prevent.
+    for (const door of ["lib/google/governance-group.ts", "lib/circle/governance-space.ts"]) {
+      const src = readFileSync(door, "utf8");
+      expect(src, door).toContain("roleAccessHolders");
+      expect(src, door).not.toContain("hasBoardAccessOn(");
+      expect(src, door).not.toContain("holdsOn(");
+    }
   });
 
   it("stopped expressing the window as a second hand-written query filter", () => {
-    const sync = readFileSync("lib/google/governance-group.ts", "utf8");
-    expect(sync).not.toContain('.lte("term_start", asOf)');
+    const src = readFileSync(HOLDERS, "utf8");
+    expect(src).not.toContain('.lte("term_start", asOf)');
   });
 });
 

@@ -237,8 +237,13 @@ export function validateRuleInput(
   };
 
   if (input.kind === "governance_role") {
-    if (destination !== "google_group")
-      return { ok: false, error: "A role rule keeps a Google group in step, not a Circle space." };
+    // ⛔ A role rule may now keep a CIRCLE SPACE in step as well as a Google
+    // group. The database has allowed it since 20261027210000 — the kind check
+    // lists governance_role and the destination check only asks for a space_id
+    // when the destination is circle_space — and this line was the only thing
+    // refusing it. Board membership is the same question ("who holds this role
+    // as at this date") with a different store, which is the whole reason these
+    // rules live in one table.
     const bodyKey = input.bodyKey?.trim();
     const roleKey = input.roleKey?.trim();
     // Refused rather than saved empty: a rule with no role matches nobody, and
@@ -264,6 +269,8 @@ export function validateRuleInput(
     };
   }
 
+  // A Google group is only ever fed by a role: a conference pass or a survey
+  // answer has no business on a mailing list.
   if (destination === "google_group")
     return { ok: false, error: "Only a role rule can keep a Google group in step." };
 

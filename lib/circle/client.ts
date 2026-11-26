@@ -344,6 +344,72 @@ export class CircleAdminClient {
     return ids;
   }
 
+  // ---- Space groups -------------------------------------------------------
+  //
+  // ⚠️ A space GROUP is not an access group. The group is the sidebar heading
+  // that holds a set of spaces; `is_hidden_from_non_members` on the Board of
+  // Directors group is true, so somebody in the two board spaces but not in the
+  // group cannot see either of them in their sidebar. Both are needed.
+
+  /**
+   * Add somebody to a space group.
+   *
+   * ⚠️ Circle's own contract: this adds them to the group AND to every space in
+   * it. That is why provisioning a board member is one call rather than three —
+   * but the caller still reads each space back, because a documented side
+   * effect is not evidence that it happened.
+   */
+  async addMemberToSpaceGroup(spaceGroupId: number, email: string): Promise<void> {
+    await this.request<void>("POST", "/space_group_members", {
+      body: { email, space_group_id: spaceGroupId },
+    });
+  }
+
+  async removeMemberFromSpaceGroup(spaceGroupId: number, email: string): Promise<void> {
+    await this.request<void>("DELETE", "/space_group_members", {
+      params: { email, space_group_id: spaceGroupId },
+    });
+  }
+
+  /**
+   * Community member ids in a space group.
+   *
+   * ⚠️ `status: "all"` for the same reason as `listSpaceMemberIds`: somebody who
+   * has never accepted their community invite is in the group as `inactive`, and
+   * reading only the active ones makes a reconciler re-add them every run until
+   * Circle starts answering 422.
+   */
+  async listSpaceGroupMemberIds(spaceGroupId: number): Promise<number[]> {
+    const ids: number[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.request<{
+        records: { community_member_id: number }[];
+        has_next_page: boolean;
+      }>("GET", "/space_group_members", {
+        params: { space_group_id: spaceGroupId, status: "all", per_page: 100, page },
+      });
+      const records = result.records ?? [];
+      for (const row of records) {
+        if (typeof row.community_member_id === "number") ids.push(row.community_member_id);
+      }
+      if (!result.has_next_page || records.length === 0) break;
+      page++;
+    }
+    return ids;
+  }
+
+  /** The spaces a group contains, so a caller can read each one back. */
+  async listSpaceIdsInGroup(spaceGroupId: number): Promise<number[]> {
+    const spaces = await this.listSpaces();
+    return spaces
+      .filter((sp) => {
+        const g = (sp as unknown as { space_group_id?: number; space_group?: { id?: number } });
+        return g.space_group_id === spaceGroupId || g.space_group?.id === spaceGroupId;
+      })
+      .map((sp) => sp.id);
+  }
+
   // ---- Access Groups ------------------------------------------------------
 
   async createAccessGroup(name: string): Promise<CircleAccessGroup> {

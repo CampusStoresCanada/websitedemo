@@ -147,12 +147,28 @@ describe("saving a rule from the form", () => {
     });
   });
 
-  it("refuses the two crossed pairings the form must never send", () => {
-    // A role rule pointed at a Circle space: nothing reads it there.
-    expect(validateRuleInput({ ...roleInput, destination: "circle_space", spaceId: 2917627 })).toEqual({
-      ok: false,
-      error: "A role rule keeps a Google group in step, not a Circle space.",
+  it("NOW ACCEPTS a role rule pointed at a Circle space", () => {
+    // ⛔ This used to be refused, and the reason given in the old test was
+    // "nothing reads it there" — which was true until
+    // lib/circle/governance-space.ts was written. The database always allowed
+    // the pairing; the validator was the only thing saying no.
+    const out = validateRuleInput({
+      ...roleInput,
+      destination: "circle_space",
+      spaceId: 1749439,
     });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.row.destination).toBe("circle_space");
+    expect(out.row.space_id).toBe(1749439);
+    expect(out.row.kind).toBe("governance_role");
+    expect(out.row.body_key).toBe(roleInput.bodyKey);
+    expect(out.row.role_key).toBe(roleInput.roleKey);
+    // ⛔ The Google target is cleared, not carried over: one row, one store.
+    expect(out.row.google_group_email).toBeNull();
+  });
+
+  it("still refuses a pass rule pointed at a group", () => {
     // A pass rule pointed at a group: the group sync only knows roles.
     expect(
       validateRuleInput({

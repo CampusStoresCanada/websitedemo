@@ -4767,7 +4767,22 @@ async function stampTransitionAccess(
 export async function notifyCandidates(
   slug: string,
   sentByProfileId: string
-): Promise<Result<{ elected: number; notElected: number; sent: number; failed: number; problems: string[] }>> {
+): Promise<
+  Result<{
+    elected: number;
+    notElected: number;
+    sent: number;
+    failed: number;
+    problems: string[];
+    /**
+     * One line per access destination brought into step — the Google group and
+     * each board Circle space — for the screen to show the person who pressed
+     * this. Declared here rather than left to inference so a caller can render
+     * it and the compiler checks it exists.
+     */
+    doors: string[];
+  }>
+> {
   const db = createAdminClient();
   const election = await getScheduledElection(slug);
   if (!election) return fail("That election does not exist.");
@@ -4829,10 +4844,92 @@ export async function notifyCandidates(
   // director until their term starts, and still does not count toward quorum.
   await stampTransitionAccess(db, slug, sentOn);
 
+  // ⛔ AND THE DOORS. Steve: "after notification we add them to all our spaces
+  // and meetings and whatnot." Stamping the window is what MAKES them a holder
+  // for access purposes; every destination that serves the role reads that same
+  // window, so this is the moment each one can be brought into step — and the
+  // moment a person is here to be told whether it worked.
+  //
+  // ⚠️ Until now ONLY `applyBoardTransition` — the override press for the
+  // exception — ran the Google group sync. So telling the winners granted the
+  // console role and nothing else: the mailing list and the board spaces both
+  // waited on somebody pressing the override, or on nobody. That is the gap
+  // this closes, and it was the same gap for Circle.
+  const doors: string[] = [];
+  try {
+    const { data: bodyRow } = await db
+      .from("governance_bodies")
+      .select("key")
+      .eq("id", election.bodyId)
+      .maybeSingle();
+    const bodyKey = bodyRow?.key as string | undefined;
+
+    if (bodyKey) {
+      const { syncGovernanceGroupNow, groupRulesForBody, describeOutcome } = await import(
+        "@/lib/google/governance-group"
+      );
+      for (const rule of await groupRulesForBody(db, bodyKey)) {
+        const outcome = await syncGovernanceGroupNow(db, rule, rule.groupEmail, { asOf: sentOn });
+        doors.push(describeOutcome(outcome));
+      }
+
+      const { syncGovernanceSpaceNow, spaceRulesForBody, describeSpaceOutcome } = await import(
+        "@/lib/circle/governance-space"
+      );
+      const { raiseAlertIfNotOpen } = await import("@/lib/ops/alerts");
+      for (const rule of await spaceRulesForBody(db, bodyKey)) {
+        const outcome = await syncGovernanceSpaceNow(db, rule, { asOf: sentOn });
+        doors.push(describeSpaceOutcome(outcome));
+
+        // ⛔ A door that did not open must not be silent. `doors` goes back to
+        // the caller, but nothing renders it yet, and the whole point of doing
+        // this at the press rather than on a schedule is that a failure reaches
+        // a person instead of a `last_run` column nobody opens. Until a screen
+        // shows it, an alert is the person.
+        //
+        // `stillMissing` is the serious one: Circle accepted the write and the
+        // read-back says they are not there.
+        if (outcome.problems.length > 0 || outcome.stillMissing.length > 0) {
+          await raiseAlertIfNotOpen({
+            ruleKey: `board_circle_access_incomplete:${rule.spaceId}`,
+            severity: outcome.stillMissing.length > 0 ? "critical" : "warning",
+            message: `${rule.label}: ${describeSpaceOutcome(outcome)}`,
+            details: {
+              spaceId: rule.spaceId,
+              spaceGroupId: outcome.spaceGroupId,
+              stillMissing: outcome.stillMissing,
+              noCircleAccount: outcome.noCircleAccount,
+              problems: outcome.problems,
+              asOf: outcome.asOf,
+            },
+          });
+        }
+
+        // Separate, and only a warning: moderator cannot be set through
+        // Circle's API at all, so this is a standing hand job rather than a
+        // failure of this sync.
+        if (outcome.moderatorByHand.length > 0) {
+          await raiseAlertIfNotOpen({
+            ruleKey: `board_circle_moderator_by_hand:${rule.spaceId}`,
+            severity: "warning",
+            message: `${rule.label}: make ${outcome.moderatorByHand.join(", ")} a moderator by hand — Circle's API has no update for a space member.`,
+            details: { spaceId: rule.spaceId, people: outcome.moderatorByHand },
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // ⛔ Never fails the send. The candidates have already been told — that is
+    // irreversible and it is the point of this function. A door that did not
+    // open is reported, loudly, as something still to do.
+    doors.push(`⚠️ access could not be brought into step: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   return ok({
     elected: outcomes.elected.length,
     notElected: outcomes.notElected.length,
     ...summary,
+    doors,
   });
 }
 

@@ -20,7 +20,7 @@
  * role" against today would answer a different question than the one on screen.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { hasBoardAccessOn } from "@/lib/governance/register";
+import { roleAccessHolders } from "@/lib/governance/role-access-holders";
 import {
   listGroupMembers,
   addGroupMember,
@@ -153,56 +153,20 @@ export async function syncGovernanceGroupNow(
   if (!workspaceConfigured())
     return emptyOutcome(groupEmail, rule.label, asOf, "Google Workspace is not configured here.");
 
-  const { data: body } = await db
-    .from("governance_bodies")
-    .select("id")
-    .eq("key", rule.bodyKey)
-    .maybeSingle();
-  if (!body)
-    return emptyOutcome(groupEmail, rule.label, asOf, `no governance body "${rule.bodyKey}"`);
-
-  // ⛔ ACCESS, not the seat. A mailing list is an operational door, so it asks
-  // `hasBoardAccessOn` — which brackets the term with the access window — and
-  // NOT `holdsOn`, which answers the governance question of who may vote and
-  // count toward quorum. Those differ at both ends of every cycle: an incoming
-  // director invited before their term starts, and an outgoing one kept on
-  // through the conference that follows the AGM. Keyed to the same predicate
-  // the board register screen uses, so the list and the screen can never
-  // disagree about who should be reachable.
-  //
-  // ⚠️ Filtered in JS rather than in the query on purpose. The rule is
-  // `coalesce(access_from, term_start) <= asOf`, which PostgREST cannot express
-  // without a view, and duplicating it as a second hand-written filter is
-  // exactly how the two drift apart. The table is 56 rows.
-  const { data: rows } = await db
-    .from("governance_role_assignments")
-    .select(
-      "person_contact_id, term_start, term_end, access_from, access_until, counts_toward_cap, contacts(email)"
-    )
-    .eq("body_id", body.id)
-    .eq("role_key", rule.roleKey);
-
-  const holders = (rows ?? []).filter((r) =>
-    hasBoardAccessOn(
-      {
-        termStart: r.term_start as string,
-        termEnd: r.term_end as string | null,
-        accessFrom: r.access_from as string | null,
-        accessUntil: r.access_until as string | null,
-        isNoServiceMarker:
-          !r.counts_toward_cap && !!r.term_end && r.term_end === r.term_start,
-      },
-      asOf
-    )
+  // ⛔ ONE answer for who holds this, shared with the Circle destination. The
+  // access-vs-seat reasoning and the asOf discipline moved to
+  // `roleAccessHolders` when Circle spaces became a second destination for the
+  // same rule; a second copy here is how the mailing list and the board spaces
+  // would come to disagree about who is on the board.
+  const { holders: holderRows, error: holdersError } = await roleAccessHolders(
+    db,
+    rule.bodyKey,
+    rule.roleKey,
+    asOf
   );
+  if (holdersError) return emptyOutcome(groupEmail, rule.label, asOf, holdersError);
 
-  const wanted = [
-    ...new Set(
-      holders
-        .map((h) => (h.contacts as { email?: string } | null)?.email?.toLowerCase())
-        .filter((e): e is string => Boolean(e))
-    ),
-  ];
+  const wanted = holderRows.map((h) => h.email);
 
   let before: { email: string; role: string }[];
   try {

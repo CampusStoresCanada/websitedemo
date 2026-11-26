@@ -445,7 +445,19 @@ export async function runConferenceCircleAccessSync(): Promise<{
     if (destination.kind === "google_group") continue;
     if (rule.kind === "conference_passes") conferenceRules.push(rule);
     else if (rule.kind === "survey_answer") surveyRules.push(rule);
-    else result.errors.push(`${row.label}: a governance_role rule needs a Google group destination`);
+    // ⛔ A governance_role rule is SKIPPED here, not an error, whichever
+    // destination it points at. It runs where the board changes — telling the
+    // winners — because the board turns over once a year: an hourly tick would
+    // be 8,760 calls to confirm nothing changed, and it would move the moment
+    // of truth away from the press. See lib/circle/governance-space.ts and
+    // lib/google/governance-group.ts.
+    //
+    // ⚠️ This used to push an error saying a governance_role rule "needs a
+    // Google group destination". The query above selects every `circle_space`
+    // rule, so the two board-space rules would have made this job report two
+    // errors an hour, for ever, about rules that are working.
+    else if (rule.kind !== "governance_role")
+      result.errors.push(`${row.label}: unknown rule kind`);
   }
 
   if (!client) {
