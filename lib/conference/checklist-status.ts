@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DERIVED_FROM_FIELD, personIdsInTaskScope, type PersonalTaskState } from "./checklist-tasks";
+import { DERIVED_FROM_FIELD, personIdsInTaskScope, taskIsScoped, type PersonalTaskState } from "./checklist-tasks";
 import { loadBursaryDesignatedSeatIds } from "./bursary-access";
 import { PERSON_CHECKS_BULK } from "./checklist-checks";
 import { loadSeatHoldings } from "./seats";
@@ -364,17 +364,19 @@ export async function loadPersonTaskStatus(
   );
 
   const scopedPeople = new Map<string, Set<string>>();
-  if (tasks.some((t) => t.scopeEntityId || t.scopeEntityKind || t.scopeDesignation)) {
+  const scopeOf = (t: (typeof tasks)[number]) => ({
+    scope_entity_id: t.scopeEntityId,
+    scope_entity_kind: t.scopeEntityKind,
+    scope_designation: t.scopeDesignation,
+    check_type: t.checkType,
+  });
+  if (tasks.some((t) => taskIsScoped(scopeOf(t)))) {
     const [{ seats, entitiesById }, designated] = await Promise.all([
       loadSeatHoldings(db, { conferenceId, assigned: true }),
       tasks.some((t) => t.scopeDesignation) ? loadBursaryDesignatedSeatIds(db, conferenceId) : undefined,
     ]);
     for (const task of tasks) {
-      const askedOf = personIdsInTaskScope(seats, entitiesById, {
-        scope_entity_id: task.scopeEntityId,
-        scope_entity_kind: task.scopeEntityKind,
-        scope_designation: task.scopeDesignation,
-      }, designated);
+      const askedOf = personIdsInTaskScope(seats, entitiesById, scopeOf(task), designated);
       if (askedOf) scopedPeople.set(task.id, askedOf);
     }
   }

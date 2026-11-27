@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({}) }));
 
@@ -117,7 +118,7 @@ describe("personIdsInTaskScope", async () => {
     [FUNDED, { kind: "registration", attributes: { funded_by: "cancoll", funds_offer_id: FULL } }],
     [FULL, { kind: "registration" }],
     ["booth-109", { kind: "booth" }],
-  ]);
+  ]) as unknown as Map<string, BuildEntity>;
   const seats = [
     { seatId: "s-funded", entityId: FUNDED, holderPersonId: "jackie" },
     { seatId: "s-full", entityId: FULL, holderPersonId: "colleague" },
@@ -158,6 +159,29 @@ describe("personIdsInTaskScope", async () => {
 
   it("asks nobody when the designated seats were not loaded", () => {
     expect(personIdsInTaskScope(seats, entities, { scope_designation: "bursary_delegate" })).toEqual(new Set());
+  });
+
+  /**
+   * "Who do you want to meet" is for people in the meetings. A Wednesday-only
+   * pass (the NIPSA rate, 2026-11) is in none, so its holder is not asked,
+   * even though the task names no scope of its own.
+   */
+  it("asks for meeting choices only of a registration that takes meetings", () => {
+    const entity = (id: string, kind: string, to?: string) =>
+      [id, { id, kind, name: id, attributes: {}, refs: to ? [{ role: "involved_in", toEntityId: to, quantity: null }] : [] }] as const;
+    const graph = new Map([
+      entity("full", "registration", "block"),
+      entity("wednesday", "registration"),
+      entity("social", "event", "block"),
+      entity("block", "meeting"),
+    ]) as unknown as Map<string, BuildEntity>;
+    const held = [
+      { seatId: "a", entityId: "full", holderPersonId: "delegate" },
+      { seatId: "b", entityId: "wednesday", holderPersonId: "nipsa" },
+      { seatId: "c", entityId: "social", holderPersonId: "guest" },
+    ];
+    expect(personIdsInTaskScope(held, graph, { check_type: "top_choices_declared" })).toEqual(new Set(["delegate"]));
+    expect(personIdsInTaskScope(held, graph, { check_type: "self_reported" })).toBeNull();
   });
 
   it("scopes by kind, and ANDs a kind with a named thing", () => {

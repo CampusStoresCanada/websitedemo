@@ -67,10 +67,19 @@ const row = {
 };
 
 /** The table reads and writes the mint makes, in order, for a buyer the fake can answer. */
-function dbFor(opts: { existingOrg?: { id: string; type: string } | null; profileId?: string | null } = {}) {
+function dbFor(
+  opts: {
+    existingOrg?: { id: string; type: string } | null;
+    profileId?: string | null;
+    /** Already an attendee at this conference: the lookup finds them, and no insert follows. */
+    existingPerson?: { id: string } | null;
+  } = {}
+) {
   const queues: Record<string, QueryResult[]> = {
     organizations: [{ data: opts.existingOrg ?? null }, { data: null }],
-    conference_people: [{ data: { id: "person-1" } }, { data: null }],
+    conference_people: opts.existingPerson
+      ? [{ data: opts.existingPerson }, { data: null }]
+      : [{ data: null }, { data: { id: "person-1" } }, { data: null }],
     entity_balances: [{ data: [{ id: "bal-1" }] }],
     entity_balance_seats: [{ data: null }],
     prospective_registration_payments: [{ data: null }],
@@ -183,6 +192,26 @@ describe("a paid non-member day pass", () => {
     expect(insert?.args[0]).toMatchObject({ type: "Non-Member", name: "St. Example School" });
     expect((insert?.args[0] as { slug: string }).slug).toMatch(/^st-example-school-\d+$/);
     expect(peopleOnAddressMock).not.toHaveBeenCalledWith(expect.anything(), "member-org", expect.anything(), expect.anything());
+  });
+
+  it("a second day for the same person joins their attendee row, never a second one", async () => {
+    peopleOnAddressMock.mockResolvedValue({ sameName: { contactId: "pat-already" }, others: [] });
+    const fake = dbFor({ existingOrg: { id: "org-existing", type: "Non-Member" }, existingPerson: { id: "person-7" } });
+    await mintProspectiveRegistration(fake.db as never, row);
+
+    const people = callsFor(fake.recorded, "conference_people");
+    expect(people.some((c) => c.method === "insert")).toBe(false);
+    expect(people.find((c) => c.method === "eq" && c.args[0] === "contact_id")?.args[1]).toBe("pat-already");
+    const seats = callsFor(fake.recorded, "entity_balance_seats").find((c) => c.method === "update");
+    expect(seats?.args[0]).toEqual({ holder_person_id: "person-7" });
+    expect(recordOwedAgreementsMock).toHaveBeenCalledWith(expect.objectContaining({ personId: "person-7" }));
+  });
+
+  it("a first-time buyer gets exactly one attendee row", async () => {
+    const fake = dbFor();
+    await mintProspectiveRegistration(fake.db as never, row);
+    const people = callsFor(fake.recorded, "conference_people");
+    expect(people.filter((c) => c.method === "insert")).toHaveLength(1);
   });
 
   it("a failed login never costs them the seat", async () => {

@@ -516,29 +516,51 @@ export async function mintProspectiveRegistration(
     mayHoldAccess = onAddress.others.length === 0 && created.addressIsNew;
   }
 
-  const { data: person, error: personError } = await db
-    .from("conference_people")
-    .insert({
-      conference_id: row.conference_id,
-      organization_id: orgId,
-      // Both point at contacts; contact_id is the one with a foreign key (see
-      // loadSeatHoldings), canonical_person_id is what agreements read.
-      contact_id: contactId,
-      canonical_person_id: contactId,
-      person_kind: "delegate",
-      source_type: "manual",
-      source_id: crypto.randomUUID(),
-      display_name: attendeeName,
-      contact_email: row.email,
-      mobile_phone: row.phone,
-      role_title: row.job_title,
-      dietary_restrictions: row.dietary_restrictions,
-      assignment_status: "assigned",
-      assigned_at: new Date().toISOString(),
-      admin_notes: "Self-registered via public non-member Day Pass checkout.",
-    })
-    .select("id")
-    .single();
+  /*
+    ⛔ The same person buying a second day is ONE attendee. Every checkout
+    used to insert a fresh row, which nothing could catch before contact_id was
+    written: a NIPSA Wednesday buyer adding Thursday on the public page (the
+    only place a non-member can, see MyConferenceSection) would get two rows,
+    two badges and two lines at the desk. In practice only a contact matched by
+    name (peopleOnAddress) can already be here.
+  */
+  const { data: existingPerson } = contactId
+    ? await db
+        .from("conference_people")
+        .select("id")
+        .eq("conference_id", row.conference_id)
+        .eq("contact_id", contactId)
+        .neq("assignment_status", "canceled")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+
+  const { data: person, error: personError } = existingPerson
+    ? { data: existingPerson as { id: string }, error: null }
+    : await db
+        .from("conference_people")
+        .insert({
+          conference_id: row.conference_id,
+          organization_id: orgId,
+          // Both point at contacts; contact_id is the one with a foreign key (see
+          // loadSeatHoldings), canonical_person_id is what agreements read.
+          contact_id: contactId,
+          canonical_person_id: contactId,
+          person_kind: "delegate",
+          source_type: "manual",
+          source_id: crypto.randomUUID(),
+          display_name: attendeeName,
+          contact_email: row.email,
+          mobile_phone: row.phone,
+          role_title: row.job_title,
+          dietary_restrictions: row.dietary_restrictions,
+          assignment_status: "assigned",
+          assigned_at: new Date().toISOString(),
+          admin_notes: "Self-registered via public non-member Day Pass checkout.",
+        })
+        .select("id")
+        .single();
   if (personError || !person) {
     console.error(`mintProspectiveRegistration: failed to create person for payment ${row.id}: ${personError?.message}`);
     return;

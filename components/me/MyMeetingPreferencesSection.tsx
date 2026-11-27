@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getMyMeetingPreferences } from "@/lib/actions/conference-meeting-preferences";
 import MyTopChoicesEditor from "@/components/me/MyTopChoicesEditor";
 import MyBlackoutEditor from "@/components/me/MyBlackoutEditor";
+import { loadSeatHoldings, takesMeetings } from "@/lib/conference/seats";
 
 /**
  * A delegate's own meeting preferences, on their own page — who they want to
@@ -24,6 +25,11 @@ import MyBlackoutEditor from "@/components/me/MyBlackoutEditor";
  * Returns null unless the viewer is actually registered — an empty "who do you
  * want to meet" block on the profile of someone who is not going is noise, and
  * invites preferences that can never be honoured.
+ *
+ * ⛔ Registered is not enough: their pass has to be in the meetings. A
+ * Wednesday-only attendee (the NIPSA rate, 2026-11) is going and has no
+ * meetings, so the same reasoning applies. `takesMeetings` is the scheduler's
+ * own test, and the checklist task asks the same people (personIdsInTaskScope).
  */
 export default async function MyMeetingPreferencesSection() {
   const auth = await requireAuthenticated();
@@ -32,14 +38,21 @@ export default async function MyMeetingPreferencesSection() {
   const db = createAdminClient();
   const { data: people } = await db
     .from("conference_people")
-    .select("conference_id")
+    .select("id, conference_id")
     .eq("user_id", auth.ctx.userId)
     .neq("assignment_status", "canceled")
     .order("updated_at", { ascending: false })
     .limit(1);
 
-  const conferenceId = (people ?? [])[0]?.conference_id as string | undefined;
-  if (!conferenceId) return null;
+  const person = (people ?? [])[0] as { id: string; conference_id: string } | undefined;
+  if (!person) return null;
+  const conferenceId = person.conference_id;
+
+  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId, holderPersonId: person.id });
+  const inMeetings = seats.some(
+    (s) => s.entityKind === "registration" && takesMeetings(s.entityId, entitiesById)
+  );
+  if (!inMeetings) return null;
 
   const result = await getMyMeetingPreferences(conferenceId);
   if (!result.success || !result.data) return null;

@@ -13,6 +13,7 @@ import AskCscBox from "@/components/me/AskCscBox";
 import MyShippingCard from "@/components/me/MyShippingCard";
 import { conferenceToday } from "@/lib/conference/desk-staff";
 import { loadDeskShipments, loadShipper, loadShippingOrigin, shippingOpen } from "@/lib/conference/shipping";
+import { audienceForOrg } from "@/lib/conference/legal-acceptance";
 
 /**
  * The attendee's own conference to-dos, on the page they already use.
@@ -89,7 +90,18 @@ export default async function MyConferenceSection() {
   let buyable: ConferenceOffer[] = [];
   let freeSeatsByEntity = new Map<string, number>();
 
-  if (isConferenceOnSale((conference?.status ?? "draft") as ConferenceStatus)) {
+  /*
+    ⛔ No storefront for a Non-Member organisation. Everything sold here goes on
+    the organisation's invoice, and a non-member day-pass buyer's school has no
+    invoice: they paid by card on the public page, which is also where a second
+    day is bought (the mint adds it to the same attendee). The cart has never
+    billed a Non-Member organisation, and this card offered them back the very
+    Wednesday pass they hold (NIPSA, 2026-11). Tier through audienceForOrg, the
+    one org-to-tier reader, never a type string.
+  */
+  const [buyerTier] = await audienceForOrg(db, person.organization_id);
+
+  if (isConferenceOnSale((conference?.status ?? "draft") as ConferenceStatus) && buyerTier !== "non_member") {
     // ⛔ listConferenceOffers authorises on `activeOrgIds` — every organisation
     // the viewer belongs to, at ANY role. That is deliberate and it is what
     // makes this work: the fifth person on a booth is rarely the org admin, and

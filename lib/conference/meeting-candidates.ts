@@ -1,8 +1,6 @@
 import type { DelegateProfile, ExhibitorProfile } from "@/lib/scheduler/types";
-import { loadSeatHoldings, type SeatHolding } from "./seats";
+import { loadSeatHoldings, takesMeetings, type SeatHolding } from "./seats";
 import { offerRequiresOwnershipOfEntityIds } from "./ownership-gate";
-import { resolveAccess } from "./entity-commerce";
-import { grantTypesForKinds } from "./entity-obligations";
 import {
   loadBlackoutListsByOrg,
   loadBlackoutListsByContact,
@@ -319,10 +317,7 @@ export async function loadMeetingCandidates(
   const participatesInMeetings = (entityId: string): boolean => {
     const cached = meetingParticipationByTypeId.get(entityId);
     if (cached !== undefined) return cached;
-    const reachableKinds = [...resolveAccess([entityId], entitiesById)]
-      .map((id) => entitiesById.get(id)?.kind)
-      .filter((kind): kind is string => Boolean(kind));
-    const participates = grantTypesForKinds(reachableKinds).includes("meeting_access");
+    const participates = takesMeetings(entityId, entitiesById);
     meetingParticipationByTypeId.set(entityId, participates);
     return participates;
   };

@@ -29,7 +29,8 @@ import { isStaffCheckType, type CheckType } from "./checklist-check-types";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "../constants/conference";
-import { loadSeatHoldings, type SeatHolding } from "./seats";
+import { loadSeatHoldings, takesMeetings, type SeatHolding } from "./seats";
+import type { BuildEntity } from "@/lib/actions/conference-entities";
 import { loadBursaryDesignatedSeatIds } from "./bursary-access";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -84,6 +85,35 @@ export type PersonalTask = {
   document?: { versionId: string; title: string; content: string } | null;
 };
 
+/** The columns that narrow who a person task is asked of. */
+export type TaskScope = {
+  scope_entity_id?: string | null;
+  scope_entity_kind?: string | null;
+  scope_designation?: string | null;
+  check_type?: string | null;
+};
+
+/**
+ * "Who do you want to meet" is asked only of people in the meetings, whatever
+ * scope the task was given.
+ *
+ * The question is about the meetings, so the check type says who it is for. A
+ * Wednesday-only pass is in no meeting (the NIPSA rate, 2026-11, and every
+ * other Wednesday or Thursday pass), so asking that person for choices invites
+ * preferences the scheduler will never read. Stated here rather than as a scope
+ * an admin has to remember to set on every such task.
+ */
+function asksForMeetingChoices(scope: TaskScope): boolean {
+  return scope.check_type === "top_choices_declared";
+}
+
+/** Is this task asked of fewer than everyone? Callers load seats only when it is. */
+export function taskIsScoped(scope: TaskScope): boolean {
+  return Boolean(
+    scope.scope_entity_id || scope.scope_entity_kind || scope.scope_designation || asksForMeetingChoices(scope)
+  );
+}
+
 /**
  * Which conference_people a scoped person task is asked of, or null when the
  * task names no scope (it is asked of everyone, as person tasks always were).
@@ -100,18 +130,25 @@ export type PersonalTask = {
  */
 export function personIdsInTaskScope(
   seats: ReadonlyArray<Pick<SeatHolding, "seatId" | "entityId" | "holderPersonId">>,
-  entitiesById: ReadonlyMap<string, { kind: string; attributes?: Record<string, unknown> | null }>,
-  scope: { scope_entity_id?: string | null; scope_entity_kind?: string | null; scope_designation?: string | null },
+  entitiesById: Map<string, BuildEntity>,
+  scope: TaskScope,
   /**
    * The seats travel bursary requests point at (loadBursaryDesignatedSeatIds).
    * Needed only for a `bursary_delegate` task; without it nobody is asked.
    */
   designatedSeatIds?: ReadonlySet<string>
 ): Set<string> | null {
-  if (!scope.scope_entity_id && !scope.scope_entity_kind && !scope.scope_designation) return null;
+  if (!taskIsScoped(scope)) return null;
+  const meetingsOnly = asksForMeetingChoices(scope);
   const inScope = new Set<string>();
   for (const seat of seats) {
     if (!seat.holderPersonId) continue;
+    if (
+      meetingsOnly &&
+      !(entitiesById.get(seat.entityId)?.kind === "registration" && takesMeetings(seat.entityId, entitiesById))
+    ) {
+      continue;
+    }
     if (scope.scope_entity_id && seat.entityId !== scope.scope_entity_id) continue;
     if (scope.scope_entity_kind && entitiesById.get(seat.entityId)?.kind !== scope.scope_entity_kind) continue;
     if (scope.scope_designation === "bursary_delegate") {
@@ -272,7 +309,7 @@ export async function loadPersonalTasks(
     (cl) => (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? []
   );
   // This person's own seats, read once, and only when some task is scoped.
-  const mySeats = allTasks.some((t) => t.audience === "person" && (t.scope_entity_id || t.scope_entity_kind || t.scope_designation))
+  const mySeats = allTasks.some((t) => t.audience === "person" && taskIsScoped(t))
     ? await loadSeatHoldings(db, { conferenceId, holderPersonId: personId })
     : null;
   const designated = allTasks.some((t) => t.audience === "person" && t.active && t.scope_designation)

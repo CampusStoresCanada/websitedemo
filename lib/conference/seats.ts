@@ -1,5 +1,6 @@
 import { ENTITY_SELECT, buildEntityGraph } from "@/lib/conference/entity-rows";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
+import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
 import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /**
@@ -427,6 +428,26 @@ export async function insertSeat(
 export { buildEntityGraph, ENTITY_SELECT };
 
 /**
+ * Does holding this registration put somebody in the curated meetings?
+ *
+ * Yes when its access closure reaches an entity of kind `meeting`, which is
+ * what `meeting_access` means (ENTITY_KIND_TO_GRANT_TYPES). Today: Full
+ * Conference, Board, Tuesday Day Pass and Connected Exhibitor Staff. No
+ * Wednesday or Thursday pass, member or not.
+ *
+ * ⛔ ONE implementation, for the scheduler's candidate list, the seat a
+ * person's meetings hang off, and who is asked to pick who they want to meet.
+ * If those three disagree, somebody is asked for choices the scheduler will
+ * never read, or scheduled without having been asked.
+ */
+export function takesMeetings(entityId: string, entitiesById: Map<string, BuildEntity>): boolean {
+  const reachableKinds = [...resolveAccess([entityId], entitiesById)]
+    .map((id) => entitiesById.get(id)?.kind)
+    .filter((kind): kind is string => Boolean(kind));
+  return grantTypesForKinds(reachableKinds).includes("meeting_access");
+}
+
+/**
  * Which of a person's seats do their MEETINGS hang off?
  *
  * Not simply their first registration. A person can hold more than one: a CSC
@@ -446,11 +467,7 @@ export function pickMeetingSeat(
   entitiesById: Map<string, BuildEntity>
 ): SeatHolding | null {
   const registrations = seats.filter((s) => s.entityKind === "registration");
-  const inMeetings = registrations.find((s) =>
-    [...resolveAccess(new Set([s.entityId]), entitiesById)].some(
-      (id) => entitiesById.get(id)?.kind === "meeting"
-    )
-  );
+  const inMeetings = registrations.find((s) => takesMeetings(s.entityId, entitiesById));
   // None of their registrations is in the meetings — exhibitor staff on a
   // booth-only type, or CSC staff. Fall back so nothing else shifts.
   return inMeetings ?? registrations[0] ?? null;

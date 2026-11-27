@@ -18,6 +18,7 @@ import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 import { loginWithNext } from "@/lib/auth/login-redirect";
 import { inForceOrgLinkFilter } from "@/lib/auth/org-link";
 import { deskConferencesFor } from "@/lib/conference/desk-staff";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 
 /**
  * Never cached. This page shows a person their own conference answers, and a
@@ -36,6 +37,18 @@ const ORG_ROLE_LABELS: Record<string, string> = {
   member:    "Member",
   partner:   "Partner",
 };
+
+/**
+ * The role a person holds at an organisation, as they read it, or null for none.
+ *
+ * ⛔ None on a Non-Member organisation. A paid non-member day pass links the
+ * buyer to their school at role `member`, the ordinary staff role, and
+ * "St. Example School · Member" reads as a CSC membership they do not have.
+ */
+function orgRoleLabel(role: string, orgType: string | null | undefined): string | null {
+  if (orgType === ORG_TYPE.nonMember) return null;
+  return ORG_ROLE_LABELS[role] ?? role;
+}
 
 export default async function MyAccountPage() {
   const auth = await requireAuthenticated();
@@ -260,8 +273,12 @@ export default async function MyAccountPage() {
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                   >
                     {org.organization?.name}
-                    <span className="text-gray-300 mx-0.5">·</span>
-                    {ORG_ROLE_LABELS[org.role] ?? org.role}
+                    {orgRoleLabel(org.role, org.organization?.type) ? (
+                      <>
+                        <span className="text-gray-300 mx-0.5">·</span>
+                        {orgRoleLabel(org.role, org.organization?.type)}
+                      </>
+                    ) : null}
                   </Link>
                 ))}
               </div>
@@ -338,8 +355,9 @@ export default async function MyAccountPage() {
               <div>
                 <p className="text-sm font-semibold text-[#1A1A1A]">{org.organization?.name}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {ORG_ROLE_LABELS[org.role] ?? org.role}
-                  {org.organization?.type ? ` · ${org.organization.type}` : ""}
+                  {[orgRoleLabel(org.role, org.organization?.type), org.organization?.type]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
               </div>
               {org.organization?.slug && (
