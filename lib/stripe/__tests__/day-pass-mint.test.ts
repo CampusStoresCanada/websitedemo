@@ -132,7 +132,14 @@ describe("a paid non-member day pass", () => {
     await mintProspectiveRegistration(fake.db as never, row);
 
     expect(provisionOrgLoginMock).toHaveBeenCalledWith(
-      expect.objectContaining({ email: row.email, personId: "contact-1", newAccount: "silent", announce: false })
+      expect.objectContaining({
+        email: row.email,
+        personId: "contact-1",
+        newAccount: "silent",
+        announce: false,
+        // Named after the buyer, not their email: /me shows this as their name.
+        displayName: "Pat Lee",
+      })
     );
     const linked = callsFor(fake.recorded, "conference_people").find((c) => c.method === "update");
     expect(linked?.args[0]).toEqual({ user_id: "user-9" });

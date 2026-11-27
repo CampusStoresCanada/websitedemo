@@ -57,6 +57,13 @@ export async function provisionOrgLogin(params: {
    */
   newAccount?: "magic_link" | "silent";
   /**
+   * The name a brand-new account carries (profiles.display_name, via the
+   * handle_new_user trigger). Without it the account is named after its email
+   * address, which is what /me then shows as the person's name. Applies to a
+   * "silent" account only (attachLoginToContact); never renames an existing one.
+   */
+  displayName?: string | null;
+  /**
    * Send "You've been added to <org> as a member". False for a non-member
    * conference attendee, whom that sentence would mislead. Default true.
    */
@@ -122,6 +129,7 @@ export async function provisionOrgLogin(params: {
       email: normalizedEmail,
       role,
       contactId: knownPersonId,
+      displayName: params.displayName,
       newAccount: params.newAccount ?? "magic_link",
       ifAlreadyActive: "refuse",
     });

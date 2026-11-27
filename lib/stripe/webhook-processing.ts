@@ -667,7 +667,7 @@ async function recordCheckoutAgreements(
  */
 async function giveDayPassLogin(
   db: AdminClient,
-  row: { id: string; email: string },
+  row: { id: string; email: string; first_name: string; last_name: string },
   ids: { orgId: string; contactId: string; personId: string }
 ): Promise<void> {
   try {
@@ -685,6 +685,7 @@ async function giveDayPassLogin(
       personId: ids.contactId,
       newAccount: "silent",
       announce: false,
+      displayName: `${row.first_name} ${row.last_name}`.trim(),
     });
     if (!login.success && login.outcome !== "already_member") {
       console.error(`mintProspectiveRegistration: no login for payment ${row.id}: ${login.error}`);
